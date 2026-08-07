@@ -1,0 +1,122 @@
+<style>
+  .layout-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin-top:24px; }
+  .layout-card { border:2px solid var(--border); border-radius:14px; overflow:hidden; cursor:pointer; background:var(--surface); transition:.18s ease; }
+  .layout-card:hover { transform:translateY(-2px); border-color:var(--accent); }
+  .layout-card.selected { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent); }
+  .preview { height:300px; padding:10px; background:#f3f4f6; color:#1f2937; font-size:10px; }
+  .window { height:100%; display:flex; overflow:hidden; border:1px solid #d1d5db; border-radius:7px; background:white; }
+  .side { width:24%; padding:9px; background:#151a23; color:#dbe3f0; }
+  .side b { display:block; color:white; font-size:12px; margin-bottom:14px; }
+  .nav-item { padding:6px 7px; border-radius:4px; margin:4px 0; }
+  .nav-item.active { background:#334155; color:white; }
+  .main { flex:1; padding:10px; min-width:0; }
+  .toolbar { display:flex; gap:6px; align-items:center; margin-bottom:9px; }
+  .search { flex:1; height:20px; border:1px solid #d1d5db; border-radius:4px; background:#fafafa; padding:3px 6px; color:#6b7280; }
+  .tiny-button { padding:4px 6px; border-radius:4px; background:#2563eb; color:white; }
+  .list-row { display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid #e5e7eb; }
+  .muted { color:#6b7280; }
+  .detail { width:43%; border-left:1px solid #e5e7eb; padding:10px; background:#fafafa; }
+  .tag { display:inline-block; padding:2px 5px; margin:2px; border-radius:9px; background:#e5e7eb; }
+  .action { display:inline-block; margin:5px 3px 0 0; padding:5px 7px; border:1px solid #d1d5db; border-radius:4px; background:white; }
+  .cards-mini { display:grid; grid-template-columns:repeat(2,1fr); gap:7px; }
+  .skill-card { min-height:60px; padding:8px; border:1px solid #e5e7eb; border-radius:6px; }
+  .layout-copy { padding:14px; }
+  .layout-copy h3 { margin:0 0 6px; }
+  .recommend { display:inline-block; margin-left:6px; padding:2px 7px; border-radius:10px; color:#166534; background:#dcfce7; font-size:11px; }
+  @media (max-width:1000px) { .layout-grid { grid-template-columns:1fr; } }
+</style>
+
+<h2>Skill 管理器主界面布局</h2>
+<p class="subtitle">点击一个布局。三种方案都支持列表、详情、删除、备份、暂停与恢复。</p>
+
+<div class="layout-grid">
+  <div class="layout-card" data-choice="master-detail" onclick="toggleSelect(this)">
+    <div class="preview">
+      <div class="window">
+        <div class="side">
+          <b>Skill Manager</b>
+          <div class="nav-item active">全部 Skills　24</div>
+          <div class="nav-item">Cursor　10</div>
+          <div class="nav-item">Claude　9</div>
+          <div class="nav-item">Codex　5</div>
+          <div class="nav-item">已暂停　3</div>
+          <div class="nav-item">备份记录</div>
+        </div>
+        <div class="main">
+          <div class="toolbar"><div class="search">搜索 Skill...</div><div class="tiny-button">刷新</div></div>
+          <div class="list-row"><span><b>brainstorming</b><br><span class="muted">Cursor · 启用中</span></span><span>›</span></div>
+          <div class="list-row"><span><b>git-helper</b><br><span class="muted">Cursor · 启用中</span></span><span>›</span></div>
+          <div class="list-row"><span><b>tdd-test</b><br><span class="muted">Claude · 已暂停</span></span><span>›</span></div>
+          <div class="list-row"><span><b>review-agent</b><br><span class="muted">Codex · 启用中</span></span><span>›</span></div>
+        </div>
+        <div class="detail">
+          <b style="font-size:13px">brainstorming</b>
+          <p class="muted">将想法转化为完整设计</p>
+          <span class="tag">Cursor</span><span class="tag">启用中</span>
+          <hr style="border:0;border-top:1px solid #e5e7eb">
+          <b>SKILL.md</b>
+          <p>通过自然对话探索用户意图、需求和设计...</p>
+          <div class="action">暂停</div><div class="action">备份</div><div class="action">删除</div>
+        </div>
+      </div>
+    </div>
+    <div class="layout-copy">
+      <h3>A. 三栏主从布局 <span class="recommend">推荐</span></h3>
+      <p>来源筛选、Skill 列表和详情同时可见，切换和批量检查最快。</p>
+    </div>
+  </div>
+
+  <div class="layout-card" data-choice="page-navigation" onclick="toggleSelect(this)">
+    <div class="preview">
+      <div class="window">
+        <div class="side">
+          <b>Skill Manager</b>
+          <div class="nav-item active">Skills</div>
+          <div class="nav-item">备份中心</div>
+          <div class="nav-item">设置</div>
+        </div>
+        <div class="main">
+          <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:14px">本地 Skills</b><div class="tiny-button">扫描</div></div>
+          <div class="toolbar" style="margin-top:10px"><div class="search">搜索名称或描述...</div></div>
+          <div class="list-row"><span><b>brainstorming</b><br><span class="muted">~/.cursor/skills</span></span><span class="tag">启用</span></div>
+          <div class="list-row"><span><b>git-helper</b><br><span class="muted">~/.cursor/skills</span></span><span class="tag">启用</span></div>
+          <div class="list-row"><span><b>tdd-test</b><br><span class="muted">~/.claude/skills</span></span><span class="tag">暂停</span></div>
+          <div style="margin:18px auto;width:75%;padding:10px;border:1px dashed #d1d5db;text-align:center;color:#6b7280">点击后进入独立详情页</div>
+        </div>
+      </div>
+    </div>
+    <div class="layout-copy">
+      <h3>B. 列表与详情分页面</h3>
+      <p>界面最清爽、详情空间最大，但查看多个 Skill 时需要频繁前进返回。</p>
+    </div>
+  </div>
+
+  <div class="layout-card" data-choice="card-dashboard" onclick="toggleSelect(this)">
+    <div class="preview">
+      <div class="window">
+        <div class="side">
+          <b>Skill Manager</b>
+          <div class="nav-item active">仪表盘</div>
+          <div class="nav-item">备份</div>
+          <div class="nav-item">设置</div>
+        </div>
+        <div class="main">
+          <b style="font-size:14px">全部 Skills</b>
+          <div class="toolbar" style="margin-top:9px"><div class="search">搜索...</div><span class="tag">全部来源</span></div>
+          <div class="cards-mini">
+            <div class="skill-card"><b>brainstorming</b><p class="muted">Cursor · 启用</p><span class="tag">设计</span></div>
+            <div class="skill-card"><b>git-helper</b><p class="muted">Cursor · 启用</p><span class="tag">Git</span></div>
+            <div class="skill-card"><b>tdd-test</b><p class="muted">Claude · 暂停</p><span class="tag">测试</span></div>
+            <div class="skill-card"><b>review-agent</b><p class="muted">Codex · 启用</p><span class="tag">Review</span></div>
+            <div class="skill-card"><b>tech-docs</b><p class="muted">Cursor · 启用</p><span class="tag">文档</span></div>
+            <div class="skill-card"><b>security</b><p class="muted">Claude · 启用</p><span class="tag">安全</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="layout-copy">
+      <h3>C. 卡片仪表盘</h3>
+      <p>视觉更丰富、适合浏览发现；Skill 数量较多时信息密度偏低。</p>
+    </div>
+  </div>
+</div>

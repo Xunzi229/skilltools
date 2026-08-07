@@ -1,0 +1,256 @@
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+
+use crate::error::AppError;
+use crate::model::{FileContent, FileNode, FileNodeKind};
+use crate::skill_repository::SkillRepository;
+
+const MAX_PREVIEW_BYTES: u64 = 512 * 1024;
+
+pub fn list_skill_tree(
+    repository: &SkillRepository,
+    skill_id: &str,
+) -> Result<Vec<FileNode>, AppError> {
+    let root = repository.detail(skill_id)?.current_path;
+    build_tree(&root, &root)
+}
+
+pub fn read_skill_file(
+    repository: &SkillRepository,
+    skill_id: &str,
+    relative_path: &str,
+) -> Result<FileContent, AppError> {
+    let root = repository.detail(skill_id)?.current_path;
+    let path = resolve_file_path(&root, relative_path)?;
+    let metadata = fs::metadata(&path)?;
+    if !metadata.is_file() {
+        return Err(AppError::Io {
+            message: format!("不是可预览文件：{relative_path}"),
+        });
+    }
+    if metadata.len() > MAX_PREVIEW_BYTES {
+        return Ok(unsupported(relative_path, "文件超过 512 KiB，不支持预览"));
+    }
+
+    let bytes = fs::read(&path)?;
+    let content = match String::from_utf8(bytes) {
+        Ok(content) => content,
+        Err(_) => return Ok(unsupported(relative_path, "二进制文件不支持预览")),
+    };
+    let media_type = match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("md" | "markdown") => "markdown",
+        Some(
+            "txt" | "json" | "yaml" | "yml" | "toml" | "rs" | "ts" | "tsx" | "js" | "jsx" | "py"
+            | "sh" | "css" | "html" | "xml" | "csv",
+        ) => "text",
+        _ => return Ok(unsupported(relative_path, "该文件类型不支持预览")),
+    };
+
+    Ok(FileContent {
+        relative_path: relative_path.to_string(),
+        media_type: media_type.to_string(),
+        content: Some(content),
+        message: None,
+    })
+}
+
+fn build_tree(root: &Path, directory: &Path) -> Result<Vec<FileNode>, AppError> {
+    let mut nodes = Vec::new();
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        let relative_path = path
+            .strip_prefix(root)
+            .map_err(|_| outside_error(&path))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let (kind, size, children) = if file_type.is_dir() {
+            (FileNodeKind::Directory, None, build_tree(root, &path)?)
+        } else {
+            (
+                FileNodeKind::File,
+                Some(entry.metadata()?.len()),
+                Vec::new(),
+            )
+        };
+        nodes.push(FileNode {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            relative_path,
+            kind,
+            size,
+            children,
+        });
+    }
+    nodes.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(nodes)
+}
+
+fn resolve_file_path(root: &Path, relative_path: &str) -> Result<PathBuf, AppError> {
+    let relative = Path::new(relative_path);
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(outside_error(relative));
+    }
+
+    let mut candidate = root.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(component) = component else {
+            return Err(outside_error(relative));
+        };
+        candidate.push(component);
+        if fs::symlink_metadata(&candidate)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(outside_error(&candidate));
+        }
+    }
+
+    let canonical_root = root.canonicalize()?;
+    let canonical_candidate = candidate.canonicalize()?;
+    if !canonical_candidate.starts_with(&canonical_root) {
+        return Err(outside_error(&canonical_candidate));
+    }
+    Ok(canonical_candidate)
+}
+
+fn outside_error(path: &Path) -> AppError {
+    AppError::PathOutsideManagedRoots {
+        path: path.display().to_string(),
+    }
+}
+
+fn unsupported(relative_path: &str, message: &str) -> FileContent {
+    FileContent {
+        relative_path: relative_path.to_string(),
+        media_type: "unsupported".to_string(),
+        content: None,
+        message: Some(message.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::{list_skill_tree, read_skill_file};
+    use crate::model::FileNodeKind;
+    use crate::paths::AppPaths;
+    use crate::skill_repository::SkillRepository;
+
+    fn repository_with_skill() -> (tempfile::TempDir, SkillRepository, String) {
+        let base = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        let skill_dir = paths.skill_roots[0].path.join("preview");
+        fs::create_dir_all(skill_dir.join("references")).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "# Preview").unwrap();
+        fs::write(skill_dir.join("references/example.txt"), "example text").unwrap();
+        fs::write(skill_dir.join("data.bin"), [0, 159, 146, 150]).unwrap();
+        let repository = SkillRepository::new(paths);
+        let id = repository.scan().unwrap()[0].id.clone();
+        (base, repository, id)
+    }
+
+    #[test]
+    fn lists_sorted_recursive_tree_with_file_sizes() {
+        let (_base, repository, id) = repository_with_skill();
+
+        let tree = list_skill_tree(&repository, &id).unwrap();
+
+        assert_eq!(tree.len(), 3);
+        assert_eq!(tree[0].name, "data.bin");
+        assert_eq!(tree[0].kind, FileNodeKind::File);
+        assert_eq!(tree[0].size, Some(4));
+        assert_eq!(tree[1].name, "references");
+        assert_eq!(tree[1].kind, FileNodeKind::Directory);
+        assert_eq!(tree[1].relative_path, "references");
+        assert_eq!(tree[1].size, None);
+        assert_eq!(tree[1].children.len(), 1);
+        assert_eq!(tree[1].children[0].relative_path, "references/example.txt");
+        assert_eq!(tree[2].name, "SKILL.md");
+    }
+
+    #[test]
+    fn reads_markdown_and_text_files() {
+        let (_base, repository, id) = repository_with_skill();
+
+        let markdown = read_skill_file(&repository, &id, "SKILL.md").unwrap();
+        let text = read_skill_file(&repository, &id, "references/example.txt").unwrap();
+
+        assert_eq!(markdown.media_type, "markdown");
+        assert_eq!(markdown.content.as_deref(), Some("# Preview"));
+        assert_eq!(markdown.message, None);
+        assert_eq!(text.media_type, "text");
+        assert_eq!(text.content.as_deref(), Some("example text"));
+    }
+
+    #[test]
+    fn rejects_parent_and_absolute_path_escape() {
+        let (_base, repository, id) = repository_with_skill();
+
+        let parent = read_skill_file(&repository, &id, "../secret.txt").unwrap_err();
+        let absolute = read_skill_file(&repository, &id, "/tmp/secret.txt").unwrap_err();
+
+        assert!(matches!(
+            parent,
+            crate::error::AppError::PathOutsideManagedRoots { .. }
+        ));
+        assert!(matches!(
+            absolute,
+            crate::error::AppError::PathOutsideManagedRoots { .. }
+        ));
+    }
+
+    #[test]
+    fn returns_unsupported_for_binary_and_oversized_files() {
+        let (_base, repository, id) = repository_with_skill();
+        let skill_path = repository.detail(&id).unwrap().current_path;
+        fs::write(skill_path.join("large.txt"), vec![b'a'; 512 * 1024 + 1]).unwrap();
+
+        let binary = read_skill_file(&repository, &id, "data.bin").unwrap();
+        let large = read_skill_file(&repository, &id, "large.txt").unwrap();
+
+        assert_eq!(binary.media_type, "unsupported");
+        assert_eq!(binary.content, None);
+        assert!(binary.message.unwrap().contains("二进制"));
+        assert_eq!(large.media_type, "unsupported");
+        assert_eq!(large.content, None);
+        assert!(large.message.unwrap().contains("512 KiB"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tree_does_not_follow_symlink_and_preview_rejects_it() {
+        use std::os::unix::fs::symlink;
+
+        let (_base, repository, id) = repository_with_skill();
+        let outside = tempdir().unwrap();
+        fs::create_dir_all(outside.path().join("nested")).unwrap();
+        fs::write(outside.path().join("nested/secret.txt"), "secret").unwrap();
+        let skill_path = repository.detail(&id).unwrap().current_path;
+        symlink(outside.path().join("nested"), skill_path.join("linked")).unwrap();
+
+        let tree = list_skill_tree(&repository, &id).unwrap();
+        let linked = tree.iter().find(|node| node.name == "linked").unwrap();
+
+        assert_eq!(linked.kind, FileNodeKind::File);
+        assert!(linked.children.is_empty());
+        assert!(read_skill_file(&repository, &id, "linked/secret.txt").is_err());
+    }
+}
