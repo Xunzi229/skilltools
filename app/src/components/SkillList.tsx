@@ -1,4 +1,6 @@
 import type { SkillSummary } from "../model/skill";
+import { displayDescription } from "../utils/skillDisplay";
+import { SkillCard } from "./SkillCard";
 
 interface SkillListProps {
   title: string;
@@ -36,51 +38,52 @@ export function SkillList({
   let content;
 
   if (loading) {
-    content = <div className="list-state">正在扫描本地 Skill…</div>;
+    content = (
+      <div className="px-3 py-8 text-center text-[13px] text-ink-3">正在扫描本地 Skill…</div>
+    );
   } else if (errorMessage) {
     content = (
-      <div className="list-state error-state" role="alert">
-        <strong>扫描失败：{errorMessage}</strong>
-        <button type="button" onClick={onRetry}>重试扫描</button>
+      <div className="px-3 py-8 text-center text-[13px]" role="alert">
+        <strong className="block text-red-600">扫描失败：{errorMessage}</strong>
+        <button
+          type="button"
+          className="mt-3 rounded-md bg-brand px-3 py-1.5 text-white"
+          onClick={onRetry}
+        >
+          重试扫描
+        </button>
       </div>
     );
   } else if (!hasScannedSkills) {
     content = (
-      <div className="list-state">
-        <strong>未扫描到 Skill</strong>
+      <div className="px-3 py-8 text-center text-[13px] text-ink-3">
+        <strong className="block text-ink">未扫描到 Skill</strong>
         <span>请确认本地 Skill 目录中已有内容。</span>
       </div>
     );
   } else if (skills.length === 0) {
     content = (
-      <div className="list-state">
-        <strong>没有匹配结果</strong>
+      <div className="px-3 py-8 text-center text-[13px] text-ink-3">
+        <strong className="block text-ink">没有匹配结果</strong>
         <span>请调整筛选条件或搜索关键词。</span>
       </div>
     );
   } else {
     content = (
-      <ul className="skill-items">
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {skills.map((skill) => (
           <li key={skill.id}>
-            <button
-              type="button"
-              className={`skill-card${selectedSkillId === skill.id ? " is-selected" : ""}`}
-              aria-pressed={selectedSkillId === skill.id}
-              onClick={() => onSelect(skill.id)}
-            >
-              <span className="skill-card-top">
-                <strong>{skill.name}</strong>
-                <span className={`provider-badge provider-${skill.provider}`}>
-                  {providerNames[skill.provider]}
-                </span>
-              </span>
-              <span className="skill-description">{skill.description || "暂无描述"}</span>
-              <span className={`status-label status-${skill.status}`}>
-                <i aria-hidden="true" />
-                {skill.status === "active" ? "已启用" : "已暂停"}
-              </span>
-            </button>
+            <SkillCard
+              name={skill.name}
+              description={displayDescription(skill.description, 96)}
+              statusLabel={
+                skill.status === "paused"
+                  ? "已暂停"
+                  : providerNames[skill.provider]
+              }
+              selected={selectedSkillId === skill.id}
+              onSelect={() => onSelect(skill.id)}
+            />
           </li>
         ))}
       </ul>
@@ -88,33 +91,43 @@ export function SkillList({
   }
 
   return (
-    <section className="skill-list-panel" aria-label="Skill 列表">
-      <header className="list-header">
-        <div>
-          <p className="eyebrow">本地技能</p>
-          <h2>{title}</h2>
-        </div>
-        <span className="result-count">{skills.length} 项</span>
+    <section
+      className="flex h-full min-h-0 min-w-0 w-[340px] flex-col overflow-hidden border-r border-line-strong bg-panel"
+      aria-label="Skill 列表"
+    >
+      <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
+        <h2 className="m-0 text-[18px] font-semibold text-ink">{title}</h2>
+        <p className="mt-1 text-[12px] text-ink-2">浏览本机已安装的 Skills</p>
+        <label className="mt-3 flex h-[38px] items-center gap-2 rounded-lg border border-line bg-panel px-3">
+          <span className="text-ink-3" aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            type="search"
+            className="w-full border-0 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
+            aria-label="搜索 Skill"
+            placeholder="搜索名称或描述"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+        </label>
       </header>
-      <label className="search-field">
-        <span aria-hidden="true">⌕</span>
-        <input
-          type="search"
-          aria-label="搜索 Skill"
-          placeholder="搜索名称或描述"
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-        />
-      </label>
       {warnings.length > 0 && (
-        <aside className="warning-block scan-warning-block" aria-label="扫描目录警告">
+        <aside
+          className="mx-3 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"
+          aria-label="扫描目录警告"
+        >
           <strong>部分目录未扫描</strong>
-          <ul>
-            {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          <ul className="mt-1 mb-0 list-disc pl-4">
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
           </ul>
         </aside>
       )}
-      <div className="list-content">{content}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2">
+        {content}
+      </div>
     </section>
   );
 }

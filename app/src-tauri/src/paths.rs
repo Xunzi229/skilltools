@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
@@ -18,6 +19,9 @@ pub struct AppPaths {
     pub backups_dir: PathBuf,
     pub paused_index: PathBuf,
     pub backup_index: PathBuf,
+    pub library_dir: PathBuf,
+    pub library_projects_dir: PathBuf,
+    pub library_index: PathBuf,
 }
 
 impl AppPaths {
@@ -41,6 +45,9 @@ impl AppPaths {
             backups_dir: app_data_dir.join("backups"),
             paused_index: app_data_dir.join("paused-index.json"),
             backup_index: app_data_dir.join("backup-index.json"),
+            library_dir: app_data_dir.join("library"),
+            library_projects_dir: app_data_dir.join("library/projects"),
+            library_index: app_data_dir.join("library-index.json"),
             app_data_dir,
         }
     }
@@ -56,6 +63,8 @@ impl AppPaths {
             self.app_data_dir.as_path(),
             self.disabled_dir.as_path(),
             self.backups_dir.as_path(),
+            self.library_dir.as_path(),
+            self.library_projects_dir.as_path(),
         ]);
 
         for root in allowed_roots {
@@ -69,6 +78,35 @@ impl AppPaths {
 
         Err(AppError::PathOutsideManagedRoots {
             path: path.display().to_string(),
+        })
+    }
+
+    /// 允许读取/操作「位于 provider Skill 根下的符号链接 Skill」。
+    /// 链接本身在白名单根内，目标可指向库路径等白名单外目录。
+    pub fn assert_skill_access(&self, path: &Path) -> Result<(), AppError> {
+        match self.assert_allowed(path) {
+            Ok(()) => Ok(()),
+            Err(_) if self.is_provider_skill_symlink(path) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn is_provider_skill_symlink(&self, path: &Path) -> bool {
+        let Ok(metadata) = fs::symlink_metadata(path) else {
+            return false;
+        };
+        if !metadata.file_type().is_symlink() {
+            return false;
+        }
+        let Some(parent) = path.parent() else {
+            return false;
+        };
+        let Ok(parent_resolved) = resolve_path(parent) else {
+            return false;
+        };
+        self.skill_roots.iter().any(|root| {
+            resolve_path(&root.path)
+                .is_ok_and(|resolved_root| resolved_root == parent_resolved)
         })
     }
 
@@ -221,6 +259,23 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn skill_access_allows_provider_root_symlink_to_outside_skill() {
+        use std::os::unix::fs::symlink;
+
+        let base = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        fs::create_dir_all(&paths.skill_roots[0].path).unwrap();
+        fs::write(outside.path().join("SKILL.md"), "# Outside").unwrap();
+        let link = paths.skill_roots[0].path.join("linked-skill");
+        symlink(outside.path(), &link).unwrap();
+
+        assert!(paths.assert_allowed(&link).is_err());
+        assert!(paths.assert_skill_access(&link).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn rejects_descendant_of_dangling_symlink() {
         use std::os::unix::fs::symlink;
 
@@ -300,5 +355,11 @@ mod tests {
         assert_eq!(paths.backups_dir, app_data_dir.join("backups"));
         assert_eq!(paths.paused_index, app_data_dir.join("paused-index.json"));
         assert_eq!(paths.backup_index, app_data_dir.join("backup-index.json"));
+        assert_eq!(paths.library_dir, app_data_dir.join("library"));
+        assert_eq!(
+            paths.library_projects_dir,
+            app_data_dir.join("library/projects")
+        );
+        assert_eq!(paths.library_index, app_data_dir.join("library-index.json"));
     }
 }

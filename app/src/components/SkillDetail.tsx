@@ -6,9 +6,10 @@ import type {
   FileNode,
   SkillDetail as SkillDetailModel,
 } from "../model/skill";
+import { displayDescription } from "../utils/skillDisplay";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { FilePreview } from "./FilePreview";
 import { FileTree } from "./FileTree";
+import { MarkdownViewer } from "./MarkdownViewer";
 
 interface SkillDetailProps {
   api: SkillApi;
@@ -40,6 +41,19 @@ function errorMessage(error: unknown): string {
   return "文件加载失败，请重试";
 }
 
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const input = document.createElement("textarea");
+  input.value = value;
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  document.body.removeChild(input);
+}
+
 export function SkillDetail({
   api,
   skill,
@@ -60,6 +74,7 @@ export function SkillDetail({
   const [preview, setPreview] = useState<FileContent | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const treeRequest = useRef(0);
   const previewRequest = useRef(0);
 
@@ -95,6 +110,7 @@ export function SkillDetail({
     setPreview(null);
     setTreeError(null);
     setPreviewError(null);
+    setCopied(false);
     if (!skillId) {
       setTreeLoading(false);
       setPreviewLoading(false);
@@ -124,18 +140,20 @@ export function SkillDetail({
 
   if (loading) {
     return (
-      <section className="detail-panel">
-        <div className="detail-state">正在加载 Skill 详情…</div>
+      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
+        <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">
+          正在加载 Skill 详情…
+        </div>
       </section>
     );
   }
 
   if (error) {
     return (
-      <section className="detail-panel">
-        <div className="detail-state error-state" role="alert">
-          <strong>详情加载失败</strong>
-          <span>{error.message}</span>
+      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
+        <div className="flex flex-1 flex-col items-center justify-center gap-1 text-[13px]" role="alert">
+          <strong className="text-red-600">详情加载失败</strong>
+          <span className="text-ink-3">{error.message}</span>
         </div>
       </section>
     );
@@ -143,9 +161,9 @@ export function SkillDetail({
 
   if (!skill) {
     return (
-      <section className="detail-panel">
-        <div className="detail-state">
-          <strong>选择一个 Skill 查看详情</strong>
+      <section className="flex min-w-0 flex-1 flex-col bg-panel">
+        <div className="flex flex-1 flex-col items-center justify-center gap-1 text-[13px] text-ink-3">
+          <strong className="text-ink">选择一个 Skill 查看详情</strong>
           <span>可在左侧筛选，再从列表中选择。</span>
         </div>
       </section>
@@ -156,30 +174,30 @@ export function SkillDetail({
   const deleteBusy = pendingAction === `delete:${skill.id}`;
 
   return (
-    <section className="detail-panel">
-      <header className="detail-header">
-        <div className="detail-title-row">
-          <div>
-            <div className="detail-meta">
-              <span className={`provider-badge provider-${skill.provider}`}>
+    <section className="flex min-w-0 flex-1 flex-col bg-panel">
+      <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px]">
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-ink-2">
                 {providerNames[skill.provider]}
               </span>
-              <span className={`status-label status-${skill.status}`}>
-                <i aria-hidden="true" />
+              <span className="text-ink-3">
                 {skill.status === "active" ? "已启用" : "已暂停"}
               </span>
             </div>
-            <h2>{skill.name}</h2>
-            <p>{skill.description || "暂无描述"}</p>
+            <h2 className="m-0 text-[28px] font-bold leading-tight text-ink">{skill.name}</h2>
+            <p className="mt-2 max-w-3xl text-[14px] leading-6 text-ink-2">
+              {displayDescription(skill.description) || "暂无描述"}
+            </p>
           </div>
-          <div className="detail-actions" role="group" aria-label="Skill 操作">
+          <div className="flex shrink-0 gap-2" role="group" aria-label="Skill 操作">
             <button
               type="button"
+              className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-hover disabled:opacity-55"
               disabled={busy}
               onClick={() =>
-                void (skill.status === "active"
-                  ? onPause(skill.id)
-                  : onResume(skill.id))
+                void (skill.status === "active" ? onPause(skill.id) : onResume(skill.id))
               }
             >
               {pendingAction === `pause:${skill.id}` ||
@@ -191,14 +209,15 @@ export function SkillDetail({
             </button>
             <button
               type="button"
+              className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-hover disabled:opacity-55"
               disabled={busy}
               onClick={() => void onBackup(skill.id)}
             >
               {pendingAction === `backup:${skill.id}` ? "处理中…" : "备份"}
             </button>
             <button
-              className="danger-action"
               type="button"
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[12px] text-red-700 hover:bg-red-100 disabled:opacity-55"
               disabled={busy}
               onClick={() => setDeleteOpen(true)}
             >
@@ -206,40 +225,68 @@ export function SkillDetail({
             </button>
           </div>
         </div>
-
-        <dl className="path-list">
-          <div>
-            <dt>原始路径</dt>
-            <dd>{skill.originalPath}</dd>
+        <div className="mt-3 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-3">
+              {skill.resolvedPath ?? skill.originalPath}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover"
+              aria-label="复制路径"
+              onClick={() => {
+                void copyText(skill.resolvedPath ?? skill.originalPath).then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                });
+              }}
+            >
+              {copied ? "已复制" : "复制"}
+            </button>
           </div>
-          {skill.currentPath !== skill.originalPath && (
-            <div>
-              <dt>当前位置</dt>
-              <dd>{skill.currentPath}</dd>
-            </div>
+          {skill.resolvedPath && (
+            <p className="m-0 truncate font-mono text-[11px] text-ink-3">
+              链接位置：{skill.currentPath}
+            </p>
           )}
-        </dl>
+          {!skill.resolvedPath && skill.currentPath !== skill.originalPath && (
+            <p className="m-0 truncate font-mono text-[11px] text-ink-3">
+              当前位置：{skill.currentPath}
+            </p>
+          )}
+        </div>
       </header>
 
-      <div className="detail-scroll">
+      <div className="min-h-0 flex-1 overflow-auto px-6 py-4">
         {actionError && (
-          <div className="action-error" role="alert">
+          <div
+            className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
+            role="alert"
+          >
             <span>{actionError.message}</span>
-            <button type="button" onClick={onClearActionError}>
+            <button
+              type="button"
+              className="rounded bg-red-100 px-2 py-1"
+              onClick={onClearActionError}
+            >
               关闭
             </button>
           </div>
         )}
         {skill.warnings.length > 0 && (
-          <aside className="warning-block" aria-label="扫描警告">
+          <aside
+            className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"
+            aria-label="扫描警告"
+          >
             <strong>需要注意</strong>
-            <ul>
-              {skill.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            <ul className="mt-1 mb-0 list-disc pl-4">
+              {skill.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
             </ul>
           </aside>
         )}
-
-        <div className="file-browser">
+        <div className="flex h-[min(520px,55vh)] min-h-[280px] overflow-hidden rounded-lg border border-line-strong">
           <FileTree
             nodes={tree}
             selectedPath={preview?.relativePath ?? null}
@@ -247,7 +294,7 @@ export function SkillDetail({
             errorMessage={treeError}
             onSelect={(relativePath) => loadPreview(skill.id, relativePath)}
           />
-          <FilePreview
+          <MarkdownViewer
             file={preview}
             loading={previewLoading}
             errorMessage={previewError}
@@ -257,8 +304,12 @@ export function SkillDetail({
       <ConfirmDialog
         open={deleteOpen}
         title={`删除 ${skill.name}？`}
-        message="此操作会先自动备份再删除 Skill，删除后可从备份记录恢复。"
-        confirmLabel="备份并删除"
+        message={
+          skill.resolvedPath
+            ? "该 Skill 是符号链接，删除只会移除链接，不会删除原始目录中的文件。"
+            : "此操作会先自动备份再删除 Skill，删除后可从备份记录恢复。"
+        }
+        confirmLabel={skill.resolvedPath ? "移除链接" : "备份并删除"}
         tone="danger"
         busy={deleteBusy}
         onCancel={() => setDeleteOpen(false)}

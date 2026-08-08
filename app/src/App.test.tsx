@@ -5,9 +5,14 @@ import type {
   BackupRecord,
   FileContent,
   FileNode,
+  LibrarySkillDetail,
+  LibrarySkillSummary,
+  Project,
   ScanResult,
+  SkillGroup,
   SkillDetail,
   SkillSummary,
+  Tag,
 } from "./model/skill";
 import type { SkillApi } from "./api/skillApi";
 
@@ -130,6 +135,82 @@ const scanResult = (
   warnings: string[] = [],
 ): ScanResult => ({ skills: nextSkills, warnings });
 
+const projects: Project[] = [
+  {
+    id: "project-local",
+    name: "skills",
+    sourceType: "local",
+    localPath: "/Users/demo/skills",
+    remoteUrl: null,
+    addedAt: "2026-08-07T10:00:00.000Z",
+    lastUpdatedAt: "2026-08-07T09:30:00.000Z",
+    lastSyncedAt: null,
+    warnings: [],
+  },
+  {
+    id: "project-git",
+    name: "team/skills",
+    sourceType: "git",
+    localPath: "/Users/demo/.skill-manager/team-skills",
+    remoteUrl: "https://example.com/team/skills.git",
+    addedAt: "2026-08-07T10:00:00.000Z",
+    lastUpdatedAt: "2026-08-07T11:00:00.000Z",
+    lastSyncedAt: "2026-08-07T12:00:00.000Z",
+    warnings: [],
+  },
+];
+
+const librarySkills: LibrarySkillSummary[] = [
+  {
+    id: "library-reviewer",
+    projectId: "project-local",
+    name: "reviewer",
+    description: "代码评审工作流",
+    relativePath: "reviewer",
+    absolutePath: "/Users/demo/skills/reviewer",
+    parentSkillId: null,
+    groupId: null,
+    tagIds: [],
+    installedProviders: [],
+    warnings: [],
+  },
+  {
+    id: "library-auto-code",
+    projectId: "project-local",
+    name: "auto-code",
+    description: "自主编码流程包",
+    relativePath: "auto-code",
+    absolutePath: "/Users/demo/skills/auto-code",
+    parentSkillId: null,
+    groupId: null,
+    tagIds: [],
+    installedProviders: [],
+    warnings: [],
+  },
+  {
+    id: "library-auto-child",
+    projectId: "project-local",
+    name: "atom-doc-parse",
+    description: "文档解析子 Skill",
+    relativePath: "auto-code/skills/atom-doc-parse",
+    absolutePath: "/Users/demo/skills/auto-code/skills/atom-doc-parse",
+    parentSkillId: "library-auto-code",
+    groupId: null,
+    tagIds: [],
+    installedProviders: [],
+    warnings: [],
+  },
+];
+
+const libraryDetail: LibrarySkillDetail = {
+  ...librarySkills[0],
+  skillMarkdown: "# Reviewer\n\n检查代码变更。",
+  files: ["SKILL.md"],
+};
+
+const tags: Tag[] = [{ id: "tag-backend", name: "后端", color: "#315fb5" }];
+const groups: SkillGroup[] = [{ id: "group-dev", name: "开发", order: 1 }];
+
 function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
   const unavailable = async (): Promise<never> => {
     throw new Error("本测试不应调用 Task 8 API");
@@ -146,27 +227,62 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     listBackups: async () => [],
     restoreBackup: unavailable,
     deleteSkill: unavailable,
+    listProjects: async () => projects,
+    addLocalProject: unavailable,
+    addGitProject: unavailable,
+    pullGitProject: unavailable,
+    removeProject: unavailable,
+    listLibrarySkills: async () => librarySkills,
+    getLibrarySkillDetail: async () => libraryDetail,
+    listLibrarySkillTree: async () => fileTrees["cursor:brainstorming"],
+    readLibrarySkillFile: async (_skillId, relativePath) =>
+      fileContent("cursor:brainstorming", relativePath),
+    installSkill: unavailable,
+    uninstallSkill: unavailable,
+    listInstallations: async () => [],
+    listTags: async () => tags,
+    createTag: unavailable,
+    renameTag: unavailable,
+    deleteTag: unavailable,
+    setSkillTags: unavailable,
+    listGroups: async () => groups,
+    createGroup: unavailable,
+    renameGroup: unavailable,
+    updateGroupOrder: unavailable,
+    deleteGroup: unavailable,
+    setSkillGroup: unavailable,
     ...overrides,
   };
 }
 
-async function renderLoaded(api = createApi()) {
+async function renderLibrary(api = createApi()) {
   render(<App api={api} />);
-  await screen.findByText("brainstorming");
+  await screen.findByText("reviewer");
+}
+
+async function renderLoaded(api = createApi()) {
+  const user = userEvent.setup();
+  render(<App api={api} />);
+  await screen.findByText("reviewer");
+  const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
+  await user.click(within(navigation).getByRole("button", { name: /^已安装/ }));
+  const list = await screen.findByRole("region", { name: "Skill 列表" });
+  await within(list).findByText("brainstorming");
+  return user;
 }
 
 describe("Skill Manager", () => {
-  it("首次加载后展示扫描到的 Skill", async () => {
-    await renderLoaded();
+  it("首次加载默认进入 Skill 库", async () => {
+    await renderLibrary();
 
     expect(screen.getByRole("heading", { name: "Skill Manager" })).toBeInTheDocument();
-    expect(screen.getByText("brainstorming")).toBeInTheDocument();
-    expect(screen.getByText("tdd-test")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Skill 库" })).toBeInTheDocument();
+    expect(screen.getByText("reviewer")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /全部/ })).toBeInTheDocument();
   });
 
   it("按来源和暂停状态筛选", async () => {
-    const user = userEvent.setup();
-    await renderLoaded();
+    const user = await renderLoaded();
     const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
     const list = screen.getByRole("region", { name: "Skill 列表" });
 
@@ -180,8 +296,7 @@ describe("Skill Manager", () => {
   });
 
   it("按名称和描述搜索且不区分大小写", async () => {
-    const user = userEvent.setup();
-    await renderLoaded();
+    const user = await renderLoaded();
     const search = screen.getByRole("searchbox", { name: "搜索 Skill" });
     const list = screen.getByRole("region", { name: "Skill 列表" });
 
@@ -196,8 +311,7 @@ describe("Skill Manager", () => {
   });
 
   it("选择 Skill 后展示 Markdown、路径、文件和警告", async () => {
-    const user = userEvent.setup();
-    await renderLoaded();
+    const user = await renderLoaded();
 
     await user.click(screen.getByText("tdd-test"));
 
@@ -212,8 +326,7 @@ describe("Skill Manager", () => {
     const readSkillFile = vi.fn(async (skillId: string, relativePath: string) =>
       fileContent(skillId, relativePath),
     );
-    const user = userEvent.setup();
-    await renderLoaded(createApi({ listSkillTree, readSkillFile }));
+    const user = await renderLoaded(createApi({ listSkillTree, readSkillFile }));
 
     expect(await screen.findByRole("tree", { name: "Skill 目录结构" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Brainstorming" })).toBeInTheDocument();
@@ -231,6 +344,24 @@ describe("Skill Manager", () => {
     );
   });
 
+  it("点击目录可收起和展开子目录", async () => {
+    const user = await renderLoaded();
+
+    await user.click(screen.getByText("tdd-test"));
+    expect(await screen.findByRole("button", { name: "examples.md" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "收起 references" }));
+    expect(screen.queryByRole("button", { name: "examples.md" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "展开 references" }));
+    expect(screen.getByRole("button", { name: "examples.md" })).toBeInTheDocument();
+  });
+
+  it("侧栏底部展示设置入口", async () => {
+    await renderLibrary();
+    expect(screen.getByRole("button", { name: "设置" })).toBeDisabled();
+  });
+
   it("快速切换时忽略过期的详情响应", async () => {
     let resolveClaude: ((detail: SkillDetail) => void) | undefined;
     const api = createApi({
@@ -243,8 +374,7 @@ describe("Skill Manager", () => {
         return Promise.resolve(details[skillId]);
       },
     });
-    const user = userEvent.setup();
-    await renderLoaded(api);
+    const user = await renderLoaded(api);
 
     await user.click(screen.getByText("tdd-test"));
     await user.click(screen.getByText("brainstorming"));
@@ -263,6 +393,13 @@ describe("Skill Manager", () => {
       .mockResolvedValueOnce(scanResult(skills));
     const user = userEvent.setup();
     render(<App api={createApi({ scanSkills })} />);
+    await screen.findByText("reviewer");
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Skill 分类" })).getByRole(
+        "button",
+        { name: /^已安装/ },
+      ),
+    );
 
     expect(await screen.findByText("扫描失败：目录读取失败")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "重试扫描" }));
@@ -290,8 +427,7 @@ describe("Skill Manager", () => {
         content: "# Brainstorming\n\n刷新后的最新内容。",
         message: null,
       });
-    const user = userEvent.setup();
-    await renderLoaded(createApi({ getSkillDetail, readSkillFile }));
+    const user = await renderLoaded(createApi({ getSkillDetail, readSkillFile }));
 
     expect(await screen.findByText("探索并澄清想法。")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /刷新扫描/ }));
@@ -302,13 +438,22 @@ describe("Skill Manager", () => {
   });
 
   it("扫描结果为空时展示空状态", async () => {
+    const user = userEvent.setup();
     render(<App api={createApi({ scanSkills: async () => scanResult([]) })} />);
+    await screen.findByText("reviewer");
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Skill 分类" })).getByRole(
+        "button",
+        { name: /^已安装/ },
+      ),
+    );
 
     expect(await screen.findByText("未扫描到 Skill")).toBeInTheDocument();
     expect(screen.getByText("请确认本地 Skill 目录中已有内容。")).toBeInTheDocument();
   });
 
   it("展示根目录扫描警告且保留其它 Skill", async () => {
+    const user = userEvent.setup();
     render(
       <App
         api={createApi({
@@ -317,8 +462,16 @@ describe("Skill Manager", () => {
         })}
       />,
     );
+    await screen.findByText("reviewer");
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Skill 分类" })).getByRole(
+        "button",
+        { name: /^已安装/ },
+      ),
+    );
 
-    expect(await screen.findByText("brainstorming")).toBeInTheDocument();
+    const list = await screen.findByRole("region", { name: "Skill 列表" });
+    expect(await within(list).findByText("brainstorming")).toBeInTheDocument();
     expect(screen.getByText(/无法读取 Skill 根目录.*拒绝访问/)).toBeInTheDocument();
   });
 
@@ -366,8 +519,7 @@ describe("Skill Manager", () => {
       .fn<() => Promise<ScanResult>>()
       .mockResolvedValueOnce(scanResult(skills))
       .mockResolvedValueOnce(scanResult([skills[1]]));
-    const user = userEvent.setup();
-    await renderLoaded(createApi({ deleteSkill, scanSkills }));
+    const user = await renderLoaded(createApi({ deleteSkill, scanSkills }));
 
     await user.click(await screen.findByRole("button", { name: "删除" }));
     expect(deleteSkill).not.toHaveBeenCalled();
@@ -387,8 +539,7 @@ describe("Skill Manager", () => {
           resolveDelete = resolve;
         }),
     );
-    const user = userEvent.setup();
-    await renderLoaded(createApi({ deleteSkill }));
+    const user = await renderLoaded(createApi({ deleteSkill }));
 
     await user.click(await screen.findByRole("button", { name: "删除" }));
     const confirm = screen.getByRole("button", { name: "备份并删除" });
@@ -419,8 +570,7 @@ describe("Skill Manager", () => {
       .mockResolvedValueOnce(details["cursor:brainstorming"])
       .mockResolvedValue(pausedDetail);
     const pauseSkill = vi.fn(async () => pausedDetail);
-    const user = userEvent.setup();
-    await renderLoaded(createApi({ scanSkills, getSkillDetail, pauseSkill }));
+    const user = await renderLoaded(createApi({ scanSkills, getSkillDetail, pauseSkill }));
 
     await user.click(await screen.findByRole("button", { name: "暂停" }));
 
@@ -432,8 +582,7 @@ describe("Skill Manager", () => {
   it("手动备份调用 createBackup 并可进入备份中心查看", async () => {
     const createBackup = vi.fn(async () => backups[0]);
     const listBackups = vi.fn(async () => [backups[0]]);
-    const user = userEvent.setup();
-    await renderLoaded(createApi({ createBackup, listBackups }));
+    const user = await renderLoaded(createApi({ createBackup, listBackups }));
 
     await user.click(await screen.findByRole("button", { name: "备份" }));
     await waitFor(() =>
@@ -499,8 +648,7 @@ describe("Skill Manager", () => {
         stack: "rust::backtrace",
       };
     });
-    const user = userEvent.setup();
-    await renderLoaded(createApi({ pauseSkill }));
+    const user = await renderLoaded(createApi({ pauseSkill }));
 
     await user.click(await screen.findByRole("button", { name: "暂停" }));
 
@@ -523,5 +671,111 @@ describe("Skill Manager", () => {
 
     expect(await screen.findByRole("button", { name: /tdd-test/ })).toBeInTheDocument();
     expect(listBackups).toHaveBeenCalledTimes(2);
+  });
+
+  it("可在 Skill 库、分组、标签、项目和已安装导航间切换", async () => {
+    await renderLibrary();
+    const user = userEvent.setup();
+    const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
+
+    await user.click(within(navigation).getByRole("button", { name: /Skill 库/ }));
+    expect(
+      await within(screen.getByRole("region", { name: "库 Skill 列表" })).findByText(
+        "reviewer",
+      ),
+    ).toBeInTheDocument();
+
+    expect(within(navigation).getByRole("button", { name: /开发/ })).toBeInTheDocument();
+    expect(within(navigation).getByRole("button", { name: /后端/ })).toBeInTheDocument();
+    expect(within(navigation).getByRole("button", { name: /项目/ })).toBeInTheDocument();
+
+    await user.click(within(navigation).getByRole("button", { name: /已安装/ }));
+    expect(
+      await within(screen.getByRole("region", { name: "Skill 列表" })).findByText(
+        "brainstorming",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("点击父 Skill 可收起和展开子 Skill", async () => {
+    const user = userEvent.setup();
+    await renderLibrary();
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+
+    expect(within(list).getByText("atom-doc-parse")).toBeInTheDocument();
+    await user.click(within(list).getByRole("button", { name: /收起 auto-code 的子 Skill/ }));
+    expect(within(list).queryByText("atom-doc-parse")).not.toBeInTheDocument();
+
+    await user.click(within(list).getByRole("button", { name: /展开 auto-code 的子 Skill/ }));
+    expect(within(list).getByText("atom-doc-parse")).toBeInTheDocument();
+  });
+
+  it("库 Skill 可编辑标签和分组", async () => {
+    const setSkillTags = vi.fn(async () => ({
+      ...librarySkills[0],
+      tagIds: ["tag-backend"],
+    }));
+    const setSkillGroup = vi.fn(async () => ({
+      ...librarySkills[0],
+      groupId: "group-dev",
+    }));
+    const user = userEvent.setup();
+    await renderLibrary(createApi({ setSkillTags, setSkillGroup }));
+
+    await user.click(
+      await within(screen.getByRole("region", { name: "库 Skill 列表" })).findByText(
+        "reviewer",
+      ),
+    );
+    await user.click(screen.getByRole("checkbox", { name: "后端" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "分组" }), "group-dev");
+
+    await waitFor(() =>
+      expect(setSkillTags).toHaveBeenCalledWith("library-reviewer", ["tag-backend"]),
+    );
+    expect(setSkillGroup).toHaveBeenCalledWith("library-reviewer", "group-dev");
+  });
+
+  it("安装开关遇到目标冲突时展示中文错误并恢复开关", async () => {
+    const installSkill = vi.fn(async () => {
+      throw { code: "TARGET_CONFLICT", message: "目标位置已存在，请先移除冲突目录" };
+    });
+    const user = userEvent.setup();
+    await renderLibrary(createApi({ installSkill }));
+
+    await user.click(
+      await within(screen.getByRole("region", { name: "库 Skill 列表" })).findByText(
+        "reviewer",
+      ),
+    );
+    const toggle = screen.getByRole("checkbox", { name: "安装到 Cursor" });
+    await user.click(toggle);
+
+    expect(await screen.findByText("目标位置已存在，请先移除冲突目录")).toBeInTheDocument();
+    expect(toggle).not.toBeChecked();
+    expect(installSkill).toHaveBeenCalledTimes(1);
+  });
+
+  it("项目面板展示名称与更新/拉取时间，以及添加与拉取错误", async () => {
+    const addLocalProject = vi.fn(async () => {
+      throw { code: "INVALID_PROJECT_PATH", message: "本地路径不存在或不可读" };
+    });
+    const pullGitProject = vi.fn(async () => {
+      throw { code: "GIT_OPERATION", message: "Git 拉取失败：存在未提交修改" };
+    });
+    const user = userEvent.setup();
+    await renderLoaded(createApi({ addLocalProject, pullGitProject }));
+
+    await user.click(screen.getByRole("button", { name: /项目/ }));
+    expect(await screen.findByText("team/skills")).toBeInTheDocument();
+    expect(screen.getAllByText(/最后更新 .* · 拉取 .*/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/拉取 2026\/08\/07/)).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox", { name: "本地项目路径" }), "/missing");
+    await user.click(screen.getByRole("button", { name: "添加本地项目" }));
+    expect(await screen.findByText("本地路径不存在或不可读")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "拉取 team/skills" }));
+    expect(await screen.findByText("Git 拉取失败：存在未提交修改")).toBeInTheDocument();
   });
 });

@@ -12,7 +12,7 @@ pub fn list_skill_tree(
     skill_id: &str,
 ) -> Result<Vec<FileNode>, AppError> {
     let root = repository.detail(skill_id)?.current_path;
-    build_tree(&root, &root)
+    list_skill_tree_at(&root)
 }
 
 pub fn read_skill_file(
@@ -21,7 +21,19 @@ pub fn read_skill_file(
     relative_path: &str,
 ) -> Result<FileContent, AppError> {
     let root = repository.detail(skill_id)?.current_path;
-    let path = resolve_file_path(&root, relative_path)?;
+    read_skill_file_at(&root, relative_path)
+}
+
+pub(crate) fn list_skill_tree_at(root: &Path) -> Result<Vec<FileNode>, AppError> {
+    let root = root.canonicalize()?;
+    build_tree(&root, &root)
+}
+
+pub(crate) fn read_skill_file_at(
+    root: &Path,
+    relative_path: &str,
+) -> Result<FileContent, AppError> {
+    let path = resolve_file_path(root, relative_path)?;
     let metadata = fs::metadata(&path)?;
     if !metadata.is_file() {
         return Err(AppError::Io {
@@ -33,6 +45,9 @@ pub fn read_skill_file(
     }
 
     let bytes = fs::read(&path)?;
+    if looks_binary(&bytes) {
+        return Ok(unsupported(relative_path, "二进制文件不支持预览"));
+    }
     let content = match String::from_utf8(bytes) {
         Ok(content) => content,
         Err(_) => return Ok(unsupported(relative_path, "二进制文件不支持预览")),
@@ -64,20 +79,21 @@ fn build_tree(root: &Path, directory: &Path) -> Result<Vec<FileNode>, AppError> 
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let path = entry.path();
-        let file_type = entry.file_type()?;
+        // Use symlink metadata so dangling/out-of-root links never fail the whole tree.
+        let metadata = fs::symlink_metadata(&path)?;
+        let file_type = metadata.file_type();
         let relative_path = path
             .strip_prefix(root)
             .map_err(|_| outside_error(&path))?
             .to_string_lossy()
             .replace('\\', "/");
-        let (kind, size, children) = if file_type.is_dir() {
+        let (kind, size, children) = if file_type.is_symlink() {
+            // Treat symlinks as opaque file nodes; never follow into the target.
+            (FileNodeKind::File, Some(metadata.len()), Vec::new())
+        } else if file_type.is_dir() {
             (FileNodeKind::Directory, None, build_tree(root, &path)?)
         } else {
-            (
-                FileNodeKind::File,
-                Some(entry.metadata()?.len()),
-                Vec::new(),
-            )
+            (FileNodeKind::File, Some(metadata.len()), Vec::new())
         };
         nodes.push(FileNode {
             name: entry.file_name().to_string_lossy().into_owned(),
@@ -94,6 +110,12 @@ fn build_tree(root: &Path, directory: &Path) -> Result<Vec<FileNode>, AppError> 
             .then_with(|| left.name.cmp(&right.name))
     });
     Ok(nodes)
+}
+
+fn looks_binary(bytes: &[u8]) -> bool {
+    bytes.iter().any(|&byte| {
+        byte == 0 || byte == 0x7f || (byte < 0x20 && !matches!(byte, b'\t' | b'\n' | b'\r'))
+    })
 }
 
 fn resolve_file_path(root: &Path, relative_path: &str) -> Result<PathBuf, AppError> {
@@ -222,9 +244,11 @@ mod tests {
         let (_base, repository, id) = repository_with_skill();
         let skill_path = repository.detail(&id).unwrap().current_path;
         fs::write(skill_path.join("large.txt"), vec![b'a'; 512 * 1024 + 1]).unwrap();
+        fs::write(skill_path.join("nul.txt"), b"ok\0still-utf8").unwrap();
 
         let binary = read_skill_file(&repository, &id, "data.bin").unwrap();
         let large = read_skill_file(&repository, &id, "large.txt").unwrap();
+        let nul_text = read_skill_file(&repository, &id, "nul.txt").unwrap();
 
         assert_eq!(binary.media_type, "unsupported");
         assert_eq!(binary.content, None);
@@ -232,6 +256,9 @@ mod tests {
         assert_eq!(large.media_type, "unsupported");
         assert_eq!(large.content, None);
         assert!(large.message.unwrap().contains("512 KiB"));
+        assert_eq!(nul_text.media_type, "unsupported");
+        assert_eq!(nul_text.content, None);
+        assert!(nul_text.message.unwrap().contains("二进制"));
     }
 
     #[cfg(unix)]
@@ -245,12 +272,20 @@ mod tests {
         fs::write(outside.path().join("nested/secret.txt"), "secret").unwrap();
         let skill_path = repository.detail(&id).unwrap().current_path;
         symlink(outside.path().join("nested"), skill_path.join("linked")).unwrap();
+        symlink(
+            outside.path().join("missing-target"),
+            skill_path.join("dangling"),
+        )
+        .unwrap();
 
         let tree = list_skill_tree(&repository, &id).unwrap();
         let linked = tree.iter().find(|node| node.name == "linked").unwrap();
+        let dangling = tree.iter().find(|node| node.name == "dangling").unwrap();
 
         assert_eq!(linked.kind, FileNodeKind::File);
         assert!(linked.children.is_empty());
+        assert_eq!(dangling.kind, FileNodeKind::File);
+        assert!(dangling.children.is_empty());
         assert!(read_skill_file(&repository, &id, "linked/secret.txt").is_err());
     }
 }

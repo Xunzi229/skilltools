@@ -1,0 +1,1340 @@
+use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
+use walkdir::WalkDir;
+
+use crate::error::AppError;
+use crate::git_ops::{
+    clone_repository, latest_commit_time, project_name_from_git_url, pull_fast_forward,
+    validate_git_url,
+};
+use crate::json_store::{read_json_value, write_json_value};
+use crate::model::{
+    FileContent, FileNode, LibrarySkillDetail, LibrarySkillSummary, Project, ProjectSourceType,
+    Provider, SkillGroup, SkillInstallation, Tag,
+};
+use crate::paths::AppPaths;
+use crate::skill_files::{list_skill_tree_at, read_skill_file_at};
+use crate::skill_repository::read_skill_metadata;
+use crate::transaction_lock::lock_app_transaction;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct LibraryIndex {
+    projects: Vec<Project>,
+    library_skills: Vec<LibrarySkillSummary>,
+    installations: Vec<SkillInstallation>,
+    tags: Vec<Tag>,
+    groups: Vec<SkillGroup>,
+}
+
+pub struct LibraryRepository {
+    paths: AppPaths,
+}
+
+impl LibraryRepository {
+    pub fn new(paths: AppPaths) -> Self {
+        Self { paths }
+    }
+
+    pub fn add_local_project(&self, path: impl AsRef<Path>) -> Result<Project, AppError> {
+        let path = canonical_project_path(path.as_ref())?;
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        ensure_project_path_is_new(&index, &path)?;
+        let project = project_for_source(ProjectSourceType::Local, path, None);
+        let skills = scan_project(&project, &[])?;
+        index.projects.push(project.clone());
+        index.library_skills.extend(skills);
+        self.write_index(&index)?;
+        Ok(project)
+    }
+
+    pub fn add_git_project(&self, url: &str) -> Result<Project, AppError> {
+        validate_git_url(url)?;
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        if index
+            .projects
+            .iter()
+            .any(|project| project.remote_url.as_deref() == Some(url))
+        {
+            return Err(AppError::ProjectAlreadyExists {
+                value: url.to_owned(),
+            });
+        }
+        let id = stable_id(&format!("git:{url}"));
+        let destination = self.paths.library_projects_dir.join(&id);
+        self.paths
+            .assert_within(&destination, &self.paths.library_projects_dir)?;
+        if destination.exists() {
+            return Err(AppError::TargetConflict {
+                path: destination.display().to_string(),
+            });
+        }
+        fs::create_dir_all(&self.paths.library_projects_dir)?;
+        if let Err(error) = clone_repository(url, &destination) {
+            let _ = fs::remove_dir_all(&destination);
+            return Err(error);
+        }
+        let mut project = project_for_source(
+            ProjectSourceType::Git,
+            destination.clone(),
+            Some(url.to_owned()),
+        );
+        project.id = id;
+        project.last_synced_at = Some(Utc::now());
+        project.last_updated_at = latest_commit_time(&destination)?
+            .or_else(|| Some(Utc::now()));
+        let result = (|| {
+            let skills = scan_project(&project, &[])?;
+            index.projects.push(project.clone());
+            index.library_skills.extend(skills);
+            self.write_index(&index)
+        })();
+        if let Err(error) = result {
+            let _ = fs::remove_dir_all(destination);
+            return Err(error);
+        }
+        Ok(project)
+    }
+
+    pub fn pull_git_project(&self, project_id: &str) -> Result<Project, AppError> {
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        let position = project_position(&index, project_id)?;
+        if index.projects[position].source_type != ProjectSourceType::Git {
+            return Err(AppError::GitOperation {
+                message: "本地引用项目不能执行 Git 拉取".to_string(),
+            });
+        }
+        let path = index.projects[position].local_path.clone();
+        self.paths
+            .assert_within(&path, &self.paths.library_projects_dir)?;
+        pull_fast_forward(&path)?;
+        index.projects[position].last_synced_at = Some(Utc::now());
+        index.projects[position].last_updated_at =
+            latest_commit_time(&path)?.or_else(|| Some(Utc::now()));
+        let project = index.projects[position].clone();
+        let previous = project_skills(&index, project_id);
+        let rescanned = scan_project(&project, &previous)?;
+        index
+            .library_skills
+            .retain(|skill| skill.project_id != project_id);
+        index.library_skills.extend(rescanned);
+        self.write_index(&index)?;
+        Ok(project)
+    }
+
+    pub fn remove_project(&self, project_id: &str) -> Result<(), AppError> {
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        let position = project_position(&index, project_id)?;
+        let project = index.projects[position].clone();
+        if project.source_type == ProjectSourceType::Git {
+            self.paths
+                .assert_within(&project.local_path, &self.paths.library_projects_dir)?;
+            match fs::remove_dir_all(&project.local_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        index.projects.remove(position);
+        index
+            .library_skills
+            .retain(|skill| skill.project_id != project_id);
+        self.write_index(&index)
+    }
+
+    pub fn list_projects(&self) -> Result<Vec<Project>, AppError> {
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        let dirty = normalize_projects(&mut index.projects);
+        if dirty {
+            self.write_index(&index)?;
+        }
+        let mut projects = index.projects;
+        projects.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        Ok(projects)
+    }
+
+    pub fn list_library_skills(&self) -> Result<Vec<LibrarySkillSummary>, AppError> {
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        let mut refreshed = Vec::new();
+        for project in &index.projects {
+            let previous = project_skills(&index, &project.id);
+            match scan_project(project, &previous) {
+                Ok(skills) => refreshed.extend(skills),
+                Err(error) => {
+                    // Keep previous skills for this project if a single project becomes unreadable.
+                    refreshed.extend(previous);
+                    eprintln!(
+                        "刷新库项目扫描失败 {}：{error}",
+                        project.local_path.display()
+                    );
+                }
+            }
+        }
+        index.library_skills = refreshed;
+        adopt_existing_installations(&mut index, &self.paths);
+        prune_missing_installations(&mut index);
+        sync_installation_statuses(&mut index);
+        self.write_index(&index)?;
+        let mut skills = index.library_skills;
+        skills.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        Ok(skills)
+    }
+
+    pub fn get_library_skill_detail(&self, skill_id: &str) -> Result<LibrarySkillDetail, AppError> {
+        let summary = self.library_skill(skill_id)?;
+        let skill_markdown =
+            fs::read_to_string(summary.absolute_path.join("SKILL.md")).map_err(AppError::from)?;
+        let mut files = WalkDir::new(&summary.absolute_path)
+            .follow_links(false)
+            .min_depth(1)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .strip_prefix(&summary.absolute_path)
+                    .ok()
+                    .map(|path| path.to_string_lossy().into_owned())
+            })
+            .collect::<Vec<_>>();
+        files.sort();
+        Ok(LibrarySkillDetail {
+            summary,
+            skill_markdown,
+            files,
+        })
+    }
+
+    pub fn list_library_skill_tree(&self, skill_id: &str) -> Result<Vec<FileNode>, AppError> {
+        let skill = self.library_skill(skill_id)?;
+        list_skill_tree_at(&skill.absolute_path)
+    }
+
+    pub fn read_library_skill_file(
+        &self,
+        skill_id: &str,
+        relative_path: &str,
+    ) -> Result<FileContent, AppError> {
+        let skill = self.library_skill(skill_id)?;
+        read_skill_file_at(&skill.absolute_path, relative_path)
+    }
+
+    pub fn install_skill(
+        &self,
+        library_skill_id: &str,
+        provider: Provider,
+    ) -> Result<SkillInstallation, AppError> {
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        let skill = index
+            .library_skills
+            .iter()
+            .find(|skill| skill.id == library_skill_id)
+            .cloned()
+            .ok_or_else(|| AppError::LibrarySkillNotFound {
+                id: library_skill_id.to_owned(),
+            })?;
+        let source_path =
+            skill
+                .absolute_path
+                .canonicalize()
+                .map_err(|_| AppError::InvalidProjectPath {
+                    path: skill.absolute_path.display().to_string(),
+                })?;
+        if !source_path.is_dir() {
+            return Err(AppError::InvalidProjectPath {
+                path: source_path.display().to_string(),
+            });
+        }
+        let root = self.paths.provider_root(provider)?;
+        self.paths.assert_allowed(root)?;
+        fs::create_dir_all(root)?;
+        adopt_existing_installations(&mut index, &self.paths);
+        prune_missing_installations(&mut index);
+        let managed_position = index.installations.iter().position(|installation| {
+            installation.library_skill_id == library_skill_id && installation.provider == provider
+        });
+        let target_path = match managed_position {
+            Some(position) => index.installations[position].target_path.clone(),
+            None => safe_skill_target(root, &skill.name)?,
+        };
+        let old_link = match fs::symlink_metadata(&target_path) {
+            Ok(metadata) if !metadata.file_type().is_symlink() => {
+                return Err(AppError::TargetConflict {
+                    path: target_path.display().to_string(),
+                });
+            }
+            Ok(_) if managed_position.is_none() => {
+                return Err(AppError::TargetConflict {
+                    path: target_path.display().to_string(),
+                });
+            }
+            Ok(_) => Some(fs::read_link(&target_path)?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+
+        if old_link.is_some() {
+            fs::remove_file(&target_path)?;
+        }
+        if let Err(error) = create_directory_symlink(&source_path, &target_path) {
+            if let Some(old_target) = old_link {
+                create_directory_symlink(&old_target, &target_path).map_err(|rollback_error| {
+                    AppError::RollbackFailed {
+                        original_error: error.to_string(),
+                        rollback_error: rollback_error.to_string(),
+                    }
+                })?;
+            }
+            return Err(error);
+        }
+
+        let installation = SkillInstallation {
+            library_skill_id: library_skill_id.to_owned(),
+            provider,
+            source_path,
+            target_path: target_path.clone(),
+            installed_at: Utc::now(),
+        };
+        if let Some(position) = managed_position {
+            index.installations[position] = installation.clone();
+        } else {
+            index.installations.push(installation.clone());
+        }
+        sync_installation_statuses(&mut index);
+        if let Err(error) = self.write_index(&index) {
+            fs::remove_file(&target_path).map_err(|rollback_error| AppError::RollbackFailed {
+                original_error: error.to_string(),
+                rollback_error: rollback_error.to_string(),
+            })?;
+            if let Some(old_target) = old_link {
+                create_directory_symlink(&old_target, &target_path).map_err(|rollback_error| {
+                    AppError::RollbackFailed {
+                        original_error: error.to_string(),
+                        rollback_error: rollback_error.to_string(),
+                    }
+                })?;
+            }
+            return Err(error);
+        }
+        Ok(installation)
+    }
+
+    pub fn uninstall_skill(
+        &self,
+        library_skill_id: &str,
+        provider: Provider,
+    ) -> Result<(), AppError> {
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        let skill_name = index
+            .library_skills
+            .iter()
+            .find(|skill| skill.id == library_skill_id)
+            .map(|skill| skill.name.clone())
+            .ok_or_else(|| AppError::LibrarySkillNotFound {
+                id: library_skill_id.to_owned(),
+            })?;
+        let root = self.paths.provider_root(provider)?;
+        self.paths.assert_allowed(root)?;
+        adopt_existing_installations(&mut index, &self.paths);
+        prune_missing_installations(&mut index);
+        let managed_position = index.installations.iter().position(|installation| {
+            installation.library_skill_id == library_skill_id && installation.provider == provider
+        });
+        let target_path = match managed_position {
+            Some(position) => index.installations[position].target_path.clone(),
+            None => safe_skill_target(root, &skill_name)?,
+        };
+        match fs::symlink_metadata(&target_path) {
+            Ok(metadata) if !metadata.file_type().is_symlink() => {
+                return Err(AppError::TargetConflict {
+                    path: target_path.display().to_string(),
+                });
+            }
+            Ok(_) if managed_position.is_none() => {
+                return Err(AppError::TargetConflict {
+                    path: target_path.display().to_string(),
+                });
+            }
+            Ok(_) => fs::remove_file(&target_path)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        if let Some(position) = managed_position {
+            index.installations.remove(position);
+            sync_installation_statuses(&mut index);
+            self.write_index(&index)?;
+        }
+        Ok(())
+    }
+
+    pub fn list_installations(&self) -> Result<Vec<SkillInstallation>, AppError> {
+        let mut installations = self.load_index()?.installations;
+        installations.sort_by(|left, right| {
+            left.library_skill_id
+                .cmp(&right.library_skill_id)
+                .then(provider_order(left.provider).cmp(&provider_order(right.provider)))
+        });
+        Ok(installations)
+    }
+
+    pub fn list_tags(&self) -> Result<Vec<Tag>, AppError> {
+        let mut tags = self.load_index()?.tags;
+        tags.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(tags)
+    }
+
+    pub fn create_tag(&self, name: String, color: Option<String>) -> Result<Tag, AppError> {
+        self.mutate_index(|index| {
+            ensure_unique_name(&index.tags, &name, None, "标签", |tag| {
+                (&tag.id, &tag.name)
+            })?;
+            let tag = Tag {
+                id: Uuid::new_v4().to_string(),
+                name,
+                color,
+            };
+            index.tags.push(tag.clone());
+            Ok(tag)
+        })
+    }
+
+    pub fn rename_tag(&self, id: &str, name: String) -> Result<Tag, AppError> {
+        self.mutate_index(|index| {
+            ensure_unique_name(&index.tags, &name, Some(id), "标签", |tag| {
+                (&tag.id, &tag.name)
+            })?;
+            let tag = index
+                .tags
+                .iter_mut()
+                .find(|tag| tag.id == id)
+                .ok_or_else(|| AppError::TagNotFound { id: id.to_owned() })?;
+            tag.name = name;
+            Ok(tag.clone())
+        })
+    }
+
+    pub fn delete_tag(&self, id: &str) -> Result<(), AppError> {
+        self.mutate_index(|index| {
+            let original_len = index.tags.len();
+            index.tags.retain(|tag| tag.id != id);
+            if index.tags.len() == original_len {
+                return Err(AppError::TagNotFound { id: id.to_owned() });
+            }
+            for skill in &mut index.library_skills {
+                skill.tag_ids.retain(|tag_id| tag_id != id);
+            }
+            Ok(())
+        })
+    }
+
+    pub fn set_skill_tags(
+        &self,
+        skill_id: &str,
+        tag_ids: Vec<String>,
+    ) -> Result<LibrarySkillSummary, AppError> {
+        self.mutate_index(|index| {
+            let unique = tag_ids.iter().collect::<HashSet<_>>();
+            if unique.len() != tag_ids.len()
+                || tag_ids
+                    .iter()
+                    .any(|id| !index.tags.iter().any(|tag| tag.id == *id))
+            {
+                return Err(AppError::TagNotFound {
+                    id: tag_ids
+                        .into_iter()
+                        .find(|id| !index.tags.iter().any(|tag| tag.id == *id))
+                        .unwrap_or_else(|| "重复标签".to_string()),
+                });
+            }
+            let skill = find_skill_mut(index, skill_id)?;
+            skill.tag_ids = tag_ids;
+            Ok(skill.clone())
+        })
+    }
+
+    pub fn list_groups(&self) -> Result<Vec<SkillGroup>, AppError> {
+        let mut groups = self.load_index()?.groups;
+        groups.sort_by(|left, right| {
+            left.order
+                .cmp(&right.order)
+                .then(left.name.cmp(&right.name))
+        });
+        Ok(groups)
+    }
+
+    pub fn create_group(&self, name: String, order: i32) -> Result<SkillGroup, AppError> {
+        self.mutate_index(|index| {
+            ensure_unique_name(&index.groups, &name, None, "分组", |group| {
+                (&group.id, &group.name)
+            })?;
+            let group = SkillGroup {
+                id: Uuid::new_v4().to_string(),
+                name,
+                order,
+            };
+            index.groups.push(group.clone());
+            Ok(group)
+        })
+    }
+
+    pub fn rename_group(&self, id: &str, name: String) -> Result<SkillGroup, AppError> {
+        self.mutate_index(|index| {
+            ensure_unique_name(&index.groups, &name, Some(id), "分组", |group| {
+                (&group.id, &group.name)
+            })?;
+            let group = index
+                .groups
+                .iter_mut()
+                .find(|group| group.id == id)
+                .ok_or_else(|| AppError::GroupNotFound { id: id.to_owned() })?;
+            group.name = name;
+            Ok(group.clone())
+        })
+    }
+
+    pub fn update_group_order(&self, id: &str, order: i32) -> Result<SkillGroup, AppError> {
+        self.mutate_index(|index| {
+            let group = index
+                .groups
+                .iter_mut()
+                .find(|group| group.id == id)
+                .ok_or_else(|| AppError::GroupNotFound { id: id.to_owned() })?;
+            group.order = order;
+            Ok(group.clone())
+        })
+    }
+
+    pub fn delete_group(&self, id: &str) -> Result<(), AppError> {
+        self.mutate_index(|index| {
+            let original_len = index.groups.len();
+            index.groups.retain(|group| group.id != id);
+            if index.groups.len() == original_len {
+                return Err(AppError::GroupNotFound { id: id.to_owned() });
+            }
+            for skill in &mut index.library_skills {
+                if skill.group_id.as_deref() == Some(id) {
+                    skill.group_id = None;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    pub fn set_skill_group(
+        &self,
+        skill_id: &str,
+        group_id: Option<String>,
+    ) -> Result<LibrarySkillSummary, AppError> {
+        self.mutate_index(|index| {
+            if let Some(id) = &group_id {
+                if !index.groups.iter().any(|group| group.id == *id) {
+                    return Err(AppError::GroupNotFound { id: id.clone() });
+                }
+            }
+            let skill = find_skill_mut(index, skill_id)?;
+            skill.group_id = group_id;
+            Ok(skill.clone())
+        })
+    }
+
+    fn mutate_index<T>(
+        &self,
+        action: impl FnOnce(&mut LibraryIndex) -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        let result = action(&mut index)?;
+        self.write_index(&index)?;
+        Ok(result)
+    }
+
+    fn library_skill(&self, skill_id: &str) -> Result<LibrarySkillSummary, AppError> {
+        self.load_index()?
+            .library_skills
+            .into_iter()
+            .find(|skill| skill.id == skill_id)
+            .ok_or_else(|| AppError::LibrarySkillNotFound {
+                id: skill_id.to_owned(),
+            })
+    }
+
+    fn load_index(&self) -> Result<LibraryIndex, AppError> {
+        read_json_value(
+            &self.paths.library_index,
+            LibraryIndex::default,
+            |message| AppError::LibraryIndex { message },
+        )
+    }
+
+    fn write_index(&self, index: &LibraryIndex) -> Result<(), AppError> {
+        self.paths.assert_allowed(&self.paths.library_index)?;
+        fs::create_dir_all(&self.paths.app_data_dir)?;
+        write_json_value(&self.paths.library_index, index, |message| {
+            AppError::LibraryIndex { message }
+        })
+    }
+}
+
+fn canonical_project_path(path: &Path) -> Result<PathBuf, AppError> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| AppError::InvalidProjectPath {
+            path: path.display().to_string(),
+        })?;
+    if !canonical.is_dir() || fs::read_dir(&canonical).is_err() {
+        return Err(AppError::InvalidProjectPath {
+            path: path.display().to_string(),
+        });
+    }
+    Ok(canonical)
+}
+
+fn ensure_project_path_is_new(index: &LibraryIndex, path: &Path) -> Result<(), AppError> {
+    if index
+        .projects
+        .iter()
+        .any(|project| project.local_path == path)
+    {
+        return Err(AppError::ProjectAlreadyExists {
+            value: path.display().to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn project_for_source(
+    source_type: ProjectSourceType,
+    local_path: PathBuf,
+    remote_url: Option<String>,
+) -> Project {
+    let identity = remote_url
+        .as_deref()
+        .map(|url| format!("git:{url}"))
+        .unwrap_or_else(|| format!("local:{}", local_path.display()));
+    let name = remote_url
+        .as_deref()
+        .map(project_name_from_git_url)
+        .unwrap_or_else(|| {
+            local_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "project".to_string())
+        });
+    let last_updated_at = path_modified_at(&local_path).or_else(|| Some(Utc::now()));
+    Project {
+        id: stable_id(&identity),
+        name,
+        source_type,
+        local_path,
+        remote_url,
+        added_at: Utc::now(),
+        last_updated_at,
+        last_synced_at: None,
+        warnings: Vec::new(),
+    }
+}
+
+fn path_modified_at(path: &Path) -> Option<DateTime<Utc>> {
+    fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .map(DateTime::<Utc>::from)
+}
+
+fn normalize_projects(projects: &mut [Project]) -> bool {
+    let mut dirty = false;
+    for project in projects.iter_mut() {
+        if let Some(url) = project.remote_url.clone() {
+            let name = project_name_from_git_url(&url);
+            if project.name != name {
+                project.name = name;
+                dirty = true;
+            }
+            if project.last_updated_at.is_none() {
+                if let Ok(Some(time)) = latest_commit_time(&project.local_path) {
+                    project.last_updated_at = Some(time);
+                    dirty = true;
+                }
+            }
+        } else if project.last_updated_at.is_none() {
+            if let Some(time) = path_modified_at(&project.local_path) {
+                project.last_updated_at = Some(time);
+                dirty = true;
+            }
+        }
+    }
+    dirty
+}
+
+fn scan_project(
+    project: &Project,
+    previous: &[LibrarySkillSummary],
+) -> Result<Vec<LibrarySkillSummary>, AppError> {
+    let mut directories = Vec::new();
+    collect_skill_directories(&project.local_path, Path::new(""), &mut directories)?;
+    directories.sort();
+    let id_for = |relative_path: &Path| {
+        stable_id(&format!(
+            "{}:{}",
+            project.id,
+            relative_path.to_string_lossy()
+        ))
+    };
+    Ok(directories
+        .iter()
+        .map(|relative_path| {
+            let absolute_path = if relative_path.as_os_str().is_empty() {
+                project.local_path.clone()
+            } else {
+                project.local_path.join(relative_path)
+            };
+            let metadata = read_skill_metadata(&absolute_path);
+            let id = id_for(relative_path);
+            let old = previous.iter().find(|skill| skill.id == id);
+            let parent_skill_id = parent_skill_relative(relative_path, &directories)
+                .map(|parent| id_for(&parent));
+            LibrarySkillSummary {
+                id,
+                project_id: project.id.clone(),
+                name: metadata.name,
+                description: metadata.description,
+                relative_path: relative_path.clone(),
+                absolute_path,
+                parent_skill_id,
+                group_id: old.and_then(|skill| skill.group_id.clone()),
+                tag_ids: old.map(|skill| skill.tag_ids.clone()).unwrap_or_default(),
+                installed_providers: old
+                    .map(|skill| skill.installed_providers.clone())
+                    .unwrap_or_default(),
+                warnings: metadata.warnings,
+            }
+        })
+        .collect())
+}
+
+/// Recursively find Skill directories.
+/// A directory with `SKILL.md` is a Skill；一般不再下钻，但会继续扫描其子目录
+/// `skills/`，以便识别嵌套子 Skill（如 auto-code/skills/foo）。
+fn collect_skill_directories(
+    absolute: &Path,
+    relative: &Path,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), AppError> {
+    if is_skill_directory(absolute) {
+        out.push(relative.to_path_buf());
+        let nested_skills = absolute.join("skills");
+        if is_plain_directory(&nested_skills) {
+            let nested_relative = if relative.as_os_str().is_empty() {
+                PathBuf::from("skills")
+            } else {
+                relative.join("skills")
+            };
+            collect_child_skill_directories(&nested_skills, &nested_relative, out)?;
+        }
+        return Ok(());
+    }
+
+    collect_child_skill_directories(absolute, relative, out)
+}
+
+fn collect_child_skill_directories(
+    absolute: &Path,
+    relative: &Path,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), AppError> {
+    let entries = fs::read_dir(absolute).map_err(|_| AppError::InvalidProjectPath {
+        path: absolute.display().to_string(),
+    })?;
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let child_absolute = entry.path();
+        if !is_plain_directory(&child_absolute) {
+            continue;
+        }
+        let child_relative = if relative.as_os_str().is_empty() {
+            PathBuf::from(&name)
+        } else {
+            relative.join(&name)
+        };
+        collect_skill_directories(&child_absolute, &child_relative, out)?;
+    }
+    Ok(())
+}
+
+fn is_plain_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+/// 最近一层祖先 Skill 路径（路径前缀最长者）。
+fn parent_skill_relative(relative_path: &Path, all: &[PathBuf]) -> Option<PathBuf> {
+    all.iter()
+        .filter(|candidate| {
+            if candidate.as_os_str() == relative_path.as_os_str() {
+                return false;
+            }
+            if candidate.as_os_str().is_empty() {
+                return !relative_path.as_os_str().is_empty();
+            }
+            relative_path.starts_with(candidate)
+        })
+        .max_by_key(|candidate| candidate.as_os_str().len())
+        .cloned()
+}
+
+fn is_skill_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path.join("SKILL.md"))
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false)
+}
+
+fn stable_id(value: &str) -> String {
+    Sha256::digest(value.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn safe_skill_target(root: &Path, name: &str) -> Result<PathBuf, AppError> {
+    let path = Path::new(name);
+    let mut components = path.components();
+    let valid = matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none();
+    if !valid {
+        return Err(AppError::PathOutsideManagedRoots {
+            path: root.join(path).display().to_string(),
+        });
+    }
+    Ok(root.join(path))
+}
+
+#[cfg(unix)]
+fn create_directory_symlink(source: &Path, target: &Path) -> Result<(), AppError> {
+    std::os::unix::fs::symlink(source, target).map_err(AppError::from)
+}
+
+#[cfg(windows)]
+fn create_directory_symlink(source: &Path, target: &Path) -> Result<(), AppError> {
+    std::os::windows::fs::symlink_dir(source, target).map_err(AppError::from)
+}
+
+/// 发现各 provider 根下已指向库 Skill 的符号链接，回填到 installations。
+fn adopt_existing_installations(index: &mut LibraryIndex, paths: &AppPaths) {
+    let sources = index
+        .library_skills
+        .iter()
+        .filter_map(|skill| {
+            skill
+                .absolute_path
+                .canonicalize()
+                .ok()
+                .map(|source| (source, skill.id.clone()))
+        })
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
+        return;
+    }
+
+    for provider in [Provider::Cursor, Provider::Claude, Provider::Codex] {
+        let Ok(root) = paths.provider_root(provider) else {
+            continue;
+        };
+        let Ok(entries) = fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let target_path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_symlink() {
+                continue;
+            }
+            let Ok(resolved) = target_path.canonicalize() else {
+                continue;
+            };
+            let Some((_, skill_id)) = sources.iter().find(|(source, _)| *source == resolved) else {
+                continue;
+            };
+            let already = index.installations.iter().any(|installation| {
+                installation.library_skill_id == *skill_id && installation.provider == provider
+            });
+            if already {
+                continue;
+            }
+            index.installations.push(SkillInstallation {
+                library_skill_id: skill_id.clone(),
+                provider,
+                source_path: resolved,
+                target_path,
+                installed_at: Utc::now(),
+            });
+        }
+    }
+}
+
+fn prune_missing_installations(index: &mut LibraryIndex) {
+    index.installations.retain(|installation| {
+        fs::symlink_metadata(&installation.target_path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+    });
+}
+
+fn sync_installation_statuses(index: &mut LibraryIndex) {
+    for skill in &mut index.library_skills {
+        skill.installed_providers = index
+            .installations
+            .iter()
+            .filter(|installation| installation.library_skill_id == skill.id)
+            .map(|installation| installation.provider)
+            .collect();
+        skill
+            .installed_providers
+            .sort_by_key(|provider| provider_order(*provider));
+        skill.installed_providers.dedup();
+    }
+}
+
+fn provider_order(provider: Provider) -> u8 {
+    match provider {
+        Provider::Cursor => 0,
+        Provider::Claude => 1,
+        Provider::Codex => 2,
+    }
+}
+
+fn project_position(index: &LibraryIndex, id: &str) -> Result<usize, AppError> {
+    index
+        .projects
+        .iter()
+        .position(|project| project.id == id)
+        .ok_or_else(|| AppError::ProjectNotFound { id: id.to_owned() })
+}
+
+fn project_skills(index: &LibraryIndex, project_id: &str) -> Vec<LibrarySkillSummary> {
+    index
+        .library_skills
+        .iter()
+        .filter(|skill| skill.project_id == project_id)
+        .cloned()
+        .collect()
+}
+
+fn find_skill_mut<'a>(
+    index: &'a mut LibraryIndex,
+    skill_id: &str,
+) -> Result<&'a mut LibrarySkillSummary, AppError> {
+    index
+        .library_skills
+        .iter_mut()
+        .find(|skill| skill.id == skill_id)
+        .ok_or_else(|| AppError::LibrarySkillNotFound {
+            id: skill_id.to_owned(),
+        })
+}
+
+fn ensure_unique_name<T>(
+    values: &[T],
+    name: &str,
+    excluded_id: Option<&str>,
+    kind: &'static str,
+    fields: impl Fn(&T) -> (&String, &String),
+) -> Result<(), AppError> {
+    if values.iter().any(|value| {
+        let (id, existing_name) = fields(value);
+        excluded_id != Some(id.as_str()) && existing_name.eq_ignore_ascii_case(name)
+    }) {
+        return Err(AppError::TaxonomyNameConflict {
+            kind,
+            name: name.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::LibraryRepository;
+    use crate::error::AppError;
+    use crate::model::{ProjectSourceType, Provider};
+    use crate::paths::AppPaths;
+
+    fn write_skill(path: &std::path::Path, name: &str) {
+        fs::create_dir_all(path).unwrap();
+        fs::write(
+            path.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {name} 描述\n---\n正文"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn local_project_deep_scans_nested_skill_directories() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        fs::create_dir_all(source.path().join("ordinary")).unwrap();
+        fs::write(source.path().join("plain.txt"), "ignored").unwrap();
+        write_skill(&source.path().join(".hidden"), "Hidden");
+        write_skill(&source.path().join("nested/deep"), "Deep");
+        write_skill(&source.path().join("skills/group/gamma"), "Gamma");
+        // Nested SKILL.md inside an existing skill package (非 skills/) must not create another skill.
+        write_skill(&source.path().join("alpha/references/inner"), "Inner");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths);
+
+        let project = repository.add_local_project(source.path()).unwrap();
+        let skills = repository.list_library_skills().unwrap();
+        let names: Vec<_> = skills.iter().map(|skill| skill.name.as_str()).collect();
+
+        assert_eq!(project.source_type, ProjectSourceType::Local);
+        assert_eq!(project.local_path, source.path().canonicalize().unwrap());
+        assert_eq!(skills.len(), 3);
+        assert!(names.contains(&"Alpha"));
+        assert!(names.contains(&"Deep"));
+        assert!(names.contains(&"Gamma"));
+        assert!(!names.contains(&"Hidden"));
+        assert!(!names.contains(&"Inner"));
+        assert!(skills
+            .iter()
+            .any(|skill| skill.relative_path == std::path::PathBuf::from("nested/deep")));
+        assert!(skills.iter().any(|skill| {
+            skill.relative_path == std::path::PathBuf::from("skills/group/gamma")
+        }));
+    }
+
+    #[test]
+    fn skill_package_skills_directory_is_scanned_as_sub_skills() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("auto-code-codex"), "auto-code-codex");
+        write_skill(
+            &source
+                .path()
+                .join("auto-code-codex/skills/adversarial-design-review"),
+            "adversarial-design-review",
+        );
+        write_skill(
+            &source
+                .path()
+                .join("auto-code-codex/skills/atom-controller-gen"),
+            "atom-controller-gen",
+        );
+        // Still ignore nested packages outside the conventional skills/ folder.
+        write_skill(
+            &source.path().join("auto-code-codex/agents/inner"),
+            "inner-agent",
+        );
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+
+        repository.add_local_project(source.path()).unwrap();
+        let skills = repository.list_library_skills().unwrap();
+
+        assert_eq!(skills.len(), 3);
+        let parent = skills
+            .iter()
+            .find(|skill| skill.name == "auto-code-codex")
+            .unwrap();
+        assert!(parent.parent_skill_id.is_none());
+        let children: Vec<_> = skills
+            .iter()
+            .filter(|skill| skill.parent_skill_id.as_deref() == Some(parent.id.as_str()))
+            .map(|skill| skill.name.as_str())
+            .collect();
+        assert!(children.contains(&"adversarial-design-review"));
+        assert!(children.contains(&"atom-controller-gen"));
+        assert!(!skills.iter().any(|skill| skill.name == "inner-agent"));
+    }
+
+    #[test]
+    fn project_root_with_skill_md_is_a_single_skill() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(source.path(), "Root Skill");
+        write_skill(&source.path().join("child"), "Child");
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+
+        repository.add_local_project(source.path()).unwrap();
+        let skills = repository.list_library_skills().unwrap();
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "Root Skill");
+        assert!(skills[0].relative_path.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn library_skill_tree_and_preview_are_scoped_to_skill_directory() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        fs::create_dir_all(source.path().join("alpha/references")).unwrap();
+        fs::write(
+            source.path().join("alpha/references/example.txt"),
+            "example",
+        )
+        .unwrap();
+        fs::write(source.path().join("secret.txt"), "secret").unwrap();
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+
+        let tree = repository.list_library_skill_tree(&skill_id).unwrap();
+        let preview = repository
+            .read_library_skill_file(&skill_id, "references/example.txt")
+            .unwrap();
+
+        assert!(tree.iter().any(|node| node.name == "SKILL.md"));
+        assert_eq!(preview.content.as_deref(), Some("example"));
+        assert!(matches!(
+            repository.read_library_skill_file(&skill_id, "../secret.txt"),
+            Err(AppError::PathOutsideManagedRoots { .. })
+        ));
+    }
+
+    #[test]
+    fn tags_and_group_persist_and_deletion_only_clears_references() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let tag_a = repository.create_tag("后端".into(), None).unwrap();
+        let tag_b = repository
+            .create_tag("常用".into(), Some("#fff".into()))
+            .unwrap();
+        let group = repository.create_group("开发".into(), 10).unwrap();
+
+        repository
+            .set_skill_tags(&skill_id, vec![tag_a.id.clone(), tag_b.id.clone()])
+            .unwrap();
+        repository
+            .set_skill_group(&skill_id, Some(group.id.clone()))
+            .unwrap();
+        let reopened = LibraryRepository::new(paths);
+        let assigned = reopened.list_library_skills().unwrap()[0].clone();
+        assert_eq!(assigned.tag_ids.len(), 2);
+        assert_eq!(assigned.group_id.as_deref(), Some(group.id.as_str()));
+
+        reopened.delete_tag(&tag_a.id).unwrap();
+        reopened.delete_group(&group.id).unwrap();
+        let cleared = reopened.list_library_skills().unwrap()[0].clone();
+        assert_eq!(cleared.tag_ids, vec![tag_b.id]);
+        assert_eq!(cleared.group_id, None);
+        assert!(source.path().join("alpha/SKILL.md").exists());
+    }
+
+    #[test]
+    fn removing_local_project_never_deletes_source_directory() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+        let project = repository.add_local_project(source.path()).unwrap();
+
+        repository.remove_project(&project.id).unwrap();
+
+        assert!(source.path().join("alpha/SKILL.md").exists());
+        assert!(repository.list_projects().unwrap().is_empty());
+        assert!(repository.list_library_skills().unwrap().is_empty());
+    }
+
+    #[test]
+    fn malformed_frontmatter_keeps_skill_with_chinese_warning() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        let skill = source.path().join("broken");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "---\nname: [broken\n---\n").unwrap();
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+
+        repository.add_local_project(source.path()).unwrap();
+        let skills = repository.list_library_skills().unwrap();
+
+        assert_eq!(skills.len(), 1);
+        assert!(skills[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("YAML 格式错误")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_adopts_existing_provider_symlinks_into_installations() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill = repository.list_library_skills().unwrap()[0].clone();
+        let claude_root = paths.provider_root(Provider::Claude).unwrap();
+        fs::create_dir_all(claude_root).unwrap();
+        // 链接名与 frontmatter name 不同，仍应按解析目标认领
+        let link = claude_root.join("alpha-link");
+        std::os::unix::fs::symlink(&skill.absolute_path, &link).unwrap();
+
+        let skills = repository.list_library_skills().unwrap();
+        let adopted = skills.iter().find(|item| item.id == skill.id).unwrap();
+
+        assert_eq!(adopted.installed_providers, vec![Provider::Claude]);
+        let installations = repository.list_installations().unwrap();
+        assert_eq!(installations.len(), 1);
+        assert_eq!(installations[0].library_skill_id, skill.id);
+        assert_eq!(installations[0].provider, Provider::Claude);
+        assert_eq!(installations[0].target_path, link);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_creates_symlink_and_persists_status() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+
+        let installation = repository
+            .install_skill(&skill_id, Provider::Cursor)
+            .unwrap();
+
+        assert!(installation.target_path.is_symlink());
+        assert_eq!(
+            fs::read_link(&installation.target_path).unwrap(),
+            source.path().join("alpha").canonicalize().unwrap()
+        );
+        assert_eq!(repository.list_installations().unwrap(), vec![installation]);
+        assert_eq!(
+            repository.list_library_skills().unwrap()[0].installed_providers,
+            vec![Provider::Cursor]
+        );
+        assert!(paths.library_index.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_updates_only_a_managed_symlink() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths);
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let original = repository
+            .install_skill(&skill_id, Provider::Cursor)
+            .unwrap();
+        fs::remove_file(&original.target_path).unwrap();
+        std::os::unix::fs::symlink(source.path(), &original.target_path).unwrap();
+
+        repository
+            .install_skill(&skill_id, Provider::Cursor)
+            .unwrap();
+
+        assert_eq!(
+            fs::read_link(&original.target_path).unwrap(),
+            source.path().join("alpha").canonicalize().unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_rejects_real_directory_and_unmanaged_symlink_conflicts() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let target = paths.provider_root(Provider::Cursor).unwrap().join("Alpha");
+        fs::create_dir_all(&target).unwrap();
+
+        assert!(matches!(
+            repository.install_skill(&skill_id, Provider::Cursor),
+            Err(AppError::TargetConflict { .. })
+        ));
+
+        fs::remove_dir(&target).unwrap();
+        std::os::unix::fs::symlink(source.path(), &target).unwrap();
+        assert!(matches!(
+            repository.install_skill(&skill_id, Provider::Cursor),
+            Err(AppError::TargetConflict { .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn uninstall_deletes_only_managed_symlink() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let installation = repository
+            .install_skill(&skill_id, Provider::Claude)
+            .unwrap();
+
+        repository
+            .uninstall_skill(&skill_id, Provider::Claude)
+            .unwrap();
+
+        assert!(fs::symlink_metadata(&installation.target_path).is_err());
+        assert!(repository.list_installations().unwrap().is_empty());
+        assert!(repository.list_library_skills().unwrap()[0]
+            .installed_providers
+            .is_empty());
+
+        fs::create_dir_all(&installation.target_path).unwrap();
+        assert!(matches!(
+            repository.uninstall_skill(&skill_id, Provider::Claude),
+            Err(AppError::TargetConflict { .. })
+        ));
+        assert!(installation.target_path.is_dir());
+    }
+
+    #[test]
+    fn install_rejects_skill_name_that_escapes_provider_root() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("escape"), "../escape");
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+
+        assert!(matches!(
+            repository.install_skill(&skill_id, Provider::Codex),
+            Err(AppError::PathOutsideManagedRoots { .. })
+        ));
+    }
+}

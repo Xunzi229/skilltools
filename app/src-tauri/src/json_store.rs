@@ -35,6 +35,37 @@ where
     atomic_write(path, &bytes)
 }
 
+pub(crate) fn read_json_value<T, Error>(
+    path: &Path,
+    default: impl FnOnce() -> T,
+    parse_error: Error,
+) -> Result<T, AppError>
+where
+    T: DeserializeOwned,
+    Error: FnOnce(String) -> AppError,
+{
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(default()),
+        Err(error) => return Err(error.into()),
+    };
+    serde_json::from_slice(&bytes).map_err(|error| parse_error(error.to_string()))
+}
+
+pub(crate) fn write_json_value<T, Error>(
+    path: &Path,
+    value: &T,
+    serialization_error: Error,
+) -> Result<(), AppError>
+where
+    T: Serialize,
+    Error: FnOnce(String) -> AppError,
+{
+    let bytes =
+        serde_json::to_vec_pretty(value).map_err(|error| serialization_error(error.to_string()))?;
+    atomic_write(path, &bytes)
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     let parent = path.parent().ok_or_else(|| AppError::Io {
         message: format!("索引路径缺少父目录：{}", path.display()),

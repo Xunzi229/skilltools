@@ -10,6 +10,14 @@ Skill Manager 是基于 Tauri、React 和 TypeScript 的本地 Skill 管理工�
 - 删除前自动创建备份
 - 从备份恢复 Skill，恢复冲突时不覆盖现有内容
 
+### V2
+
+- 使用中央库统一管理 Skill，并按标签分组
+- 支持添加本地项目和 Git 项目
+- 一键通过符号链接将 Skill 应用到目标平台
+- 通过目录树浏览并预览 Skill 文件
+- 扫描项目时仅识别包含 `SKILL.md` 的 Skill 目录
+
 管理目录：
 
 - `~/.cursor/skills`

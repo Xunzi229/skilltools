@@ -5,13 +5,18 @@ use tauri::State;
 
 use crate::backup_repository::BackupRepository;
 use crate::error::AppError;
-use crate::model::{BackupReason, BackupRecord, FileContent, FileNode, ScanResult, SkillDetail};
+use crate::library_repository::LibraryRepository;
+use crate::model::{
+    BackupReason, BackupRecord, FileContent, FileNode, LibrarySkillDetail, LibrarySkillSummary,
+    Project, Provider, ScanResult, SkillDetail, SkillGroup, SkillInstallation, Tag,
+};
 use crate::skill_files::{list_skill_tree as build_skill_tree, read_skill_file as load_skill_file};
 use crate::skill_repository::SkillRepository;
 
 pub struct AppState {
     pub skills: Mutex<SkillRepository>,
     pub backups: Mutex<BackupRepository>,
+    pub library: Mutex<LibraryRepository>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -33,6 +38,17 @@ pub(crate) fn map_app_error(error: AppError) -> CommandError {
         AppError::BackupVerificationFailed { .. } => "BACKUP_VERIFICATION_FAILED",
         AppError::BackupNotFound { .. } => "BACKUP_NOT_FOUND",
         AppError::BackupIndex { .. } => "BACKUP_INDEX",
+        AppError::LibraryIndex { .. } => "LIBRARY_INDEX",
+        AppError::InvalidProjectPath { .. } => "INVALID_PROJECT_PATH",
+        AppError::InvalidGitUrl { .. } => "INVALID_GIT_URL",
+        AppError::GitNotFound => "GIT_NOT_FOUND",
+        AppError::GitOperation { .. } => "GIT_OPERATION",
+        AppError::ProjectNotFound { .. } => "PROJECT_NOT_FOUND",
+        AppError::ProjectAlreadyExists { .. } => "PROJECT_ALREADY_EXISTS",
+        AppError::LibrarySkillNotFound { .. } => "LIBRARY_SKILL_NOT_FOUND",
+        AppError::TaxonomyNameConflict { .. } => "TAXONOMY_NAME_CONFLICT",
+        AppError::TagNotFound { .. } => "TAG_NOT_FOUND",
+        AppError::GroupNotFound { .. } => "GROUP_NOT_FOUND",
         AppError::RollbackFailed { .. } => "ROLLBACK_FAILED",
     };
     CommandError {
@@ -227,6 +243,292 @@ pub fn delete_skill(
     delete_skill_with_state(state.inner(), skill_id)
 }
 
+#[tauri::command]
+pub fn add_local_project(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Project, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .add_local_project(path)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn add_git_project(state: State<'_, AppState>, url: String) -> Result<Project, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .add_git_project(&url)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn pull_git_project(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Project, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .pull_git_project(&project_id)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn remove_project(state: State<'_, AppState>, project_id: String) -> Result<(), CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .remove_project(&project_id)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn list_projects(state: State<'_, AppState>) -> Result<Vec<Project>, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .list_projects()
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn list_library_skills(
+    state: State<'_, AppState>,
+) -> Result<Vec<LibrarySkillSummary>, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .list_library_skills()
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn get_library_skill_detail(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<LibrarySkillDetail, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .get_library_skill_detail(&id)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn list_library_skill_tree(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<FileNode>, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .list_library_skill_tree(&id)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn read_library_skill_file(
+    state: State<'_, AppState>,
+    id: String,
+    relative_path: String,
+) -> Result<FileContent, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .read_library_skill_file(&id, &relative_path)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn install_skill(
+    state: State<'_, AppState>,
+    library_skill_id: String,
+    provider: Provider,
+) -> Result<SkillInstallation, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .install_skill(&library_skill_id, provider)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn uninstall_skill(
+    state: State<'_, AppState>,
+    library_skill_id: String,
+    provider: Provider,
+) -> Result<(), CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .uninstall_skill(&library_skill_id, provider)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn list_installations(
+    state: State<'_, AppState>,
+) -> Result<Vec<SkillInstallation>, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .list_installations()
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn list_tags(state: State<'_, AppState>) -> Result<Vec<Tag>, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .list_tags()
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn create_tag(
+    state: State<'_, AppState>,
+    name: String,
+    color: Option<String>,
+) -> Result<Tag, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .create_tag(name, color)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn rename_tag(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<Tag, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .rename_tag(&id, name)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn delete_tag(state: State<'_, AppState>, id: String) -> Result<(), CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .delete_tag(&id)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn set_skill_tags(
+    state: State<'_, AppState>,
+    skill_id: String,
+    tag_ids: Vec<String>,
+) -> Result<LibrarySkillSummary, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .set_skill_tags(&skill_id, tag_ids)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn list_groups(state: State<'_, AppState>) -> Result<Vec<SkillGroup>, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .list_groups()
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn create_group(
+    state: State<'_, AppState>,
+    name: String,
+    order: i32,
+) -> Result<SkillGroup, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .create_group(name, order)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn rename_group(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<SkillGroup, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .rename_group(&id, name)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn update_group_order(
+    state: State<'_, AppState>,
+    id: String,
+    order: i32,
+) -> Result<SkillGroup, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .update_group_order(&id, order)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn delete_group(state: State<'_, AppState>, id: String) -> Result<(), CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .delete_group(&id)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn set_skill_group(
+    state: State<'_, AppState>,
+    skill_id: String,
+    group_id: Option<String>,
+) -> Result<LibrarySkillSummary, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .set_skill_group(&skill_id, group_id)
+        .map_err(map_app_error)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -241,6 +543,7 @@ mod tests {
     };
     use crate::backup_repository::BackupRepository;
     use crate::error::AppError;
+    use crate::library_repository::LibraryRepository;
     use crate::model::{BackupReason, SkillStatus};
     use crate::paths::AppPaths;
     use crate::skill_repository::SkillRepository;
@@ -257,7 +560,8 @@ mod tests {
         .unwrap();
         let state = AppState {
             skills: SkillRepository::new(paths.clone()).into(),
-            backups: BackupRepository::new(paths).into(),
+            backups: BackupRepository::new(paths.clone()).into(),
+            library: LibraryRepository::new(paths).into(),
         };
         (base, state)
     }
@@ -423,7 +727,8 @@ mod tests {
         let paths = AppPaths::for_test(base.path());
         let state = AppState {
             skills: SkillRepository::new(paths.clone()).into(),
-            backups: BackupRepository::new(paths).into(),
+            backups: BackupRepository::new(paths.clone()).into(),
+            library: LibraryRepository::new(paths).into(),
         };
 
         let error = get_skill_detail_with_state(&state, "missing".into()).unwrap_err();

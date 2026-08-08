@@ -20,6 +20,28 @@ pub enum AppError {
     BackupNotFound { id: String },
     #[error("备份索引操作失败：{message}")]
     BackupIndex { message: String },
+    #[error("库索引操作失败：{message}")]
+    LibraryIndex { message: String },
+    #[error("项目路径无效或不可读：{path}")]
+    InvalidProjectPath { path: String },
+    #[error("Git 地址不受支持：{url}")]
+    InvalidGitUrl { url: String },
+    #[error("未找到 git 可执行文件")]
+    GitNotFound,
+    #[error("Git 操作失败：{message}")]
+    GitOperation { message: String },
+    #[error("未找到项目：{id}")]
+    ProjectNotFound { id: String },
+    #[error("项目已存在：{value}")]
+    ProjectAlreadyExists { value: String },
+    #[error("未找到库 Skill：{id}")]
+    LibrarySkillNotFound { id: String },
+    #[error("{kind}名称已存在：{name}")]
+    TaxonomyNameConflict { kind: &'static str, name: String },
+    #[error("未找到标签：{id}")]
+    TagNotFound { id: String },
+    #[error("未找到分组：{id}")]
+    GroupNotFound { id: String },
     #[error("事务失败且回滚失败：原始错误：{original_error}；回滚错误：{rollback_error}")]
     RollbackFailed {
         original_error: String,

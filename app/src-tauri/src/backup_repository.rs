@@ -91,7 +91,7 @@ impl BackupRepository {
     where
         Writer: FnOnce(&[BackupRecord]) -> Result<(), AppError>,
     {
-        self.paths.assert_allowed(source)?;
+        self.paths.assert_skill_access(source)?;
         self.paths.assert_allowed(&self.paths.backups_dir)?;
         self.paths.assert_allowed(&self.paths.backup_index)?;
         let mut records = self.load_records()?;
@@ -107,7 +107,11 @@ impl BackupRepository {
         self.paths.assert_allowed(&temp_path)?;
         fs::create_dir_all(&skill_backup_dir)?;
 
-        let manifest = copy_verified_directory(source, &temp_path)?;
+        let manifest = if is_symlink(source) {
+            archive_provider_symlink(source, &temp_path)?
+        } else {
+            copy_verified_directory(source, &temp_path)?
+        };
         let checksum = manifest_checksum(&manifest)?;
         if let Err(error) = fs::rename(&temp_path, &archive_path) {
             remove_directory_if_present(&temp_path, "备份临时目录");
@@ -292,11 +296,29 @@ impl BackupRepository {
         let _guard = self.lock_transaction()?;
         let skill_repository = SkillRepository::new(self.paths.clone());
         let detail = skill_repository.detail(skill_id)?;
-        self.paths.assert_allowed(&detail.current_path)?;
+        self.paths.assert_skill_access(&detail.current_path)?;
         let parent = detail.current_path.parent().ok_or_else(|| AppError::Io {
             message: format!("删除源路径缺少父目录：{}", detail.current_path.display()),
         })?;
         self.paths.assert_allowed(parent)?;
+
+        // 符号链接 Skill：只移除链接本身，不碰原始目标目录。
+        if is_symlink(&detail.current_path) {
+            let backup = self.create_backup_from_source_unlocked(
+                &detail,
+                &detail.current_path,
+                BackupReason::BeforeDelete,
+            )?;
+            if detail.status == SkillStatus::Paused {
+                let mut records = skill_repository.load_pause_records()?;
+                records.retain(|record| record.skill_id != skill_id);
+                skill_repository.write_pause_records(&records)?;
+            }
+            fs::remove_file(&detail.current_path)?;
+            after_freeze();
+            return Ok(backup);
+        }
+
         let tombstone = parent.join(format!(".skill-delete-{}.tombstone", Uuid::new_v4()));
         self.paths.assert_allowed(&tombstone)?;
 
@@ -390,6 +412,26 @@ where
             rollback_error: rollback_error.to_string(),
         },
     }
+}
+
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+/// 备份 provider 根下的 Skill 符号链接：只归档链接目标，不复制原始目录内容。
+fn archive_provider_symlink(
+    source: &Path,
+    target: &Path,
+) -> Result<Vec<ManifestEntry>, AppError> {
+    let link_target = fs::read_link(source)?;
+    fs::create_dir_all(target)?;
+    fs::write(
+        target.join(".skill-manager-symlink-target"),
+        link_target.to_string_lossy().as_bytes(),
+    )?;
+    directory_manifest(target)
 }
 
 fn copy_verified_directory(source: &Path, target: &Path) -> Result<Vec<ManifestEntry>, AppError> {
@@ -602,6 +644,38 @@ mod tests {
         assert_eq!(record.reason, BackupReason::BeforeDelete);
         assert!(!source.exists());
         assert!(record.archive_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_provider_symlink_removes_only_the_link() {
+        use std::os::unix::fs::symlink;
+
+        let base = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("SKILL.md"), "# Keep Me").unwrap();
+        fs::write(outside.path().join("keep.txt"), "keep").unwrap();
+        let paths = AppPaths::for_test(base.path());
+        fs::create_dir_all(&paths.skill_roots[0].path).unwrap();
+        let link = paths.skill_roots[0].path.join("linked-skill");
+        symlink(outside.path(), &link).unwrap();
+        let id = SkillRepository::new(paths.clone()).scan().unwrap()[0]
+            .id
+            .clone();
+        let repository = BackupRepository::new(paths);
+
+        let record = repository.delete_skill(&id).unwrap();
+
+        assert!(!link.exists());
+        assert!(outside.path().join("SKILL.md").exists());
+        assert_eq!(
+            fs::read_to_string(outside.path().join("keep.txt")).unwrap(),
+            "keep"
+        );
+        assert_eq!(
+            fs::read_to_string(record.archive_path.join(".skill-manager-symlink-target")).unwrap(),
+            outside.path().to_string_lossy()
+        );
     }
 
     #[test]

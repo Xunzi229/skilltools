@@ -99,10 +99,12 @@ app-data/
 
 ### 3.3 Skill 扫描规则
 
-- 扫描项目根目录或工具 Skill 根目录的直接子目录。
+- **库项目扫描为深度扫描**：递归遍历项目目录树，发现任意层级包含 `SKILL.md` 的目录即识别为 Skill（如 `skills/group/foo/SKILL.md`）。
 - **仅识别包含 `SKILL.md` 的目录为 Skill**；无 `SKILL.md` 的目录、普通文件、隐藏目录一律过滤，不进入列表。
-- 若项目根本身包含 `SKILL.md`，则将该项目识别为单个 Skill。
-- 工具目录扫描（已安装视图）采用同一过滤规则，避免把非 Skill 目录混入。
+- 若某目录已是 Skill（含 `SKILL.md`），默认不再向下扫描其子目录，避免把 `agents/`、`rules/` 等包内文件误识别为新 Skill。
+- **例外**：若 Skill 目录下存在约定子目录 `skills/`，则继续深度扫描该目录，将其中的 Skill 识别为**子 Skill**，并记录 `parentSkillId`。
+- 若项目根本身包含 `SKILL.md`，则将该项目识别为 Skill；仅当存在根级 `skills/` 时继续扫描子 Skill。
+- 工具目录扫描（已安装视图）仍只扫描各工具 Skill 根的直接子目录，保持与 Agent 约定一致。
 - 不递归跟随符号链接。
 - 存在 `SKILL.md` 但解析失败时仍保留条目，并附加中文 warning。
 

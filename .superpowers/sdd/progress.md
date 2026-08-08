@@ -13,4 +13,9 @@ Task 7: complete（前端 10 tests passed；三栏界面、刷新重载详情复
 Task 8: complete（前端 18 tests passed；操作确认、备份中心与删除清空选择复核通过）
 Task 9: complete（前端 21 + Rust 76 tests；macOS `.app`/`.dmg` 打包成功）
 Final review fixes: complete（暂停索引路径隔离、备份计数刷新、CSP、扫描警告）
+V2 Task 1: complete（扫描过滤 + 文件树/预览；Rust 83 + 前端 22）
+V2 Task 2: complete（中央库/本地与 Git 项目/标签分组；Rust 89）
+V2 Task 3: complete（符号链接安装卸载；Rust 94）
+V2 Task 4: complete（前端库导航与操作；前端 26 + Rust 95）
+V2 Task 5: complete（全量验证与 Tauri 打包通过）
 

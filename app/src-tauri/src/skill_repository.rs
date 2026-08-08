@@ -53,17 +53,43 @@ impl SkillRepository {
                     }
                 };
                 let skill_path = entry.path();
-                if let Err(error) = self.paths.assert_allowed(&skill_path) {
-                    reject_unsafe_skill_path(&skill_path, &error);
-                    continue;
-                }
-
                 match entry.file_type() {
+                    // 库安装产物：链接本身在 provider 根下，目标可在库路径（白名单外）
+                    Ok(file_type) if file_type.is_symlink() => {
+                        if skill_path.parent() != Some(root.path.as_path()) {
+                            continue;
+                        }
+                        if is_skill_directory(&skill_path) {
+                            skills.push(read_summary(root.provider, &skill_path));
+                        }
+                    }
                     Ok(file_type) if file_type.is_dir() && is_skill_directory(&skill_path) => {
+                        if let Err(error) = self.paths.assert_allowed(&skill_path) {
+                            reject_unsafe_skill_path(&skill_path, &error);
+                            continue;
+                        }
                         skills.push(read_summary(root.provider, &skill_path));
                     }
                     Ok(_) => {}
                     Err(error) => {
+                        if let Ok(metadata) = fs::symlink_metadata(&skill_path) {
+                            if metadata.file_type().is_symlink() {
+                                if skill_path.parent() == Some(root.path.as_path())
+                                    && is_skill_directory(&skill_path)
+                                {
+                                    let mut summary = read_summary(root.provider, &skill_path);
+                                    summary.warnings.push(format!(
+                                        "无法读取条目类型：{error}"
+                                    ));
+                                    skills.push(summary);
+                                }
+                                continue;
+                            }
+                        }
+                        if let Err(allowed_error) = self.paths.assert_allowed(&skill_path) {
+                            reject_unsafe_skill_path(&skill_path, &allowed_error);
+                            continue;
+                        }
                         if let Some(summary) = recover_summary_after_file_type_error(
                             root.provider,
                             &skill_path,
@@ -146,7 +172,7 @@ impl SkillRepository {
             .ok_or_else(|| AppError::SkillNotFound {
                 id: skill_id.to_owned(),
             })?;
-        self.paths.assert_allowed(&summary.current_path)?;
+        self.paths.assert_skill_access(&summary.current_path)?;
 
         let mut warnings = summary.warnings;
         let skill_markdown = match fs::read_to_string(summary.current_path.join("SKILL.md")) {
@@ -191,6 +217,7 @@ impl SkillRepository {
             status: summary.status,
             original_path: summary.original_path,
             current_path: summary.current_path,
+            resolved_path: summary.resolved_path,
             warnings,
             skill_markdown,
             files,
@@ -247,7 +274,7 @@ impl SkillRepository {
             .disabled_dir
             .join(provider_directory(skill.provider))
             .join(directory_name);
-        self.paths.assert_allowed(&skill.current_path)?;
+        self.paths.assert_skill_access(&skill.current_path)?;
         self.paths.assert_allowed(&paused_path)?;
         self.paths.assert_allowed(&self.paths.paused_index)?;
         if paused_path.exists() {
@@ -499,6 +526,12 @@ struct Frontmatter {
     description: Option<String>,
 }
 
+pub(crate) struct SkillMetadata {
+    pub name: String,
+    pub description: String,
+    pub warnings: Vec<String>,
+}
+
 fn read_root_entries_or_isolate(
     root_path: &Path,
     warnings: &mut Vec<String>,
@@ -599,29 +632,46 @@ fn append_incomplete_file_list_warning(warnings: &mut Vec<String>, error: impl A
 
 fn read_summary(provider: Provider, skill_path: &Path) -> SkillSummary {
     let mut summary = summary_with_warnings(provider, skill_path, Vec::new());
+    let metadata = read_skill_metadata(skill_path);
+    summary.name = metadata.name;
+    summary.description = metadata.description;
+    summary.warnings.extend(metadata.warnings);
 
+    summary
+}
+
+pub(crate) fn read_skill_metadata(skill_path: &Path) -> SkillMetadata {
+    let mut metadata = SkillMetadata {
+        name: skill_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        description: String::new(),
+        warnings: Vec::new(),
+    };
     match fs::read_to_string(skill_path.join("SKILL.md")) {
         Ok(markdown) => {
             if let Some(yaml) = frontmatter_yaml(&markdown) {
                 match serde_yaml::from_str::<Frontmatter>(yaml) {
                     Ok(frontmatter) => {
-                        if let Some(frontmatter_name) = frontmatter.name {
-                            summary.name = frontmatter_name;
+                        if let Some(name) = frontmatter.name {
+                            metadata.name = name;
                         }
-                        if let Some(frontmatter_description) = frontmatter.description {
-                            summary.description = frontmatter_description;
+                        if let Some(description) = frontmatter.description {
+                            metadata.description = description;
                         }
                     }
-                    Err(error) => summary
+                    Err(error) => metadata
                         .warnings
                         .push(format!("SKILL.md 的 YAML 格式错误：{error}")),
                 }
             }
         }
-        Err(error) => summary.warnings.push(format!("无法读取 SKILL.md：{error}")),
+        Err(error) => metadata
+            .warnings
+            .push(format!("无法读取 SKILL.md：{error}")),
     }
-
-    summary
+    metadata
 }
 
 fn summary_with_warnings(
@@ -639,6 +689,10 @@ fn summary_with_warnings(
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let current_path = skill_path.to_path_buf();
+    let resolved_path = fs::symlink_metadata(skill_path)
+        .ok()
+        .filter(|metadata| metadata.file_type().is_symlink())
+        .and_then(|_| skill_path.canonicalize().ok());
 
     SkillSummary {
         id,
@@ -648,6 +702,7 @@ fn summary_with_warnings(
         status: SkillStatus::Active,
         original_path: current_path.clone(),
         current_path,
+        resolved_path,
         warnings,
     }
 }
@@ -765,23 +820,44 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn scan_rejects_skill_path_that_resolves_outside_allowed_roots() {
+    fn scan_includes_provider_symlink_skills_outside_allowed_roots() {
         use std::os::unix::fs::symlink;
 
         let base = tempdir().unwrap();
         let outside = tempdir().unwrap();
         let paths = AppPaths::for_test(base.path());
         fs::create_dir_all(&paths.skill_roots[0].path).unwrap();
-        fs::write(outside.path().join("SKILL.md"), "# Outside").unwrap();
+        fs::write(
+            outside.path().join("SKILL.md"),
+            "---\nname: Library Skill\ndescription: from library\n---\nBody",
+        )
+        .unwrap();
+        fs::write(outside.path().join("notes.txt"), "note").unwrap();
         symlink(
             outside.path(),
-            paths.skill_roots[0].path.join("unsafe-skill"),
+            paths.skill_roots[0].path.join("library-skill"),
         )
         .unwrap();
 
-        let skills = SkillRepository::new(paths).scan().unwrap();
+        let repository = SkillRepository::new(paths);
+        let skills = repository.scan().unwrap();
 
-        assert!(skills.is_empty());
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].provider, Provider::Cursor);
+        assert_eq!(skills[0].name, "Library Skill");
+        assert!(skills[0].current_path.is_symlink());
+        assert_eq!(
+            skills[0].resolved_path.as_deref(),
+            Some(outside.path().canonicalize().unwrap().as_path())
+        );
+
+        let detail = repository.detail(&skills[0].id).unwrap();
+        assert!(detail.skill_markdown.contains("Library Skill"));
+        assert!(detail.files.iter().any(|file| file == "notes.txt"));
+        assert_eq!(
+            detail.resolved_path.as_deref(),
+            Some(outside.path().canonicalize().unwrap().as_path())
+        );
     }
 
     #[cfg(unix)]
@@ -1362,5 +1438,46 @@ mod tests {
         let detail = repository.detail(&id).unwrap();
         assert_eq!(detail.status, SkillStatus::Paused);
         assert_eq!(detail.skill_markdown, "# Paused content");
+    }
+}
+
+#[cfg(test)]
+mod frontmatter_fold_tests {
+    use super::{frontmatter_yaml, read_skill_metadata};
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn parses_folded_description_block() {
+        let base = tempdir().unwrap();
+        let skill = base.path().join("java-test-coverage-assessment");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(
+            skill.join("SKILL.md"),
+            r#"---
+name: java-test-coverage-assessment
+description: >
+  Evaluate Java project test coverage metrics. Parses JaCoCo XML reports to compute
+  unit-test line/branch coverage scores, and optionally integration-test API/scenario
+  coverage scores. Computes the composite coverage score per the quality assessment spec.
+  TRIGGER when user mentions: 'test coverage', 'JaCoCo', 'unit test coverage',
+  'integration test coverage', 'code coverage', '测试覆盖率', '单元测试', '集成测试覆盖',
+  '覆盖率报告', 'coverage report'.
+type: skill
+---
+
+# Java Test Coverage Assessment Skill
+"#,
+        )
+        .unwrap();
+        let metadata = read_skill_metadata(&skill);
+        assert_eq!(metadata.name, "java-test-coverage-assessment");
+        assert!(metadata.description.starts_with("Evaluate Java project"));
+        assert!(!metadata.description.contains("name:"));
+        assert!(!metadata.description.contains("type: skill"));
+        assert!(metadata.warnings.is_empty(), "{:?}", metadata.warnings);
+        let markdown = fs::read_to_string(skill.join("SKILL.md")).unwrap();
+        let yaml = frontmatter_yaml(&markdown).unwrap();
+        assert!(serde_yaml::from_str::<super::Frontmatter>(yaml).is_ok());
     }
 }
