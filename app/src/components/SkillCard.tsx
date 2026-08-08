@@ -9,6 +9,8 @@ interface SkillCardProps {
   expandable?: boolean;
   expanded?: boolean;
   childCount?: number;
+  groupLabel?: string | null;
+  tagLabels?: string[];
 }
 
 export function SkillCard({
@@ -22,12 +24,16 @@ export function SkillCard({
   expandable = false,
   expanded = true,
   childCount = 0,
+  groupLabel = null,
+  tagLabels = [],
 }: SkillCardProps) {
+  const hasMeta = Boolean(groupLabel) || tagLabels.length > 0;
+
   return (
     <button
       type="button"
       className={[
-        "flex h-20 w-full flex-col justify-center gap-1.5 rounded-lg border text-left transition-colors",
+        "flex min-h-20 w-full flex-col justify-center gap-1 rounded-lg border py-2.5 text-left transition-colors",
         indent ? "pl-7 pr-3.5" : "px-3.5",
         selected
           ? "border-brand bg-brand/5"
@@ -61,6 +67,26 @@ export function SkillCard({
         </span>
         <span className="shrink-0 text-[12px] text-ink-3">{statusLabel}</span>
       </span>
+      {hasMeta && (
+        <span className="flex min-w-0 flex-wrap items-center gap-1">
+          {groupLabel && (
+            <span className="max-w-[120px] truncate rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-ink-2">
+              {groupLabel}
+            </span>
+          )}
+          {tagLabels.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              className="max-w-[100px] truncate rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand"
+            >
+              {tag}
+            </span>
+          ))}
+          {tagLabels.length > 3 && (
+            <span className="text-[10px] text-ink-3">+{tagLabels.length - 3}</span>
+          )}
+        </span>
+      )}
       <span className="line-clamp-2 text-[12px] leading-4 text-ink-2">
         {description || "暂无描述"}
       </span>

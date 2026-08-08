@@ -22,6 +22,8 @@ interface LibraryListProps {
 export function LibraryList({
   title,
   skills,
+  groups,
+  tags,
   selectedId,
   search,
   loading,
@@ -241,6 +243,12 @@ export function LibraryList({
                     expandable={expandable}
                     expanded={expanded}
                     childCount={childCount}
+                    groupLabel={
+                      groups.find((group) => group.id === skill.groupId)?.name ?? null
+                    }
+                    tagLabels={skill.tagIds
+                      .map((id) => tags.find((tag) => tag.id === id)?.name)
+                      .filter((name): name is string => Boolean(name))}
                   />
                 </li>
               );

@@ -90,15 +90,19 @@ export function useLibrary(api: SkillApi) {
       });
   }, [api, selectedLibrarySkillId, librarySkills]);
 
-  const runAction = useCallback(async (key: string, action: () => Promise<void>) => {
-    if (pendingRef.current) return;
+  const runAction = useCallback(async <T,>(
+    key: string,
+    action: () => Promise<T>,
+  ): Promise<T | undefined> => {
+    if (pendingRef.current) return undefined;
     pendingRef.current = key;
     setPendingAction(key);
     setActionError(null);
     try {
-      await action();
+      return await action();
     } catch (error) {
       setActionError(normalizeError(error));
+      return undefined;
     } finally {
       pendingRef.current = null;
       setPendingAction(null);
@@ -106,11 +110,12 @@ export function useLibrary(api: SkillApi) {
   }, []);
 
   const mutateAndRefresh = useCallback(
-    (key: string, action: () => Promise<unknown>) =>
-      runAction(key, async () => {
+    async (key: string, action: () => Promise<unknown>): Promise<void> => {
+      await runAction(key, async () => {
         await action();
         await refresh();
-      }),
+      });
+    },
     [refresh, runAction],
   );
 
@@ -146,16 +151,33 @@ export function useLibrary(api: SkillApi) {
       mutateAndRefresh(`tags:${id}`, () => api.setSkillTags(id, tagIds)),
     setSkillGroup: (id: string, groupId: string | null) =>
       mutateAndRefresh(`group:${id}`, () => api.setSkillGroup(id, groupId)),
-    createTag: (name: string, color: string | null) =>
-      mutateAndRefresh("tag:create", () => api.createTag(name, color)),
+    createTag: async (
+      name: string,
+      color: string | null = null,
+    ): Promise<Tag | undefined> =>
+      runAction("tag:create", async () => {
+        const tag = await api.createTag(name.trim(), color);
+        await refresh();
+        return tag;
+      }),
     renameTag: (id: string, name: string) =>
-      mutateAndRefresh(`tag:rename:${id}`, () => api.renameTag(id, name)),
+      mutateAndRefresh(`tag:rename:${id}`, () => api.renameTag(id, name.trim())),
     deleteTag: (id: string) =>
       mutateAndRefresh(`tag:delete:${id}`, () => api.deleteTag(id)),
-    createGroup: (name: string, order: number) =>
-      mutateAndRefresh("group:create", () => api.createGroup(name, order)),
+    createGroup: async (
+      name: string,
+      order?: number,
+    ): Promise<SkillGroup | undefined> =>
+      runAction("group:create", async () => {
+        const nextOrder =
+          order ??
+          groups.reduce((max, group) => Math.max(max, group.order), -1) + 1;
+        const group = await api.createGroup(name.trim(), nextOrder);
+        await refresh();
+        return group;
+      }),
     renameGroup: (id: string, name: string) =>
-      mutateAndRefresh(`group:rename:${id}`, () => api.renameGroup(id, name)),
+      mutateAndRefresh(`group:rename:${id}`, () => api.renameGroup(id, name.trim())),
     updateGroupOrder: (id: string, order: number) =>
       mutateAndRefresh(`group:order:${id}`, () => api.updateGroupOrder(id, order)),
     deleteGroup: (id: string) =>

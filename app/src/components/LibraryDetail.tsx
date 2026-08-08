@@ -12,6 +12,7 @@ import type {
 import { displayDescription } from "../utils/skillDisplay";
 import { FileTree } from "./FileTree";
 import { MarkdownViewer } from "./MarkdownViewer";
+import { NameDialog } from "./NameDialog";
 import { TargetSelector } from "./TargetSelector";
 
 interface LibraryDetailProps {
@@ -24,6 +25,8 @@ interface LibraryDetailProps {
   pendingAction: string | null;
   onSetTags: (id: string, tagIds: string[]) => Promise<void>;
   onSetGroup: (id: string, groupId: string | null) => Promise<void>;
+  onCreateTag: (name: string) => Promise<Tag | undefined>;
+  onCreateGroup: (name: string) => Promise<SkillGroup | undefined>;
   onInstall: (id: string, provider: Provider) => Promise<void>;
   onUninstall: (id: string, provider: Provider) => Promise<void>;
   onClearError: () => void;
@@ -59,6 +62,8 @@ export function LibraryDetail({
   pendingAction,
   onSetTags,
   onSetGroup,
+  onCreateTag,
+  onCreateGroup,
   onInstall,
   onUninstall,
   onClearError,
@@ -69,6 +74,7 @@ export function LibraryDetail({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [nameDialog, setNameDialog] = useState<"group" | "tag" | null>(null);
   const request = useRef(0);
 
   const loadPreview = (id: string, relativePath: string) => {
@@ -126,7 +132,10 @@ export function LibraryDetail({
 
   const busy = pendingAction !== null;
   return (
-    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
+    <section
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel"
+      aria-label="库 Skill 详情"
+    >
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         {skill.parentSkillId && (
           <span className="mb-2 inline-block rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-ink-2">
@@ -174,9 +183,19 @@ export function LibraryDetail({
           </div>
         )}
 
-        <div className="mb-5 grid gap-4 md:grid-cols-[minmax(140px,0.7fr)_1fr]">
-          <label className="flex flex-col gap-1.5 text-[12px] text-ink-2">
-            <span>分组</span>
+        <div className="mb-5 grid gap-4 md:grid-cols-[minmax(160px,0.7fr)_1fr]">
+          <div className="flex flex-col gap-1.5 text-[12px] text-ink-2">
+            <div className="flex items-center justify-between gap-2">
+              <span>分组</span>
+              <button
+                type="button"
+                className="rounded px-1.5 py-0.5 text-[11px] text-brand hover:bg-brand/10 disabled:opacity-55"
+                disabled={busy}
+                onClick={() => setNameDialog("group")}
+              >
+                新建分组
+              </button>
+            </div>
             <select
               className="h-9 rounded-lg border border-line bg-panel px-2 text-[13px] text-ink"
               aria-label="分组"
@@ -187,17 +206,29 @@ export function LibraryDetail({
               }
             >
               <option value="">未分组</option>
-              {groups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.name}
-                </option>
-              ))}
+              {[...groups]
+                .sort((left, right) => left.order - right.order)
+                .map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
             </select>
-          </label>
+          </div>
           <fieldset className="min-w-0 border-0 p-0">
-            <legend className="mb-1.5 px-0 text-[12px] text-ink-2">标签</legend>
+            <legend className="mb-1.5 flex w-full items-center justify-between px-0 text-[12px] text-ink-2">
+              <span>标签</span>
+              <button
+                type="button"
+                className="rounded px-1.5 py-0.5 text-[11px] text-brand hover:bg-brand/10 disabled:opacity-55"
+                disabled={busy}
+                onClick={() => setNameDialog("tag")}
+              >
+                新建标签
+              </button>
+            </legend>
             {tags.length === 0 ? (
-              <span className="text-[12px] text-ink-3">暂无标签</span>
+              <span className="text-[12px] text-ink-3">暂无标签，可点「新建标签」创建</span>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {tags.map((tag) => (
@@ -262,6 +293,29 @@ export function LibraryDetail({
           />
         </div>
       </div>
+
+      <NameDialog
+        open={nameDialog !== null}
+        title={nameDialog === "group" ? "新建分组" : "新建标签"}
+        confirmLabel="创建并应用"
+        busy={busy}
+        onCancel={() => setNameDialog(null)}
+        onConfirm={(name) => {
+          const kind = nameDialog;
+          const skillId = skill.id;
+          const currentTagIds = skill.tagIds;
+          setNameDialog(null);
+          if (kind === "group") {
+            void onCreateGroup(name).then((group) => {
+              if (group) void onSetGroup(skillId, group.id);
+            });
+          } else if (kind === "tag") {
+            void onCreateTag(name).then((tag) => {
+              if (tag) void onSetTags(skillId, [...currentTagIds, tag.id]);
+            });
+          }
+        }}
+      />
     </section>
   );
 }

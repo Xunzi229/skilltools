@@ -129,6 +129,7 @@ function App({ api = tauriSkillApi }: AppProps) {
         backupCount={backups.length}
         activeFilter={filter}
         loading={listLoading || library.loading}
+        busy={library.pendingAction !== null}
         onFilterChange={(nextFilter) => {
           setFilter(nextFilter);
           setSearch("");
@@ -136,6 +137,29 @@ function App({ api = tauriSkillApi }: AppProps) {
         onRefresh={() => {
           void refresh();
           void library.refresh();
+        }}
+        onCreateGroup={async (name) => {
+          await library.createGroup(name);
+        }}
+        onRenameGroup={async (id, name) => {
+          await library.renameGroup(id, name);
+        }}
+        onDeleteGroup={async (id) => {
+          await library.deleteGroup(id);
+          if (filter === `group:${id}`) setFilter("library");
+        }}
+        onMoveGroup={async (id, order) => {
+          await library.updateGroupOrder(id, order);
+        }}
+        onCreateTag={async (name) => {
+          await library.createTag(name);
+        }}
+        onRenameTag={async (id, name) => {
+          await library.renameTag(id, name);
+        }}
+        onDeleteTag={async (id) => {
+          await library.deleteTag(id);
+          if (filter === `tag:${id}`) setFilter("library");
         }}
       />
 
@@ -187,6 +211,8 @@ function App({ api = tauriSkillApi }: AppProps) {
             pendingAction={library.pendingAction}
             onSetTags={library.setSkillTags}
             onSetGroup={library.setSkillGroup}
+            onCreateTag={(name) => library.createTag(name)}
+            onCreateGroup={(name) => library.createGroup(name)}
             onInstall={library.installSkill}
             onUninstall={library.uninstallSkill}
             onClearError={library.clearActionError}

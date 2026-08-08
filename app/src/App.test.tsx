@@ -241,15 +241,15 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     uninstallSkill: unavailable,
     listInstallations: async () => [],
     listTags: async () => tags,
-    createTag: unavailable,
-    renameTag: unavailable,
-    deleteTag: unavailable,
+    createTag: async (name) => ({ id: `tag-${name}`, name, color: null }),
+    renameTag: async (id, name) => ({ id, name, color: null }),
+    deleteTag: async () => undefined,
     setSkillTags: unavailable,
     listGroups: async () => groups,
-    createGroup: unavailable,
-    renameGroup: unavailable,
-    updateGroupOrder: unavailable,
-    deleteGroup: unavailable,
+    createGroup: async (name, order) => ({ id: `group-${name}`, name, order }),
+    renameGroup: async (id, name) => ({ id, name, order: 0 }),
+    updateGroupOrder: async (id, order) => ({ id, name: "开发", order }),
+    deleteGroup: async () => undefined,
     setSkillGroup: unavailable,
     ...overrides,
   };
@@ -685,9 +685,9 @@ describe("Skill Manager", () => {
       ),
     ).toBeInTheDocument();
 
-    expect(within(navigation).getByRole("button", { name: /开发/ })).toBeInTheDocument();
-    expect(within(navigation).getByRole("button", { name: /后端/ })).toBeInTheDocument();
-    expect(within(navigation).getByRole("button", { name: /项目/ })).toBeInTheDocument();
+    expect(within(navigation).getByRole("button", { name: /^开发/ })).toBeInTheDocument();
+    expect(within(navigation).getByRole("button", { name: /^后端/ })).toBeInTheDocument();
+    expect(within(navigation).getByRole("button", { name: /^项目/ })).toBeInTheDocument();
 
     await user.click(within(navigation).getByRole("button", { name: /已安装/ }));
     expect(
@@ -734,6 +734,58 @@ describe("Skill Manager", () => {
       expect(setSkillTags).toHaveBeenCalledWith("library-reviewer", ["tag-backend"]),
     );
     expect(setSkillGroup).toHaveBeenCalledWith("library-reviewer", "group-dev");
+  });
+
+  it("侧栏可新建标签并筛选", async () => {
+    let currentTags = [...tags];
+    const createTag = vi.fn(async (name: string) => {
+      const tag = { id: "tag-new", name, color: null };
+      currentTags = [...currentTags, tag];
+      return tag;
+    });
+    const user = userEvent.setup();
+    await renderLibrary(
+      createApi({
+        createTag,
+        listTags: async () => currentTags,
+      }),
+    );
+
+    const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
+    await user.click(within(navigation).getByRole("button", { name: "新建标签" }));
+    await user.type(screen.getByRole("textbox", { name: "名称" }), "前端");
+    await user.click(screen.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(createTag).toHaveBeenCalledWith("前端", null));
+    expect(
+      await within(navigation).findByRole("button", { name: /^前端/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("详情可新建分组并应用到当前 Skill", async () => {
+    const created = { id: "group-ops", name: "运维", order: 2 };
+    const createGroup = vi.fn(async () => created);
+    const setSkillGroup = vi.fn(async () => ({
+      ...librarySkills[0],
+      groupId: created.id,
+    }));
+    const user = userEvent.setup();
+    await renderLibrary(createApi({ createGroup, setSkillGroup }));
+
+    await user.click(
+      await within(screen.getByRole("region", { name: "库 Skill 列表" })).findByText(
+        "reviewer",
+      ),
+    );
+    const detail = screen.getByRole("region", { name: "库 Skill 详情" });
+    await user.click(within(detail).getByRole("button", { name: "新建分组" }));
+    await user.type(screen.getByRole("textbox", { name: "名称" }), "运维");
+    await user.click(screen.getByRole("button", { name: "创建并应用" }));
+
+    await waitFor(() => expect(createGroup).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(setSkillGroup).toHaveBeenCalledWith("library-reviewer", "group-ops"),
+    );
   });
 
   it("安装开关遇到目标冲突时展示中文错误并恢复开关", async () => {
