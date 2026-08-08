@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
 import type {
   CommandError,
+  ExternalEditor,
   FileContent,
   FileNode,
   SkillDetail as SkillDetailModel,
@@ -75,8 +76,17 @@ export function SkillDetail({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editors, setEditors] = useState<ExternalEditor[]>([]);
+  const [openError, setOpenError] = useState<string | null>(null);
   const treeRequest = useRef(0);
   const previewRequest = useRef(0);
+
+  useEffect(() => {
+    void api
+      .listExternalEditors()
+      .then(setEditors)
+      .catch(() => setEditors([]));
+  }, [api]);
 
   const loadPreview = (skillId: string, relativePath: string) => {
     const requestId = ++previewRequest.current;
@@ -161,7 +171,7 @@ export function SkillDetail({
 
   if (!skill) {
     return (
-      <section className="flex min-w-0 flex-1 flex-col bg-panel">
+      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         <div className="flex flex-1 flex-col items-center justify-center gap-1 text-[13px] text-ink-3">
           <strong className="text-ink">选择一个 Skill 查看详情</strong>
           <span>可在左侧筛选，再从列表中选择。</span>
@@ -174,7 +184,7 @@ export function SkillDetail({
   const deleteBusy = pendingAction === `delete:${skill.id}`;
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col bg-panel">
+    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -257,10 +267,10 @@ export function SkillDetail({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto px-6 py-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
         {actionError && (
           <div
-            className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
+            className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
             role="alert"
           >
             <span>{actionError.message}</span>
@@ -275,7 +285,7 @@ export function SkillDetail({
         )}
         {skill.warnings.length > 0 && (
           <aside
-            className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"
+            className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"
             aria-label="扫描警告"
           >
             <strong>需要注意</strong>
@@ -286,13 +296,37 @@ export function SkillDetail({
             </ul>
           </aside>
         )}
-        <div className="flex h-[min(520px,55vh)] min-h-[280px] overflow-hidden rounded-lg border border-line-strong">
+        {openError && (
+          <div
+            className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
+            role="alert"
+          >
+            <span>{openError}</span>
+            <button
+              type="button"
+              className="rounded bg-red-100 px-2 py-1"
+              onClick={() => setOpenError(null)}
+            >
+              关闭
+            </button>
+          </div>
+        )}
+        <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line-strong">
           <FileTree
             nodes={tree}
             selectedPath={preview?.relativePath ?? null}
             loading={treeLoading}
             errorMessage={treeError}
+            editors={editors}
             onSelect={(relativePath) => loadPreview(skill.id, relativePath)}
+            onOpenWith={async (relativePath, editorId) => {
+              setOpenError(null);
+              try {
+                await api.openSkillFileExternal(skill.id, relativePath, editorId);
+              } catch (failure: unknown) {
+                setOpenError(errorMessage(failure));
+              }
+            }}
           />
           <MarkdownViewer
             file={preview}

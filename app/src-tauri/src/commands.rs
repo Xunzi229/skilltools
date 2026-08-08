@@ -5,12 +5,16 @@ use tauri::State;
 
 use crate::backup_repository::BackupRepository;
 use crate::error::AppError;
+use crate::external_open::{self, ExternalEditor};
 use crate::library_repository::LibraryRepository;
 use crate::model::{
     BackupReason, BackupRecord, FileContent, FileNode, LibrarySkillDetail, LibrarySkillSummary,
     Project, Provider, ScanResult, SkillDetail, SkillGroup, SkillInstallation, Tag,
 };
-use crate::skill_files::{list_skill_tree as build_skill_tree, read_skill_file as load_skill_file};
+use crate::skill_files::{
+    list_skill_tree as build_skill_tree, read_skill_file as load_skill_file,
+    resolve_skill_file_path,
+};
 use crate::skill_repository::SkillRepository;
 
 pub struct AppState {
@@ -196,6 +200,50 @@ pub fn read_skill_file(
     relative_path: String,
 ) -> Result<FileContent, CommandError> {
     read_skill_file_with_state(state.inner(), skill_id, relative_path)
+}
+
+#[tauri::command]
+pub fn list_external_editors() -> Vec<ExternalEditor> {
+    external_open::list_external_editors()
+}
+
+#[tauri::command]
+pub fn open_skill_file_external(
+    state: State<'_, AppState>,
+    skill_id: String,
+    relative_path: String,
+    editor_id: String,
+) -> Result<(), CommandError> {
+    let detail = state
+        .skills
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .detail(&skill_id)
+        .map_err(map_app_error)?;
+    let root = detail
+        .resolved_path
+        .unwrap_or(detail.current_path);
+    let path = resolve_skill_file_path(&root, &relative_path).map_err(map_app_error)?;
+    external_open::open_path_with(&path, &editor_id).map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn open_library_skill_file_external(
+    state: State<'_, AppState>,
+    id: String,
+    relative_path: String,
+    editor_id: String,
+) -> Result<(), CommandError> {
+    let root = state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .get_library_skill_detail(&id)
+        .map_err(map_app_error)?
+        .summary
+        .absolute_path;
+    let path = resolve_skill_file_path(&root, &relative_path).map_err(map_app_error)?;
+    external_open::open_path_with(&path, &editor_id).map_err(map_app_error)
 }
 
 #[tauri::command]

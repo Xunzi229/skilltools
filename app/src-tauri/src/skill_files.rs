@@ -29,6 +29,13 @@ pub(crate) fn list_skill_tree_at(root: &Path) -> Result<Vec<FileNode>, AppError>
     build_tree(&root, &root)
 }
 
+pub(crate) fn resolve_skill_file_path(
+    root: &Path,
+    relative_path: &str,
+) -> Result<PathBuf, AppError> {
+    resolve_file_path(root, relative_path)
+}
+
 pub(crate) fn read_skill_file_at(
     root: &Path,
     relative_path: &str,

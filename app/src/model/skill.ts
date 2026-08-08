@@ -44,6 +44,11 @@ export interface FileContent {
   message: string | null;
 }
 
+export interface ExternalEditor {
+  id: string;
+  name: string;
+}
+
 export interface BackupRecord {
   id: string;
   skillId: string;

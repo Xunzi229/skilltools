@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
 import type {
   CommandError,
+  ExternalEditor,
   FileContent,
   FileNode,
   LibrarySkillDetail as LibrarySkillDetailModel,
@@ -75,7 +76,15 @@ export function LibraryDetail({
   const [fileError, setFileError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [nameDialog, setNameDialog] = useState<"group" | "tag" | null>(null);
+  const [editors, setEditors] = useState<ExternalEditor[]>([]);
   const request = useRef(0);
+
+  useEffect(() => {
+    void api
+      .listExternalEditors()
+      .then(setEditors)
+      .catch(() => setEditors([]));
+  }, [api]);
 
   const loadPreview = (id: string, relativePath: string) => {
     const requestId = ++request.current;
@@ -166,10 +175,10 @@ export function LibraryDetail({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto px-6 py-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
         {actionError && (
           <div
-            className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
+            className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
             role="alert"
           >
             <span>{actionError.message}</span>
@@ -183,7 +192,7 @@ export function LibraryDetail({
           </div>
         )}
 
-        <div className="mb-5 grid gap-4 md:grid-cols-[minmax(160px,0.7fr)_1fr]">
+        <div className="grid shrink-0 gap-4 md:grid-cols-[minmax(160px,0.7fr)_1fr]">
           <div className="flex flex-col gap-1.5 text-[12px] text-ink-2">
             <div className="flex items-center justify-between gap-2">
               <span>分组</span>
@@ -256,7 +265,7 @@ export function LibraryDetail({
           </fieldset>
         </div>
 
-        <div className="mb-5">
+        <div className="shrink-0">
           <TargetSelector
             installedProviders={skill.installedProviders}
             busy={busy}
@@ -269,7 +278,7 @@ export function LibraryDetail({
         </div>
 
         {skill.warnings.length > 0 && (
-          <aside className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          <aside className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
             <ul className="m-0 list-disc pl-4">
               {skill.warnings.map((item) => (
                 <li key={item}>{item}</li>
@@ -278,13 +287,26 @@ export function LibraryDetail({
           </aside>
         )}
 
-        <div className="flex h-[min(520px,55vh)] min-h-[280px] overflow-hidden rounded-lg border border-line-strong">
+        <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line-strong">
           <FileTree
             nodes={tree}
             selectedPath={preview?.relativePath ?? null}
             loading={treeLoading}
             errorMessage={fileError}
+            editors={editors}
             onSelect={(path) => loadPreview(skill.id, path)}
+            onOpenWith={async (relativePath, editorId) => {
+              setFileError(null);
+              try {
+                await api.openLibrarySkillFileExternal(
+                  skill.id,
+                  relativePath,
+                  editorId,
+                );
+              } catch (error: unknown) {
+                setFileError(messageOf(error));
+              }
+            }}
           />
           <MarkdownViewer
             file={preview}

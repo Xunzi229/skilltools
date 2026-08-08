@@ -1,6 +1,7 @@
 pub mod backup_repository;
 pub mod commands;
 pub mod error;
+mod external_open;
 mod fs_ops;
 pub mod git_ops;
 mod json_store;
@@ -40,6 +41,9 @@ pub fn run() {
             commands::get_skill_detail,
             commands::list_skill_tree,
             commands::read_skill_file,
+            commands::list_external_editors,
+            commands::open_skill_file_external,
+            commands::open_library_skill_file_external,
             commands::pause_skill,
             commands::resume_skill,
             commands::create_backup,

@@ -221,6 +221,13 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     getSkillDetail: async (skillId) => details[skillId],
     listSkillTree: async (skillId) => fileTrees[skillId],
     readSkillFile: async (skillId, relativePath) => fileContent(skillId, relativePath),
+    listExternalEditors: async () => [
+      { id: "default", name: "默认应用" },
+      { id: "notepad", name: "记事本" },
+      { id: "reveal", name: "在资源管理器中显示" },
+    ],
+    openSkillFileExternal: async () => undefined,
+    openLibrarySkillFileExternal: async () => undefined,
     pauseSkill: unavailable,
     resumeSkill: unavailable,
     createBackup: unavailable,
@@ -277,7 +284,7 @@ describe("Skill Manager", () => {
 
     expect(screen.getByRole("heading", { name: "Skill Manager" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Skill 库" })).toBeInTheDocument();
-    expect(screen.getByText("reviewer")).toBeInTheDocument();
+    expect(screen.getAllByText("reviewer").length).toBeGreaterThan(0);
     expect(screen.getByRole("tab", { name: /全部/ })).toBeInTheDocument();
   });
 
@@ -355,6 +362,25 @@ describe("Skill Manager", () => {
 
     await user.click(screen.getByRole("button", { name: "展开 references" }));
     expect(screen.getByRole("button", { name: "examples.md" })).toBeInTheDocument();
+  });
+
+  it("右键文件悬停打开可选择应用", async () => {
+    const openSkillFileExternal = vi.fn(async () => undefined);
+    const user = await renderLoaded(createApi({ openSkillFileExternal }));
+
+    const file = await screen.findByRole("button", { name: "SKILL.md" });
+    await user.pointer({ keys: "[MouseRight>]", target: file });
+
+    expect(await screen.findByRole("menu", { name: "文件菜单" })).toBeInTheDocument();
+    await user.hover(screen.getByRole("menuitem", { name: "打开" }));
+    expect(await screen.findByRole("menu", { name: "选择应用" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "记事本" }));
+
+    expect(openSkillFileExternal).toHaveBeenCalledWith(
+      "cursor:brainstorming",
+      "SKILL.md",
+      "notepad",
+    );
   });
 
   it("侧栏底部展示设置入口", async () => {

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   BackupRecord,
   CommandError,
+  ExternalEditor,
   FileContent,
   FileNode,
   LibrarySkillDetail,
@@ -20,6 +21,17 @@ export interface SkillApi {
   getSkillDetail(skillId: string): Promise<SkillDetail>;
   listSkillTree(skillId: string): Promise<FileNode[]>;
   readSkillFile(skillId: string, relativePath: string): Promise<FileContent>;
+  listExternalEditors(): Promise<ExternalEditor[]>;
+  openSkillFileExternal(
+    skillId: string,
+    relativePath: string,
+    editorId: string,
+  ): Promise<void>;
+  openLibrarySkillFileExternal(
+    id: string,
+    relativePath: string,
+    editorId: string,
+  ): Promise<void>;
   pauseSkill(skillId: string): Promise<SkillDetail>;
   resumeSkill(skillId: string): Promise<SkillDetail>;
   createBackup(skillId: string): Promise<BackupRecord>;
@@ -82,6 +94,11 @@ export const tauriSkillApi: SkillApi = {
   listSkillTree: (skillId) => call("list_skill_tree", { skillId }),
   readSkillFile: (skillId, relativePath) =>
     call("read_skill_file", { skillId, relativePath }),
+  listExternalEditors: () => call("list_external_editors"),
+  openSkillFileExternal: (skillId, relativePath, editorId) =>
+    call("open_skill_file_external", { skillId, relativePath, editorId }),
+  openLibrarySkillFileExternal: (id, relativePath, editorId) =>
+    call("open_library_skill_file_external", { id, relativePath, editorId }),
   pauseSkill: (skillId) => call("pause_skill", { skillId }),
   resumeSkill: (skillId) => call("resume_skill", { skillId }),
   createBackup: (skillId) => call("create_backup", { skillId }),
