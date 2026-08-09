@@ -23,6 +23,8 @@ jobs:
           - platform: ubuntu-22.04-arm
             args: ""
           - platform: windows-latest
+            # MSI/WiX 要求 pre-release 标识为纯数字（<=65535），如 0.8.0-1。
+            # 含 preview/rc 字母时仅打 NSIS，避免整 job 失败。
             args: ""
 
     runs-on: ${{ matrix.platform }}
@@ -69,14 +71,16 @@ jobs:
           releaseName: Skill Manager ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}${{ (contains(github.ref_name, 'preview') || contains(github.ref_name, '-rc')) && ' (Preview)' || '' }}
           releaseBody: |
             Preview / 预览版：含尚未正式发布的功能，仅供测试。
-            多平台安装包（Windows / macOS / Linux）。
-
-            - Windows：`.msi` / `.exe`（支持应用内更新）
+            多平台安装包（Windows / macOS / Linux）：
+            - Windows：正式版为 `.msi` + `.exe`；preview/rc（非数字 pre-release）仅 `.exe`（NSIS，支持应用内更新）
             - macOS：`.dmg` / `.app`（未签名，首次打开需在「隐私与安全性」中允许；自动更新可能受 Gatekeeper 限制）
             - Linux：`.AppImage` / `.deb`
 
             更新签名需仓库 Secrets：`TAURI_SIGNING_PRIVATE_KEY`（及可选密码）。
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, 'preview') || contains(github.ref_name, '-rc') }}
-          args: ${{ matrix.args }}
+          # preview/rc 的 Windows 跳过 MSI（WiX 不支持非数字 pre-release）
+          args: ${{ matrix.args }}${{ startsWith(matrix.platform, 'windows') && (contains(github.ref_name, 'preview') || contains(github.ref_name, '-rc')) && ' --bundles nsis' || '' }}
           updaterJsonPreferNsis: true
+          # 资源名带平台/架构，例如 Skill.Manager_0.8.0-preview.1_windows-x86_64-setup.exe
+          releaseAssetNamePattern: "[name]_[version]_[platform]-[arch][setup][ext]"
