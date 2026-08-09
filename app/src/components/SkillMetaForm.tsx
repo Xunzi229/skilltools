@@ -149,6 +149,23 @@ function FieldEditor({
   );
 }
 
+function draftsEqual(
+  left: ReturnType<typeof buildDraft>,
+  right: { standard: Record<string, string>; custom: CustomRow[]; visibleOptional: string[] },
+) {
+  if (left.visibleOptional.join("\0") !== right.visibleOptional.join("\0")) return false;
+  for (const field of STANDARD_FRONTMATTER_FIELDS) {
+    if ((left.standard[field.key] ?? "") !== (right.standard[field.key] ?? "")) {
+      return false;
+    }
+  }
+  if (left.custom.length !== right.custom.length) return false;
+  return left.custom.every(
+    (row, index) =>
+      row.key === right.custom[index]?.key && row.value === right.custom[index]?.value,
+  );
+}
+
 export function SkillMetaForm({
   markdown,
   name,
@@ -168,6 +185,7 @@ export function SkillMetaForm({
   const [addChoice, setAddChoice] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const draft = buildDraft(markdown, name, description);
@@ -177,11 +195,49 @@ export function SkillMetaForm({
     setAddChoice("");
     setMessage(null);
     setExpanded(false);
+    setSaving(false);
   }, [markdown, name, description]);
+
+  const baseline = buildDraft(markdown, name, description);
+  const dirty = !draftsEqual(baseline, { standard, custom, visibleOptional });
+  const formBusy = busy || saving;
 
   const availableOptional = OPTIONAL_FIELDS.filter(
     (field) => !visibleOptional.includes(field.key),
   );
+
+  const resetDraft = () => {
+    const draft = buildDraft(markdown, name, description);
+    setStandard(draft.standard);
+    setCustom(draft.custom);
+    setVisibleOptional(draft.visibleOptional);
+    setAddChoice("");
+    setMessage(null);
+  };
+
+  const applyDraft = () => {
+    setMessage(null);
+    const collected = collectFields(standard, visibleOptional, custom);
+    if (typeof collected === "string") {
+      setMessage(collected);
+      setExpanded(true);
+      return;
+    }
+    setSaving(true);
+    void onSave(collected)
+      .then(() => setMessage("元数据已保存"))
+      .catch((error: unknown) => {
+        setMessage(
+          typeof error === "object" &&
+            error &&
+            "message" in error &&
+            typeof (error as { message: unknown }).message === "string"
+            ? (error as { message: string }).message
+            : "保存失败",
+        );
+      })
+      .finally(() => setSaving(false));
+  };
 
   const addField = (choice: string) => {
     if (!choice) return;
@@ -202,25 +258,7 @@ export function SkillMetaForm({
       className="macos-card mb-4 shrink-0 px-3 py-3"
       onSubmit={(event) => {
         event.preventDefault();
-        setMessage(null);
-        const collected = collectFields(standard, visibleOptional, custom);
-        if (typeof collected === "string") {
-          setMessage(collected);
-          setExpanded(true);
-          return;
-        }
-        void onSave(collected)
-          .then(() => setMessage("元数据已保存"))
-          .catch((error: unknown) => {
-            setMessage(
-              typeof error === "object" &&
-                error &&
-                "message" in error &&
-                typeof (error as { message: unknown }).message === "string"
-                ? (error as { message: string }).message
-                : "保存失败",
-            );
-          });
+        applyDraft();
       }}
     >
       <div className="flex items-center justify-between gap-2">
@@ -235,9 +273,30 @@ export function SkillMetaForm({
           </span>
           <h4 className="m-0 text-[13px] font-semibold text-ink">SKILL.md 元数据</h4>
           {!expanded && (
-            <span className="truncate text-[11px] text-ink-3">点击展开编辑</span>
+            <span className="truncate text-[11px] text-ink-3">
+              {dirty ? "有未应用的更改" : "点击展开编辑"}
+            </span>
           )}
         </button>
+        {dirty && (
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              className="macos-btn-ghost macos-btn-sm"
+              disabled={formBusy}
+              onClick={resetDraft}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              className="macos-btn-primary macos-btn-sm"
+              disabled={formBusy || !(standard.name ?? "").trim()}
+            >
+              {saving ? "应用中…" : "应用"}
+            </button>
+          </div>
+        )}
       </div>
 
       {expanded && (
@@ -256,7 +315,7 @@ export function SkillMetaForm({
             multiline={field.multiline}
             hint={"hint" in field ? field.hint : undefined}
             value={standard[field.key] ?? ""}
-            busy={busy}
+            busy={formBusy}
             onChange={(value) =>
               setStandard((current) => ({ ...current, [field.key]: value }))
             }
@@ -274,7 +333,7 @@ export function SkillMetaForm({
               multiline={field.multiline}
               hint={"hint" in field ? field.hint : undefined}
               value={standard[field.key] ?? ""}
-              busy={busy}
+              busy={formBusy}
               onChange={(value) =>
                 setStandard((current) => ({ ...current, [field.key]: value }))
               }
@@ -296,7 +355,7 @@ export function SkillMetaForm({
                 placeholder="键"
                 aria-label="自定义字段键"
                 value={row.key}
-                disabled={busy}
+                disabled={formBusy}
                 onChange={(event) =>
                   setCustom((current) =>
                     current.map((item) =>
@@ -310,7 +369,7 @@ export function SkillMetaForm({
                 placeholder="值"
                 aria-label="自定义字段值"
                 value={row.value}
-                disabled={busy}
+                disabled={formBusy}
                 onChange={(event) =>
                   setCustom((current) =>
                     current.map((item) =>
@@ -322,7 +381,7 @@ export function SkillMetaForm({
               <button
                 type="button"
                 className="macos-btn-ghost macos-btn-sm shrink-0"
-                disabled={busy}
+                disabled={formBusy}
                 aria-label={`删除字段 ${row.key || "未命名"}`}
                 onClick={() =>
                   setCustom((current) => current.filter((item) => item.id !== row.id))
@@ -342,7 +401,7 @@ export function SkillMetaForm({
             className="macos-select macos-select-sm min-w-0 flex-1"
             aria-label="添加元数据字段"
             value={addChoice}
-            disabled={busy}
+            disabled={formBusy}
             onChange={(event) => {
               const value = event.target.value;
               setAddChoice(value);
@@ -358,13 +417,6 @@ export function SkillMetaForm({
             <option value="__custom__">自定义键值…</option>
           </select>
         </label>
-        <button
-          type="submit"
-          className="macos-btn-primary"
-          disabled={busy || !(standard.name ?? "").trim()}
-        >
-          保存元数据
-        </button>
         {message && <span className="text-[12px] text-ink-2">{message}</span>}
       </div>
         </>

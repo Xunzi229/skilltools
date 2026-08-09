@@ -51,6 +51,8 @@ pub enum AppError {
     Settings { message: String },
     #[error("ZIP 操作失败：{message}")]
     Zip { message: String },
+    #[error("翻译预览失败：{message}")]
+    Translate { message: String },
 }
 
 impl From<std::io::Error> for AppError {

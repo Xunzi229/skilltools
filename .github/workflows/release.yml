@@ -66,8 +66,9 @@ jobs:
         with:
           projectPath: app
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
-          releaseName: Skill Manager ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: Skill Manager ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}${{ (contains(github.ref_name, 'preview') || contains(github.ref_name, '-rc')) && ' (Preview)' || '' }}
           releaseBody: |
+            Preview / 预览版：含尚未正式发布的功能，仅供测试。
             多平台安装包（Windows / macOS / Linux）。
 
             - Windows：`.msi` / `.exe`（支持应用内更新）
@@ -76,6 +77,6 @@ jobs:
 
             更新签名需仓库 Secrets：`TAURI_SIGNING_PRIVATE_KEY`（及可选密码）。
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, 'preview') || contains(github.ref_name, '-rc') }}
           args: ${{ matrix.args }}
           updaterJsonPreferNsis: true

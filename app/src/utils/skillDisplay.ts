@@ -1,3 +1,34 @@
+/** 从 Git URL 提取展示名：优先 `owner/repo`（去掉 `.git`）。 */
+export function projectNameFromGitUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return "project";
+
+  let path = trimmed;
+  if (path.startsWith("git@")) {
+    const rest = path.slice("git@".length);
+    const colon = rest.indexOf(":");
+    path = colon >= 0 ? rest.slice(colon + 1) : rest;
+  } else {
+    const withoutScheme = path
+      .replace(/^https?:\/\//i, "")
+      .replace(/^git:\/\//i, "")
+      .replace(/^ssh:\/\//i, "")
+      .replace(/^git@/i, "");
+    const slash = withoutScheme.indexOf("/");
+    path = slash >= 0 ? withoutScheme.slice(slash + 1) : withoutScheme;
+  }
+
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+  }
+  if (parts.length === 1) {
+    return parts[0]!;
+  }
+  return "project";
+}
+
 /** 列表/详情头部用的短描述：去掉 TRIGGER 段并压缩空白。 */
 export function displayDescription(description: string, maxLength = 160): string {
   const withoutTrigger = description.split(/\bTRIGGER\b/i)[0] ?? description;
@@ -9,6 +40,35 @@ export function displayDescription(description: string, maxLength = 160): string
     return normalized;
   }
   return `${normalized.slice(0, maxLength).trimEnd()}…`;
+}
+
+/** 库 Skill 搜索：名称、描述、来源 owner / repo / owner/repo。 */
+export function matchesLibrarySkillSearch(
+  skill: {
+    name: string;
+    description: string;
+    sourceRepo?: string | null;
+  },
+  query: string,
+): boolean {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return true;
+  if (skill.name.toLocaleLowerCase().includes(normalized)) return true;
+  if (skill.description.toLocaleLowerCase().includes(normalized)) return true;
+  const source = (skill.sourceRepo ?? "").trim().toLocaleLowerCase();
+  if (!source) return false;
+  if (source.includes(normalized)) return true;
+  const slash = source.indexOf("/");
+  if (slash <= 0) return false;
+  const owner = source.slice(0, slash);
+  const repo = source.slice(slash + 1);
+  return owner.includes(normalized) || repo.includes(normalized);
+}
+
+/** 无来源时显示「本地」；有 `owner/repo` 则原样返回。 */
+export function displaySourceLabel(sourceRepo?: string | null): string {
+  const value = sourceRepo?.trim();
+  return value ? value : "本地";
 }
 
 /** 预览 SKILL.md 时去掉 YAML frontmatter，避免把元数据渲成正文。 */

@@ -7,7 +7,7 @@ import type {
   Tag,
 } from "../model/skill";
 import { formatBatchSummary } from "../hooks/useBatchActions";
-import { displayDescription } from "../utils/skillDisplay";
+import { displayDescription, matchesLibrarySkillSearch } from "../utils/skillDisplay";
 import { NameDialog } from "./NameDialog";
 import { PanelToggle } from "./PanelToggle";
 import { SkillCard } from "./SkillCard";
@@ -123,14 +123,10 @@ export function LibraryList({
 
   // 搜索时自动展开匹配到子 Skill 的父节点
   useEffect(() => {
-    const query = search.trim().toLocaleLowerCase();
-    if (!query) return;
+    if (!search.trim()) return;
     const parentsToExpand = filtered
       .filter(
-        (skill) =>
-          skill.parentSkillId &&
-          (skill.name.toLocaleLowerCase().includes(query) ||
-            skill.description.toLocaleLowerCase().includes(query)),
+        (skill) => skill.parentSkillId && matchesLibrarySkillSearch(skill, search),
       )
       .map((skill) => skill.parentSkillId as string);
     if (parentsToExpand.length === 0) return;
@@ -243,7 +239,7 @@ export function LibraryList({
           <input
             type="search"
             aria-label="搜索库 Skill"
-            placeholder="搜索名称或描述"
+            placeholder="搜索名称、描述或来源"
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />

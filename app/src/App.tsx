@@ -17,6 +17,7 @@ import { useSkills } from "./hooks/useSkills";
 import { useLibrary } from "./hooks/useLibrary";
 import type { Provider } from "./model/skill";
 import { applyPreviewTypography } from "./utils/previewTypography";
+import { matchesLibrarySkillSearch } from "./utils/skillDisplay";
 import "./styles.css";
 
 interface AppProps {
@@ -138,18 +139,12 @@ function App({ api = tauriSkillApi }: AppProps) {
   }, [filter, search, skills]);
 
   const visibleLibrarySkills = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
     return library.librarySkills.filter((skill) => {
       const matchesFilter =
         filter === "library" ||
         (filter.startsWith("group:") && skill.groupId === filter.slice(6)) ||
         (filter.startsWith("tag:") && skill.tagIds.includes(filter.slice(4)));
-      return (
-        matchesFilter &&
-        (!query ||
-          skill.name.toLocaleLowerCase().includes(query) ||
-          skill.description.toLocaleLowerCase().includes(query))
-      );
+      return matchesFilter && matchesLibrarySkillSearch(skill, search);
     });
   }, [filter, library.librarySkills, search]);
 
@@ -276,11 +271,14 @@ function App({ api = tauriSkillApi }: AppProps) {
       ) : filter === "projects" ? (
         <ProjectPanel
           projects={library.projects}
+          gitImports={library.gitImports}
           loading={library.loading}
           error={library.actionError ?? library.loadError}
           pendingAction={library.pendingAction}
           onAddLocal={library.addLocalProject}
           onAddGit={library.addGitProject}
+          onRetryGitImport={library.retryGitImport}
+          onDismissGitImport={library.dismissGitImport}
           onPull={library.pullGitProject}
           onRemove={library.removeProject}
           onImportZip={library.importSkillZip}
@@ -390,7 +388,7 @@ function App({ api = tauriSkillApi }: AppProps) {
               void installations.refresh();
             }}
             onClearError={library.clearActionError}
-            onMetadataSaved={() => void library.refresh()}
+            onMetadataSaved={() => void library.refresh({ silent: true })}
           />
         </>
       ) : (

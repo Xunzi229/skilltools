@@ -86,6 +86,10 @@ export interface LibrarySkillSummary {
   groupId: string | null;
   tagIds: string[];
   installedProviders: Provider[];
+  /** Git 来源 owner/repo；无法解析时为 null/undefined */
+  sourceRepo?: string | null;
+  /** 可在浏览器打开的来源 URL */
+  sourceUrl?: string | null;
   warnings: string[];
 }
 
@@ -120,12 +124,42 @@ export interface CommandError {
   message: string;
 }
 
+/** 前端 Git 导入占位（clone 完成前不在后端索引中） */
+export type GitImportStatus = "importing" | "failed";
+
+export interface GitImportItem {
+  tempId: string;
+  url: string;
+  name: string;
+  status: GitImportStatus;
+  error: CommandError | null;
+}
+
 export type ThemePreference = "light" | "dark";
 
 export interface SkillRootOverrides {
   cursor: string | null;
   claude: string | null;
   codex: string | null;
+}
+
+export interface TranslateSettings {
+  /** e.g. https://api.openai.com/v1 */
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  /** e.g. 中文 / English / 日本語 */
+  targetLang: string;
+}
+
+export type TranslateSkillSource = "provider" | "library";
+
+export interface TranslatePreview {
+  markdown: string;
+  sourceFiles: string[];
+  truncated: boolean;
+  targetLang: string;
+  model: string;
 }
 
 export interface AppSettings {
@@ -138,6 +172,7 @@ export interface AppSettings {
   /** 预览区字体名，如 Microsoft YaHei */
   previewFontFamily: string;
   previewFontSize: number;
+  translate: TranslateSettings;
 }
 
 export interface AppPathsInfo {

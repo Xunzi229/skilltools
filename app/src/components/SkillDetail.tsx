@@ -8,6 +8,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { FileTree } from "./FileTree";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { SkillMetaForm } from "./SkillMetaForm";
+import { TranslatePreviewButton } from "./TranslatePreviewButton";
 
 interface SkillDetailProps {
   api: SkillApi;
@@ -126,6 +127,12 @@ export function SkillDetail({
             </p>
           </div>
           <div className="flex shrink-0 gap-1.5" role="group" aria-label="Skill 操作">
+            <TranslatePreviewButton
+              api={api}
+              source="provider"
+              skillId={skill.id}
+              disabled={busy}
+            />
             <button
               type="button"
               className="macos-btn-ghost"

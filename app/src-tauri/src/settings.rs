@@ -56,6 +56,31 @@ fn default_preview_font_size() -> u32 {
     14
 }
 
+/// OpenAI-compatible translation API settings (preview only; never writes skill files).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslateSettings {
+    /// e.g. https://api.openai.com/v1
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub model: String,
+    /// e.g. 中文 / English / 日本語
+    #[serde(default)]
+    pub target_lang: String,
+}
+
+impl TranslateSettings {
+    pub fn is_configured(&self) -> bool {
+        !self.base_url.trim().is_empty()
+            && !self.api_key.trim().is_empty()
+            && !self.model.trim().is_empty()
+            && !self.target_lang.trim().is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -73,6 +98,8 @@ pub struct AppSettings {
     pub preview_font_family: String,
     #[serde(default = "default_preview_font_size")]
     pub preview_font_size: u32,
+    #[serde(default)]
+    pub translate: TranslateSettings,
 }
 
 impl Default for AppSettings {
@@ -84,6 +111,7 @@ impl Default for AppSettings {
             backup_max_count: default_backup_max_count(),
             preview_font_family: default_preview_font_family(),
             preview_font_size: default_preview_font_size(),
+            translate: TranslateSettings::default(),
         }
     }
 }
@@ -141,6 +169,12 @@ mod tests {
             backup_max_count: Some(200),
             preview_font_family: "Consolas".into(),
             preview_font_size: 16,
+            translate: TranslateSettings {
+                base_url: "https://api.openai.com/v1".into(),
+                api_key: "sk-test".into(),
+                model: "gpt-4o-mini".into(),
+                target_lang: "中文".into(),
+            },
         };
         save_settings(base.path(), &settings).unwrap();
         let loaded = load_settings(base.path()).unwrap();

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::backup_repository::BackupRepository;
 use crate::error::AppError;
@@ -23,6 +23,9 @@ use crate::skill_files::{
     write_skill_file as save_skill_file, resolve_skill_file_path,
 };
 use crate::skill_repository::SkillRepository;
+use crate::translate::{
+    self, TranslatePreview, TranslateSkillSource,
+};
 
 pub struct AppState {
     pub skills: Mutex<SkillRepository>,
@@ -70,6 +73,7 @@ pub(crate) fn map_app_error(error: AppError) -> CommandError {
         AppError::RollbackFailed { .. } => "ROLLBACK_FAILED",
         AppError::Settings { .. } => "SETTINGS",
         AppError::Zip { .. } => "ZIP",
+        AppError::Translate { .. } => "TRANSLATE",
     };
     CommandError {
         code,
@@ -349,13 +353,24 @@ pub fn add_local_project(
 }
 
 #[tauri::command]
-pub fn add_git_project(state: State<'_, AppState>, url: String) -> Result<Project, CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .add_git_project(&url)
-        .map_err(map_app_error)
+pub async fn add_git_project(
+    app: AppHandle,
+    url: String,
+) -> Result<Project, CommandError> {
+    // clone + 扫描放到 blocking 线程，避免占住 async runtime
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let result = {
+            let library = state.library.lock().map_err(|_| state_lock_error())?;
+            library.add_git_project(&url).map_err(map_app_error)
+        };
+        result
+    })
+    .await
+    .map_err(|error| CommandError {
+        code: "TASK_JOIN",
+        message: format!("添加 Git 项目任务失败：{error}"),
+    })?
 }
 
 #[tauri::command]
@@ -741,6 +756,46 @@ pub fn get_app_paths(state: State<'_, AppState>) -> Result<AppPathsInfo, Command
         default_claude_skills: AppPaths::default_provider_root(&state.home_dir, Provider::Claude),
         default_codex_skills: AppPaths::default_provider_root(&state.home_dir, Provider::Codex),
     })
+}
+
+/// Read-only translation preview. Never writes or modifies skill files.
+#[tauri::command]
+pub fn preview_translate_skill(
+    state: State<'_, AppState>,
+    source: TranslateSkillSource,
+    skill_id: String,
+) -> Result<TranslatePreview, CommandError> {
+    let paths = current_paths(state.inner())?;
+    let settings = settings::load_settings(&paths.app_data_dir).map_err(map_app_error)?;
+    let skill_root = match source {
+        TranslateSkillSource::Provider => {
+            let detail = state
+                .skills
+                .lock()
+                .map_err(|_| state_lock_error())?
+                .detail(&skill_id)
+                .map_err(map_app_error)?;
+            detail
+                .resolved_path
+                .unwrap_or(detail.current_path)
+        }
+        TranslateSkillSource::Library => {
+            let detail = state
+                .library
+                .lock()
+                .map_err(|_| state_lock_error())?
+                .get_library_skill_detail(&skill_id)
+                .map_err(map_app_error)?;
+            detail.summary.absolute_path
+        }
+    };
+    // Ensure the skill root stays inside managed directories (symlinked provider skills allowed).
+    paths
+        .assert_skill_access(&skill_root)
+        .map_err(map_app_error)?;
+    let collected = translate::collect_translate_source(&skill_root).map_err(map_app_error)?;
+    translate::translate_with_openai_compatible(&settings.translate, &collected)
+        .map_err(map_app_error)
 }
 
 #[tauri::command]

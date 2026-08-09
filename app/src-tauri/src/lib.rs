@@ -18,6 +18,7 @@ pub mod paths;
 pub mod settings;
 pub mod skill_files;
 pub mod skill_repository;
+mod translate;
 mod transaction_lock;
 mod zip_ops;
 
@@ -108,6 +109,7 @@ pub fn run() {
             commands::set_skill_group,
             commands::get_settings,
             commands::save_settings,
+            commands::preview_translate_skill,
             commands::get_app_paths,
             commands::reveal_path,
             commands::export_library_skill_zip,

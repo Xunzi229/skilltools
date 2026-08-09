@@ -10,8 +10,8 @@ use walkdir::WalkDir;
 
 use crate::error::AppError;
 use crate::git_ops::{
-    clone_repository, latest_commit_time, project_name_from_git_url, pull_fast_forward,
-    validate_git_url,
+    browse_url_from_git_url, clone_repository, latest_commit_time, project_name_from_git_url,
+    pull_fast_forward, read_origin_url, source_repo_from_git_url, validate_git_url,
 };
 use crate::json_store::{read_json_value, write_json_value};
 use crate::model::{
@@ -512,6 +512,7 @@ pub(crate) fn scan_project(
             relative_path.to_string_lossy()
         ))
     };
+    let (source_repo, source_url) = resolve_project_source(project);
     Ok(directories
         .iter()
         .map(|relative_path| {
@@ -538,10 +539,30 @@ pub(crate) fn scan_project(
                 installed_providers: old
                     .map(|skill| skill.installed_providers.clone())
                     .unwrap_or_default(),
+                source_repo: source_repo.clone(),
+                source_url: source_url.clone(),
                 warnings: metadata.warnings,
             }
         })
         .collect())
+}
+
+/// 项目级 remote 落到其下每个 skill；无 remote 时尝试读 `.git/config` origin。
+fn resolve_project_source(project: &Project) -> (Option<String>, Option<String>) {
+    let remote = project
+        .remote_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .map(str::to_owned)
+        .or_else(|| read_origin_url(&project.local_path));
+    let Some(url) = remote else {
+        return (None, None);
+    };
+    (
+        source_repo_from_git_url(&url),
+        browse_url_from_git_url(&url),
+    )
 }
 
 /// Recursively find Skill directories.
@@ -808,6 +829,30 @@ mod tests {
             format!("---\nname: {name}\ndescription: {name} 描述\n---\n正文"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn skills_inherit_source_repo_from_git_config_origin() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("ask-matt"), "ask-matt");
+        let git = source.path().join(".git");
+        fs::create_dir_all(&git).unwrap();
+        fs::write(
+            git.join("config"),
+            "[remote \"origin\"]\n\turl = https://github.com/acme/ask-matt.git\n",
+        )
+        .unwrap();
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths);
+        repository.add_local_project(source.path()).unwrap();
+        let skills = repository.list_library_skills().unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].source_repo.as_deref(), Some("acme/ask-matt"));
+        assert_eq!(
+            skills[0].source_url.as_deref(),
+            Some("https://github.com/acme/ask-matt")
+        );
     }
 
     #[test]

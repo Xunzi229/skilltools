@@ -155,6 +155,12 @@ pub struct LibrarySkillSummary {
     pub tag_ids: Vec<String>,
     #[serde(default)]
     pub installed_providers: Vec<Provider>,
+    /// Git 来源 `owner/repo`；无法解析时为 None
+    #[serde(default)]
+    pub source_repo: Option<String>,
+    /// 可在浏览器打开的来源 URL（可选）
+    #[serde(default)]
+    pub source_url: Option<String>,
     pub warnings: Vec<String>,
 }
 

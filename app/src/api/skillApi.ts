@@ -23,6 +23,8 @@ import type {
   SkillGroup,
   SkillInstallation,
   Tag,
+  TranslatePreview,
+  TranslateSkillSource,
 } from "../model/skill";
 
 export interface SkillApi {
@@ -126,6 +128,10 @@ export interface SkillApi {
   setSkillGroup(skillId: string, groupId: string | null): Promise<LibrarySkillSummary>;
   getSettings(): Promise<AppSettings>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
+  previewTranslateSkill(
+    source: TranslateSkillSource,
+    skillId: string,
+  ): Promise<TranslatePreview>;
   getAppPaths(): Promise<AppPathsInfo>;
   revealPath(path: string): Promise<void>;
   exportLibrarySkillZip(id: string, destPath: string): Promise<void>;
@@ -252,6 +258,8 @@ export const tauriSkillApi: SkillApi = {
     call("set_skill_group", { skillId, groupId }),
   getSettings: () => call("get_settings"),
   saveSettings: (settings) => call("save_settings", { next: settings }),
+  previewTranslateSkill: (source, skillId) =>
+    call("preview_translate_skill", { source, skillId }),
   getAppPaths: () => call("get_app_paths"),
   revealPath: (path) => call("reveal_path", { path }),
   exportLibrarySkillZip: (id, destPath) =>

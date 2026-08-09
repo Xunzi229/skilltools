@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
 import type {
   CommandError,
+  GitImportItem,
   LibrarySkillDetail,
   LibrarySkillSummary,
   Project,
@@ -10,9 +11,11 @@ import type {
   Tag,
 } from "../model/skill";
 import { normalizeCommandError } from "../utils/errors";
+import { projectNameFromGitUrl } from "../utils/skillDisplay";
 
 export function useLibrary(api: SkillApi) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [gitImports, setGitImports] = useState<GitImportItem[]>([]);
   const [librarySkills, setLibrarySkills] = useState<LibrarySkillSummary[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [groups, setGroups] = useState<SkillGroup[]>([]);
@@ -25,10 +28,39 @@ export function useLibrary(api: SkillApi) {
   const [actionError, setActionError] = useState<CommandError | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const pendingRef = useRef<string | null>(null);
+  const gitImportUrlsRef = useRef<Set<string>>(new Set());
   const detailRequest = useRef(0);
+  const selectedLibrarySkillIdRef = useRef<string | null>(null);
+  selectedLibrarySkillIdRef.current = selectedLibrarySkillId;
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const loadDetail = useCallback(
+    async (skillId: string, options?: { silent?: boolean }) => {
+      const requestId = ++detailRequest.current;
+      if (!options?.silent) {
+        setDetailLoading(true);
+      }
+      try {
+        const detail = await api.getLibrarySkillDetail(skillId);
+        if (requestId === detailRequest.current) {
+          setSelectedLibrarySkill(detail);
+        }
+      } catch (error: unknown) {
+        if (requestId === detailRequest.current) {
+          setActionError(normalizeCommandError(error));
+        }
+      } finally {
+        if (requestId === detailRequest.current && !options?.silent) {
+          setDetailLoading(false);
+        }
+      }
+    },
+    [api],
+  );
+
+  const refresh = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+    }
     setLoadError(null);
     try {
       const [nextProjects, nextSkills, nextTags, nextGroups] = await Promise.all([
@@ -38,24 +70,37 @@ export function useLibrary(api: SkillApi) {
         api.listGroups(),
       ]);
       setProjects(nextProjects);
+      setGitImports((prev) =>
+        prev.filter(
+          (item) =>
+            item.status === "importing" ||
+            !nextProjects.some((project) => project.remoteUrl === item.url),
+        ),
+      );
       setLibrarySkills(nextSkills);
       setTags(nextTags);
       setGroups(nextGroups);
-      setSelectedLibrarySkillId((current) =>
-        current && nextSkills.some((skill) => skill.id === current)
-          ? current
-          : nextSkills[0]?.id ?? null,
-      );
-      if (nextSkills.length === 0) {
+      const currentId = selectedLibrarySkillIdRef.current;
+      const nextSelectedId =
+        currentId && nextSkills.some((skill) => skill.id === currentId)
+          ? currentId
+          : nextSkills[0]?.id ?? null;
+      setSelectedLibrarySkillId(nextSelectedId);
+      if (!nextSelectedId) {
         detailRequest.current += 1;
         setSelectedLibrarySkill(null);
+      } else if (nextSelectedId === currentId) {
+        // 选中项未变时 useEffect 不会重跑，需在此同步详情
+        await loadDetail(nextSelectedId, { silent: options?.silent });
       }
     } catch (error) {
       setLoadError(normalizeCommandError(error));
     } finally {
-      setLoading(false);
+      if (!options?.silent) {
+        setLoading(false);
+      }
     }
-  }, [api]);
+  }, [api, loadDetail]);
 
   useEffect(() => {
     void refresh();
@@ -66,22 +111,32 @@ export function useLibrary(api: SkillApi) {
       setSelectedLibrarySkill(null);
       return;
     }
-    const requestId = ++detailRequest.current;
-    setDetailLoading(true);
-    void api
-      .getLibrarySkillDetail(selectedLibrarySkillId)
-      .then((detail) => {
-        if (requestId === detailRequest.current) setSelectedLibrarySkill(detail);
-      })
-      .catch((error: unknown) => {
-        if (requestId === detailRequest.current) {
-          setActionError(normalizeCommandError(error));
+    void loadDetail(selectedLibrarySkillId);
+  }, [loadDetail, selectedLibrarySkillId]);
+
+  const patchInstalledProviders = useCallback(
+    (id: string, provider: Provider, installed: boolean) => {
+      const update = (providers: Provider[]) => {
+        if (installed) {
+          return providers.includes(provider) ? providers : [...providers, provider];
         }
-      })
-      .finally(() => {
-        if (requestId === detailRequest.current) setDetailLoading(false);
-      });
-  }, [api, selectedLibrarySkillId, librarySkills]);
+        return providers.filter((item) => item !== provider);
+      };
+      setLibrarySkills((skills) =>
+        skills.map((skill) =>
+          skill.id === id
+            ? { ...skill, installedProviders: update(skill.installedProviders) }
+            : skill,
+        ),
+      );
+      setSelectedLibrarySkill((detail) =>
+        detail && detail.id === id
+          ? { ...detail, installedProviders: update(detail.installedProviders) }
+          : detail,
+      );
+    },
+    [],
+  );
 
   const runAction = useCallback(async <T,>(
     key: string,
@@ -112,8 +167,57 @@ export function useLibrary(api: SkillApi) {
     [refresh, runAction],
   );
 
+  const startGitImport = useCallback(
+    async (url: string, tempId?: string) => {
+      const trimmed = url.trim();
+      if (!trimmed) return;
+
+      if (gitImportUrlsRef.current.has(trimmed)) {
+        return;
+      }
+      if (projects.some((project) => project.remoteUrl === trimmed)) {
+        setActionError({
+          code: "PROJECT_ALREADY_EXISTS",
+          message: `项目已存在：${trimmed}`,
+        });
+        return;
+      }
+
+      const id = tempId ?? `importing:${trimmed}:${Date.now()}`;
+      const name = projectNameFromGitUrl(trimmed);
+      gitImportUrlsRef.current.add(trimmed);
+      setActionError(null);
+      setGitImports((prev) => {
+        const withoutSame = prev.filter((item) => item.url !== trimmed);
+        return [
+          ...withoutSame,
+          { tempId: id, url: trimmed, name, status: "importing", error: null },
+        ];
+      });
+
+      try {
+        await api.addGitProject(trimmed);
+        gitImportUrlsRef.current.delete(trimmed);
+        setGitImports((prev) => prev.filter((item) => item.tempId !== id));
+        await refresh({ silent: true });
+      } catch (error) {
+        gitImportUrlsRef.current.delete(trimmed);
+        const normalized = normalizeCommandError(error);
+        setGitImports((prev) =>
+          prev.map((item) =>
+            item.tempId === id
+              ? { ...item, status: "failed", error: normalized }
+              : item,
+          ),
+        );
+      }
+    },
+    [api, projects, refresh],
+  );
+
   return {
     projects,
+    gitImports,
     librarySkills,
     tags,
     groups,
@@ -128,22 +232,49 @@ export function useLibrary(api: SkillApi) {
     selectLibrarySkill: setSelectedLibrarySkillId,
     addLocalProject: (path: string) =>
       mutateAndRefresh("project:add-local", () => api.addLocalProject(path)),
-    addGitProject: (url: string) =>
-      mutateAndRefresh("project:add-git", () => api.addGitProject(url)),
+    addGitProject: (url: string) => startGitImport(url),
+    retryGitImport: (tempId: string) => {
+      const target = gitImports.find((item) => item.tempId === tempId);
+      if (!target) return Promise.resolve();
+      return startGitImport(target.url, target.tempId);
+    },
+    dismissGitImport: (tempId: string) => {
+      setGitImports((prev) => {
+        const target = prev.find((item) => item.tempId === tempId);
+        if (target) {
+          gitImportUrlsRef.current.delete(target.url);
+        }
+        return prev.filter((item) => item.tempId !== tempId);
+      });
+    },
     pullGitProject: (id: string) =>
       runAction(`project:pull:${id}`, async () => {
         const result = await api.pullGitProject(id);
-        await refresh();
+        await refresh({ silent: true });
         return result;
       }),
     removeProject: (id: string) =>
       mutateAndRefresh(`project:remove:${id}`, () => api.removeProject(id)),
-    installSkill: (id: string, provider: Provider) =>
-      mutateAndRefresh(`install:${id}:${provider}`, () => api.installSkill(id, provider)),
-    uninstallSkill: (id: string, provider: Provider) =>
-      mutateAndRefresh(`uninstall:${id}:${provider}`, () =>
-        api.uninstallSkill(id, provider),
-      ),
+    installSkill: async (id: string, provider: Provider) => {
+      setActionError(null);
+      try {
+        await api.installSkill(id, provider);
+        patchInstalledProviders(id, provider, true);
+      } catch (error) {
+        setActionError(normalizeCommandError(error));
+        throw error;
+      }
+    },
+    uninstallSkill: async (id: string, provider: Provider) => {
+      setActionError(null);
+      try {
+        await api.uninstallSkill(id, provider);
+        patchInstalledProviders(id, provider, false);
+      } catch (error) {
+        setActionError(normalizeCommandError(error));
+        throw error;
+      }
+    },
     setSkillTags: (id: string, tagIds: string[]) =>
       mutateAndRefresh(`tags:${id}`, () => api.setSkillTags(id, tagIds)),
     setSkillGroup: (id: string, groupId: string | null) =>

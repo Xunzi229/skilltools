@@ -1,15 +1,23 @@
 import { useState } from "react";
-import type { CommandError, Project, ProjectPullResult } from "../model/skill";
+import type {
+  CommandError,
+  GitImportItem,
+  Project,
+  ProjectPullResult,
+} from "../model/skill";
 import { pickDirectory, pickSaveZip, pickZipFile } from "../utils/dialogs";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 interface ProjectPanelProps {
   projects: Project[];
+  gitImports: GitImportItem[];
   loading: boolean;
   error: CommandError | null;
   pendingAction: string | null;
   onAddLocal: (path: string) => Promise<void>;
   onAddGit: (url: string) => Promise<void>;
+  onRetryGitImport: (tempId: string) => Promise<void>;
+  onDismissGitImport: (tempId: string) => void;
   onPull: (id: string) => Promise<ProjectPullResult | undefined>;
   onRemove: (id: string) => Promise<void>;
   onImportZip: (zipPath: string) => Promise<void>;
@@ -37,11 +45,14 @@ function formatDateTime(value: string | null): string {
 
 export function ProjectPanel({
   projects,
+  gitImports,
   loading,
   error,
   pendingAction,
   onAddLocal,
   onAddGit,
+  onRetryGitImport,
+  onDismissGitImport,
   onPull,
   onRemove,
   onImportZip,
@@ -55,6 +66,7 @@ export function ProjectPanel({
   const busy = pendingAction !== null;
   const removeBusy =
     removeTarget !== null && pendingAction === `project:remove:${removeTarget.id}`;
+  const hasRows = projects.length > 0 || gitImports.length > 0;
 
   return (
     <>
@@ -153,7 +165,10 @@ export function ProjectPanel({
             className="flex flex-col gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              if (gitUrl.trim()) void onAddGit(gitUrl.trim());
+              const url = gitUrl.trim();
+              if (!url) return;
+              setGitUrl("");
+              void onAddGit(url);
             }}
           >
             <label htmlFor="git-project-url" className="text-[12px] text-ink-2">
@@ -171,21 +186,70 @@ export function ProjectPanel({
               <button
                 type="submit"
                 className="macos-btn-primary shrink-0"
-                disabled={busy || !gitUrl.trim()}
+                disabled={!gitUrl.trim()}
               >
                 添加 Git 项目
               </button>
             </div>
           </form>
         </div>
-        {loading ? (
+        {loading && !hasRows ? (
           <div className="py-10 text-center text-[13px] text-ink-3">正在加载项目…</div>
-        ) : projects.length === 0 ? (
+        ) : !hasRows ? (
           <div className="py-10 text-center text-[13px] text-ink-3">
             <strong className="text-ink">暂无项目</strong>
           </div>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
+            {gitImports.map((item) => (
+              <li
+                key={item.tempId}
+                className="macos-card flex items-center justify-between gap-4 px-4 py-3"
+                data-import-status={item.status}
+              >
+                <div className="min-w-0">
+                  <strong className="block text-[14px] text-ink">{item.name}</strong>
+                  <span className="mt-1 block truncate font-mono text-[10px] text-ink-3">
+                    {item.url}
+                  </span>
+                  {item.status === "importing" ? (
+                    <span className="project-meta mt-1 block text-[11px] text-ink-3">
+                      正在导入中…
+                    </span>
+                  ) : (
+                    <span
+                      className="project-meta mt-1 block text-[11px] text-[#c41e16]"
+                      role="alert"
+                    >
+                      导入失败：{item.error?.message ?? "未知错误"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {item.status === "importing" ? (
+                    <span className="macos-badge">正在导入中</span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="macos-btn-primary macos-btn-sm"
+                        onClick={() => void onRetryGitImport(item.tempId)}
+                      >
+                        重试
+                      </button>
+                      <button
+                        type="button"
+                        className="macos-btn-danger-soft macos-btn-sm"
+                        aria-label={`删除导入失败项 ${item.name}`}
+                        onClick={() => onDismissGitImport(item.tempId)}
+                      >
+                        删除
+                      </button>
+                    </>
+                  )}
+                </div>
+              </li>
+            ))}
             {projects.map((project) => (
               <li
                 key={project.id}

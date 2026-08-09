@@ -8,7 +8,7 @@ import type {
   SkillGroup,
   Tag,
 } from "../model/skill";
-import { displayDescription } from "../utils/skillDisplay";
+import { displayDescription, displaySourceLabel } from "../utils/skillDisplay";
 import { pickSaveZip } from "../utils/dialogs";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { FileTree } from "./FileTree";
@@ -17,6 +17,7 @@ import { NameDialog } from "./NameDialog";
 import { SkillMetaForm } from "./SkillMetaForm";
 import { TagColorDot } from "./TagColorPicker";
 import { TargetSelector } from "./TargetSelector";
+import { TranslatePreviewButton } from "./TranslatePreviewButton";
 
 interface LibraryDetailProps {
   api: SkillApi;
@@ -123,8 +124,33 @@ export function LibraryDetail({
             <p className="mt-2 max-w-3xl text-[14px] leading-6 text-ink-2">
               {displayDescription(skill.description) || "暂无描述"}
             </p>
+            <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[12px] text-ink-3">
+              <span className="shrink-0">来源</span>
+              {skill.sourceRepo && skill.sourceUrl ? (
+                <button
+                  type="button"
+                  className="macos-link truncate font-mono text-[12px]"
+                  title={skill.sourceUrl}
+                  onClick={() => {
+                    window.open(skill.sourceUrl!, "_blank", "noopener,noreferrer");
+                  }}
+                >
+                  {skill.sourceRepo}
+                </button>
+              ) : (
+                <span className="truncate font-mono text-[12px]">
+                  {displaySourceLabel(skill.sourceRepo)}
+                </span>
+              )}
+            </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
+            <TranslatePreviewButton
+              api={api}
+              source="library"
+              skillId={skill.id}
+              disabled={busy}
+            />
             <button
               type="button"
               className="macos-btn-ghost"
@@ -270,12 +296,21 @@ export function LibraryDetail({
         <div className="shrink-0">
           <TargetSelector
             installedProviders={skill.installedProviders}
-            busy={busy}
-            onToggle={(provider, installed) =>
-              void (installed
-                ? onUninstall(skill.id, provider)
-                : onInstall(skill.id, provider))
-            }
+            disabled={busy}
+            onApply={async (nextProviders) => {
+              const current = new Set(skill.installedProviders);
+              const next = new Set(nextProviders);
+              for (const provider of nextProviders) {
+                if (!current.has(provider)) {
+                  await onInstall(skill.id, provider);
+                }
+              }
+              for (const provider of skill.installedProviders) {
+                if (!next.has(provider)) {
+                  await onUninstall(skill.id, provider);
+                }
+              }
+            }}
           />
         </div>
 

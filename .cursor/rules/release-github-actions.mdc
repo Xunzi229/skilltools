@@ -1,0 +1,41 @@
+---
+description: 正式打包与发版必须走 GitHub Actions，勿本地打安装包再手动上传
+alwaysApply: true
+---
+
+# 正式发版：走 GitHub Actions
+
+基于 `.github/workflows/release.yml`（`tauri-apps/tauri-action`）。
+
+## 原则
+
+- **正式发版默认用 GitHub Actions**。
+- 禁止把本地 `npm run tauri build` + 手动 `gh release upload` 当作常规发版流程。
+- 本地 `tauri build` **仅用于开发验证/冒烟**，不是正式发版路径。
+- 用户说「编译打包」「发 Release」「打 tag」时，**优先走下方 CI 流程**，并用 `gh run list` / `gh run watch` 或打开 Actions 确认，而不是本地打包上传。
+
+## 触发方式
+
+- `push` tag：`v*`
+- 或 `workflow_dispatch`（手动触发）
+
+## 正确流程
+
+1. **同步 bump 版本**（三者一致，并更新相关 lock）：
+   - `app/package.json`
+   - `app/src-tauri/tauri.conf.json`
+   - `app/src-tauri/Cargo.toml`（及 `Cargo.lock`）
+2. **commit + push** 到远程分支
+3. 打 **annotated tag** 并推送：
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+4. 等待 `release` workflow 多平台构建，并创建/更新 GitHub Release
+
+## 产物与 Secrets
+
+- **产物**：Windows `.msi` / `.exe`；macOS `.dmg`；Linux `.AppImage` / `.deb`
+- **updater**：`updaterJsonPreferNsis: true`，优先 NSIS
+- **Secrets**：`TAURI_SIGNING_PRIVATE_KEY`；可选 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+  - 缺签名密钥时可能无 `.sig`，但仍走 CI 构建与发版

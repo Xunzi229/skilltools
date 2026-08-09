@@ -17,6 +17,12 @@ import {
   PREVIEW_FONT_SIZE_OPTIONS,
   applyPreviewTypography,
 } from "../utils/previewTypography";
+import {
+  DEFAULT_TRANSLATE_SETTINGS,
+  TRANSLATE_LANG_OPTIONS,
+  isTranslateConfigured,
+  normalizeTranslateSettings,
+} from "../utils/translateSettings";
 
 interface SettingsPanelProps {
   api: SkillApi;
@@ -52,9 +58,13 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
     void Promise.all([api.getSettings(), api.getAppPaths()])
       .then(([nextSettings, nextPaths]) => {
         if (cancelled) return;
-        setSettings(nextSettings);
+        const normalized = {
+          ...nextSettings,
+          translate: normalizeTranslateSettings(nextSettings.translate),
+        };
+        setSettings(normalized);
         setPaths(nextPaths);
-        applyPreviewTypography(nextSettings);
+        applyPreviewTypography(normalized);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -180,7 +190,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         <h2 className="macos-page-title">设置</h2>
         <p className="macos-page-sub">
-          主题、预览字体、路径、备份策略与更新（v{APP_VERSION}）。安装健康见「安装」页。
+          主题、预览字体、翻译接口、路径、备份策略与更新（v{APP_VERSION}）。安装健康见「安装」页。
         </p>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
@@ -281,6 +291,127 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
               >
                 预览效果：The quick brown fox 中文预览 0123456789
               </p>
+            </section>
+            <section className="macos-card mb-6 p-4">
+              <h3 className="macos-section-title">Skill 翻译预览</h3>
+              <p className="mt-2 text-[12px] text-ink-3">
+                OpenAI 兼容接口（chat/completions）。配置完整后，Skill
+                详情页显示「翻译」按钮；仅预览，不修改原文件。范围：SKILL.md 与
+                README*.md（超大将截断）。
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1 text-[12px] text-ink-2 sm:col-span-2">
+                  Base URL
+                  <input
+                    type="url"
+                    className="macos-input px-2.5 py-1.5"
+                    placeholder="https://api.openai.com/v1"
+                    value={settings?.translate?.baseUrl ?? ""}
+                    disabled={saving || !settings}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      setSettings({
+                        ...settings,
+                        translate: {
+                          ...normalizeTranslateSettings(settings.translate),
+                          baseUrl: event.target.value,
+                        },
+                      });
+                    }}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[12px] text-ink-2 sm:col-span-2">
+                  API Key
+                  <input
+                    type="password"
+                    className="macos-input px-2.5 py-1.5"
+                    placeholder="sk-…"
+                    autoComplete="off"
+                    value={settings?.translate?.apiKey ?? ""}
+                    disabled={saving || !settings}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      setSettings({
+                        ...settings,
+                        translate: {
+                          ...normalizeTranslateSettings(settings.translate),
+                          apiKey: event.target.value,
+                        },
+                      });
+                    }}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[12px] text-ink-2">
+                  模型
+                  <input
+                    type="text"
+                    className="macos-input px-2.5 py-1.5"
+                    placeholder="gpt-4o-mini"
+                    value={settings?.translate?.model ?? ""}
+                    disabled={saving || !settings}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      setSettings({
+                        ...settings,
+                        translate: {
+                          ...normalizeTranslateSettings(settings.translate),
+                          model: event.target.value,
+                        },
+                      });
+                    }}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[12px] text-ink-2">
+                  目标语言
+                  <input
+                    list="translate-lang-options"
+                    type="text"
+                    className="macos-input px-2.5 py-1.5"
+                    placeholder="中文"
+                    value={
+                      settings?.translate?.targetLang ??
+                      DEFAULT_TRANSLATE_SETTINGS.targetLang
+                    }
+                    disabled={saving || !settings}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      setSettings({
+                        ...settings,
+                        translate: {
+                          ...normalizeTranslateSettings(settings.translate),
+                          targetLang: event.target.value,
+                        },
+                      });
+                    }}
+                  />
+                  <datalist id="translate-lang-options">
+                    {TRANSLATE_LANG_OPTIONS.map((lang) => (
+                      <option key={lang} value={lang} />
+                    ))}
+                  </datalist>
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="macos-btn-ghost"
+                  disabled={saving || !settings}
+                  onClick={() => {
+                    if (!settings) return;
+                    void save({
+                      ...settings,
+                      translate: normalizeTranslateSettings(settings.translate),
+                    });
+                  }}
+                >
+                  保存翻译设置
+                </button>
+                <span className="text-[12px] text-ink-3">
+                  {settings && isTranslateConfigured(settings)
+                    ? "已配置，详情页可显示「翻译」"
+                    : "未完整配置，不显示翻译按钮"}
+                </span>
+              </div>
             </section>
             <section className="macos-card mb-6 p-4">
               <div className="flex items-center justify-between gap-3">
