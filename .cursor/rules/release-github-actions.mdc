@@ -35,7 +35,7 @@ alwaysApply: true
 
 ## 产物与 Secrets
 
-- **产物**：Windows `.msi` / `.exe`；macOS `.dmg`；Linux `.AppImage` / `.deb`
+- **产物**：Windows `.msi` / `-setup.exe`（安装包）+ 单文件主程序 `.exe`（免安装，需 WebView2）；macOS `.dmg`；Linux `.AppImage` / `.deb`
 - **updater**：`updaterJsonPreferNsis: true`，优先 NSIS
 - **Secrets**：`TAURI_SIGNING_PRIVATE_KEY`；可选 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
   - 缺签名密钥时可能无 `.sig`，但仍走 CI 构建与发版

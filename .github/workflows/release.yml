@@ -72,7 +72,10 @@ jobs:
           releaseBody: |
             Preview / 预览版：含尚未正式发布的功能，仅供测试。
             多平台安装包（Windows / macOS / Linux）：
-            - Windows：正式版为 `.msi` + `.exe`；preview/rc（非数字 pre-release）仅 `.exe`（NSIS，支持应用内更新）
+            - Windows：
+              - `..._windows-x64-setup.exe`：NSIS 安装包（正式版另有 `.msi`；支持应用内更新）
+              - `..._windows-x64.exe`：免安装单文件主程序（需系统已安装 WebView2）
+              - preview/rc（非数字 pre-release）跳过 MSI，仅 NSIS + 单文件 exe
             - macOS：`.dmg` / `.app`（未签名，首次打开需在「隐私与安全性」中允许；自动更新可能受 Gatekeeper 限制）
             - Linux：`.AppImage` / `.deb`
 
@@ -82,5 +85,7 @@ jobs:
           # preview/rc 的 Windows 跳过 MSI（WiX 不支持非数字 pre-release）
           args: ${{ matrix.args }}${{ startsWith(matrix.platform, 'windows') && (contains(github.ref_name, 'preview') || contains(github.ref_name, '-rc')) && ' --bundles nsis' || '' }}
           updaterJsonPreferNsis: true
-          # 资源名带平台/架构，例如 Skill.Manager_0.8.0-preview.1_windows-x86_64-setup.exe
+          # 仅 Windows 额外上传裸主程序 exe（便携/免安装）；与 -setup.exe 安装包区分
+          uploadPlainBinary: ${{ startsWith(matrix.platform, 'windows') }}
+          # 资源名带平台/架构，例如 Skill.Manager_0.8.0-preview.2_windows-x64-setup.exe / ..._windows-x64.exe
           releaseAssetNamePattern: "[name]_[version]_[platform]-[arch][setup][ext]"
