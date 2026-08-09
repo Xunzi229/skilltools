@@ -15,7 +15,12 @@ import { useInstallations } from "./hooks/useInstallations";
 import { useLocalStorageBool } from "./hooks/useLocalStorageBool";
 import { useSkills } from "./hooks/useSkills";
 import { useLibrary } from "./hooks/useLibrary";
-import type { Provider } from "./model/skill";
+import {
+  skillIdForProviderFilter,
+  skillMemberIds,
+  skillProviders,
+  type Provider,
+} from "./model/skill";
 import { applyPreviewTypography } from "./utils/previewTypography";
 import { matchesLibrarySkillSearch } from "./utils/skillDisplay";
 import "./styles.css";
@@ -131,8 +136,9 @@ function App({ api = tauriSkillApi }: AppProps) {
     return skills.filter((skill) => {
       const matchesFilter =
         filter === "all" ||
-        filter === skill.provider ||
-        (filter === "paused" && skill.status === "paused");
+        (filter === "paused" && skill.status === "paused") ||
+        ((filter === "cursor" || filter === "claude" || filter === "codex") &&
+          skillProviders(skill).includes(filter));
       const matchesSearch =
         !query ||
         skill.name.toLocaleLowerCase().includes(query) ||
@@ -166,11 +172,27 @@ function App({ api = tauriSkillApi }: AppProps) {
       filter !== "backups" &&
       selectedSkillId !== null &&
       visibleSkills.length > 0 &&
-      !visibleSkills.some((skill) => skill.id === selectedSkillId)
+      !visibleSkills.some((skill) =>
+        skillMemberIds(skill).includes(selectedSkillId),
+      )
     ) {
-      selectSkill(visibleSkills[0].id);
+      selectSkill(skillIdForProviderFilter(visibleSkills[0], filter));
+      return;
     }
-  }, [filter, selectSkill, selectedSkillId, visibleSkills]);
+    if (
+      (filter === "cursor" || filter === "claude" || filter === "codex") &&
+      selectedSkillId !== null
+    ) {
+      const current = skills.find((skill) =>
+        skillMemberIds(skill).includes(selectedSkillId),
+      );
+      if (!current) return;
+      const nextId = skillIdForProviderFilter(current, filter);
+      if (nextId !== selectedSkillId) {
+        selectSkill(nextId);
+      }
+    }
+  }, [filter, selectSkill, selectedSkillId, skills, visibleSkills]);
 
   useEffect(() => {
     void loadBackups();
@@ -178,12 +200,16 @@ function App({ api = tauriSkillApi }: AppProps) {
 
   const toggleSet = (
     setter: Dispatch<SetStateAction<Set<string>>>,
-    id: string,
+    ids: string | string[],
   ) => {
+    const list = Array.isArray(ids) ? ids : [ids];
     setter((current) => {
       const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const allSelected = list.every((id) => next.has(id));
+      for (const id of list) {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      }
       return next;
     });
   };
@@ -432,8 +458,13 @@ function App({ api = tauriSkillApi }: AppProps) {
             collapsed={listCollapsed}
             onToggleCollapse={() => setListCollapsed((value) => !value)}
             onSearchChange={setSearch}
-            onSelect={selectSkill}
-            onToggleSelect={(id) => toggleSet(setSkillSelectedIds, id)}
+            onSelect={(id) => {
+              const skill = visibleSkills.find((item) => item.id === id);
+              selectSkill(
+                skill ? skillIdForProviderFilter(skill, filter) : id,
+              );
+            }}
+            onToggleSelect={(ids) => toggleSet(setSkillSelectedIds, ids)}
             onClearSelection={() => setSkillSelectedIds(new Set())}
             onBatchPause={() => {
               const ids = [...skillSelectedIds];

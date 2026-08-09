@@ -1,9 +1,19 @@
 import { useState } from "react";
-import type { BatchResult, SkillSummary } from "../model/skill";
+import {
+  skillMatchesSelection,
+  skillMemberIds,
+  type BatchResult,
+  type SkillSummary,
+} from "../model/skill";
 import { formatBatchSummary } from "../hooks/useBatchActions";
-import { displayDescription } from "../utils/skillDisplay";
+import {
+  rowCheckboxClass,
+  useSelectionMode,
+} from "../hooks/useSelectionMode";
+import { displayDescription, formatProviderLabels } from "../utils/skillDisplay";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { PanelToggle } from "./PanelToggle";
+import { SelectionModeButton } from "./SelectionModeButton";
 import { SkillCard } from "./SkillCard";
 
 interface SkillListProps {
@@ -22,7 +32,7 @@ interface SkillListProps {
   onToggleCollapse?: () => void;
   onSearchChange: (value: string) => void;
   onSelect: (skillId: string) => void;
-  onToggleSelect: (skillId: string) => void;
+  onToggleSelect: (skillIds: string[]) => void;
   onClearSelection: () => void;
   onBatchPause: () => void;
   onBatchResume: () => void;
@@ -32,12 +42,6 @@ interface SkillListProps {
   onRetry: () => void;
   onClearBatchResult: () => void;
 }
-
-const providerNames = {
-  cursor: "Cursor",
-  claude: "Claude",
-  codex: "Codex",
-};
 
 export function SkillList({
   title,
@@ -68,6 +72,10 @@ export function SkillList({
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [replaceWithLink, setReplaceWithLink] = useState(true);
+  const { selectionActive, toggleSelectionMode } = useSelectionMode(
+    selectedIds.size,
+    onClearSelection,
+  );
 
   if (collapsed) {
     return (
@@ -127,30 +135,35 @@ export function SkillList({
   } else {
     content = (
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-        {skills.map((skill) => (
-          <li key={skill.id} className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
-              className="ml-1.5 size-3.5 shrink-0 accent-[var(--color-brand)]"
-              checked={selectedIds.has(skill.id)}
-              aria-label={`选择 ${skill.name}`}
-              onChange={() => onToggleSelect(skill.id)}
-            />
-            <div className="min-w-0 flex-1">
-              <SkillCard
-                name={skill.name}
-                description={displayDescription(skill.description, 96)}
-                statusLabel={
-                  skill.status === "paused"
-                    ? "已暂停"
-                    : providerNames[skill.provider]
-                }
-                selected={selectedSkillId === skill.id}
-                onSelect={() => onSelect(skill.id)}
+        {skills.map((skill) => {
+          const memberIds = skillMemberIds(skill);
+          const checked = memberIds.every((id) => selectedIds.has(id));
+          return (
+            <li key={skill.id} className="group flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                className={rowCheckboxClass(selectionActive)}
+                checked={checked}
+                tabIndex={selectionActive ? 0 : -1}
+                aria-label={`选择 ${skill.name}`}
+                onChange={() => onToggleSelect(memberIds)}
               />
-            </div>
-          </li>
-        ))}
+              <div className="min-w-0 flex-1">
+                <SkillCard
+                  name={skill.name}
+                  description={displayDescription(skill.description, 96)}
+                  statusLabel={
+                    skill.status === "paused"
+                      ? "已暂停"
+                      : formatProviderLabels(skill)
+                  }
+                  selected={skillMatchesSelection(skill, selectedSkillId)}
+                  onSelect={() => onSelect(skill.id)}
+                />
+              </div>
+            </li>
+          );
+        })}
       </ul>
     );
   }
@@ -166,14 +179,21 @@ export function SkillList({
             <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">{title}</h2>
             <p className="mt-1 text-[12px] text-ink-2">浏览本机已安装的 Skills</p>
           </div>
-          {onToggleCollapse && (
-            <PanelToggle
-              expanded
-              labelExpand="展开列表"
-              labelCollapse="折叠列表"
-              onToggle={onToggleCollapse}
+          <div className="flex shrink-0 items-center gap-1.5">
+            <SelectionModeButton
+              selectionActive={selectionActive}
+              disabled={batchBusy}
+              onToggle={toggleSelectionMode}
             />
-          )}
+            {onToggleCollapse && (
+              <PanelToggle
+                expanded
+                labelExpand="展开列表"
+                labelCollapse="折叠列表"
+                onToggle={onToggleCollapse}
+              />
+            )}
+          </div>
         </div>
         <label className="macos-search mt-3">
           <span className="text-[13px] text-ink-3" aria-hidden="true">

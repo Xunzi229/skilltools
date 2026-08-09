@@ -25,6 +25,16 @@ pub enum BackupReason {
     BeforeDelete,
 }
 
+/// 同一源路径下的其它 Provider 安装（列表去重后挂在主条目上）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillProviderInstall {
+    pub id: String,
+    pub provider: Provider,
+    pub current_path: PathBuf,
+    pub status: SkillStatus,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillSummary {
@@ -38,6 +48,12 @@ pub struct SkillSummary {
     /// 当 current_path 为符号链接时，解析后的真实 Skill 目录
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_path: Option<PathBuf>,
+    /// 指向同一源路径的全部 Provider（含自身，按 Cursor → Claude → Codex）
+    #[serde(default)]
+    pub providers: Vec<Provider>,
+    /// 除主条目外的同名源安装
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also_installed: Vec<SkillProviderInstall>,
     pub warnings: Vec<String>,
 }
 
@@ -60,6 +76,10 @@ pub struct SkillDetail {
     pub current_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_path: Option<PathBuf>,
+    #[serde(default)]
+    pub providers: Vec<Provider>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also_installed: Vec<SkillProviderInstall>,
     pub warnings: Vec<String>,
     pub skill_markdown: String,
     pub files: Vec<String>,
@@ -354,6 +374,8 @@ mod tests {
             original_path: PathBuf::from("/skills/example"),
             current_path: PathBuf::from("/skills/example"),
             resolved_path: None,
+            providers: vec![Provider::Cursor],
+            also_installed: vec![],
             warnings: vec![],
         };
 
@@ -363,5 +385,6 @@ mod tests {
         assert_eq!(value["status"], json!("active"));
         assert_eq!(value["originalPath"], json!("/skills/example"));
         assert_eq!(value["currentPath"], json!("/skills/example"));
+        assert_eq!(value["providers"], json!(["cursor"]));
     }
 }

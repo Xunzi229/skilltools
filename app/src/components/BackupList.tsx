@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { BackupRecord, CommandError } from "../model/skill";
+import {
+  rowCheckboxClass,
+  useSelectionMode,
+} from "../hooks/useSelectionMode";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { SelectionModeButton } from "./SelectionModeButton";
 import { SkillCard } from "./SkillCard";
 
 interface BackupListProps {
@@ -58,6 +63,11 @@ export function BackupList({
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const clearChecked = useCallback(() => setChecked(new Set()), []);
+  const { selectionActive, toggleSelectionMode } = useSelectionMode(
+    checked.size,
+    clearChecked,
+  );
 
   useEffect(() => {
     setSelectedId((current) =>
@@ -87,8 +97,17 @@ export function BackupList({
         aria-label="备份列表"
       >
         <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
-          <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">备份记录</h2>
-          <p className="mt-1 text-[12px] text-ink-2">{orderedBackups.length} 条记录</p>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">备份记录</h2>
+              <p className="mt-1 text-[12px] text-ink-2">{orderedBackups.length} 条记录</p>
+            </div>
+            <SelectionModeButton
+              selectionActive={selectionActive}
+              disabled={pendingAction !== null || batchDeleting}
+              onToggle={toggleSelectionMode}
+            />
+          </div>
           {checked.size > 0 && (
             <button
               type="button"
@@ -123,11 +142,12 @@ export function BackupList({
           ) : (
             <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
               {orderedBackups.map((backup) => (
-                <li key={backup.id} className="flex items-center gap-1.5">
+                <li key={backup.id} className="group flex items-center gap-1.5">
                   <input
                     type="checkbox"
-                    className="ml-1.5 size-3.5 shrink-0 accent-[var(--color-brand)]"
+                    className={rowCheckboxClass(selectionActive)}
                     checked={checked.has(backup.id)}
+                    tabIndex={selectionActive ? 0 : -1}
                     aria-label={`选择备份 ${backup.skillName}`}
                     onChange={(event) => {
                       setChecked((current) => {

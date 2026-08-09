@@ -114,9 +114,17 @@ export function SkillDetail({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px]">
-              <span className="rounded-full bg-hover px-2 py-0.5 text-ink-2">
-                {providerNames[skill.provider]}
-              </span>
+              {(skill.providers && skill.providers.length > 0
+                ? skill.providers
+                : [skill.provider]
+              ).map((provider) => (
+                <span
+                  key={provider}
+                  className="rounded-full bg-hover px-2 py-0.5 text-ink-2"
+                >
+                  {providerNames[provider]}
+                </span>
+              ))}
               <span className="text-ink-3">
                 {skill.status === "active" ? "已启用" : "已暂停"}
               </span>

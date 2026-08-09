@@ -833,11 +833,15 @@ describe("Skill Manager", () => {
 
     await user.click(screen.getByRole("button", { name: /备份记录/ }));
     const list = await screen.findByRole("region", { name: "备份列表" });
-    const items = within(list).getAllByRole("button");
-    expect(items[0]).toHaveTextContent("tdd-test");
-    expect(items[1]).toHaveTextContent("brainstorming");
+    expect(within(list).getByRole("button", { name: /tdd-test/ })).toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: /brainstorming/ })).toBeInTheDocument();
+    const skillCards = within(list)
+      .getAllByRole("button")
+      .filter((button) => /tdd-test|brainstorming/.test(button.textContent ?? ""));
+    expect(skillCards[0]).toHaveTextContent("tdd-test");
+    expect(skillCards[1]).toHaveTextContent("brainstorming");
 
-    await user.click(items[0]);
+    await user.click(skillCards[0]);
     expect(screen.getByText("删除前")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "恢复备份" }));
     expect(restoreBackup).not.toHaveBeenCalled();
@@ -847,6 +851,31 @@ describe("Skill Manager", () => {
     await waitFor(() =>
       expect(restoreBackup).toHaveBeenCalledWith("backup-new"),
     );
+  });
+
+  it("备份列表默认隐藏勾选框，选择模式可进入退出", async () => {
+    const user = userEvent.setup();
+    await renderLoaded(createApi({ listBackups: async () => backups }));
+    await user.click(screen.getByRole("button", { name: /备份记录/ }));
+    const list = await screen.findByRole("region", { name: "备份列表" });
+
+    const checkbox = within(list).getByRole("checkbox", {
+      name: "选择备份 brainstorming",
+    });
+    expect(checkbox).toHaveAttribute("tabindex", "-1");
+
+    await user.click(within(list).getByRole("button", { name: "选择" }));
+    expect(within(list).getByRole("button", { name: "完成" })).toBeInTheDocument();
+    expect(checkbox).toHaveAttribute("tabindex", "0");
+
+    await user.click(checkbox);
+    expect(within(list).getByRole("button", { name: /删除选中（1）/ })).toBeInTheDocument();
+
+    await user.click(within(list).getByRole("button", { name: "完成" }));
+    expect(within(list).getByRole("button", { name: "选择" })).toBeInTheDocument();
+    expect(within(list).queryByRole("button", { name: /删除选中/ })).not.toBeInTheDocument();
+    expect(checkbox).toHaveAttribute("tabindex", "-1");
+    expect(checkbox).not.toBeChecked();
   });
 
   it("恢复目标冲突展示中文错误且保留备份详情", async () => {
@@ -927,6 +956,76 @@ describe("Skill Manager", () => {
     ).toBeInTheDocument();
   });
 
+  it("同一源路径多 Provider 安装在本机列表只显示一行并正确计数", async () => {
+    const shared: SkillSummary = {
+      id: "cursor:grill-me",
+      name: "grill-me",
+      description: "shared source",
+      provider: "cursor",
+      status: "active",
+      originalPath: "/Users/demo/.cursor/skills/grill-me",
+      currentPath: "/Users/demo/.cursor/skills/grill-me",
+      resolvedPath: "/Users/demo/.skill-manager/library/grill-me",
+      providers: ["cursor", "claude", "codex"],
+      alsoInstalled: [
+        {
+          id: "claude:grill-me",
+          provider: "claude",
+          currentPath: "/Users/demo/.claude/skills/grill-me",
+          status: "active",
+        },
+        {
+          id: "codex:grill-me",
+          provider: "codex",
+          currentPath: "/Users/demo/.codex/skills/grill-me",
+          status: "active",
+        },
+      ],
+      warnings: [],
+    };
+    const detail: SkillDetail = {
+      ...shared,
+      skillMarkdown: "# grill-me\n",
+      files: ["SKILL.md"],
+    };
+
+    const user = userEvent.setup();
+    render(
+      <App
+        api={createApi({
+          scanSkills: async () => scanResult([shared]),
+          getSkillDetail: async () => detail,
+          listSkillTree: async () => fileTrees["cursor:brainstorming"],
+          readSkillFile: async (_id, relativePath) =>
+            fileContent("cursor:brainstorming", relativePath),
+        })}
+      />,
+    );
+    await screen.findByText("reviewer");
+    const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
+    await user.click(within(navigation).getByRole("button", { name: /^已安装/ }));
+    const list = await screen.findByRole("region", { name: "Skill 列表" });
+    await within(list).findByText("grill-me");
+
+    expect(within(navigation).getByRole("button", { name: /^已安装/ })).toHaveTextContent(
+      "1",
+    );
+    expect(within(navigation).getByRole("button", { name: /^Cursor/ })).toHaveTextContent(
+      "1",
+    );
+    expect(within(navigation).getByRole("button", { name: /^Claude/ })).toHaveTextContent(
+      "1",
+    );
+    expect(within(navigation).getByRole("button", { name: /^Codex/ })).toHaveTextContent(
+      "1",
+    );
+    expect(within(list).getAllByText("grill-me")).toHaveLength(1);
+    expect(within(list).getByText("Cursor+Claude+Codex")).toBeInTheDocument();
+
+    await user.click(within(navigation).getByRole("button", { name: /^Claude/ }));
+    expect(within(list).getAllByText("grill-me")).toHaveLength(1);
+  });
+
   it("从库勾选后进入安装页仍保留勾选数量", async () => {
     await renderLibrary();
     const user = userEvent.setup();
@@ -953,6 +1052,29 @@ describe("Skill Manager", () => {
     expect(checkbox).toHaveAttribute("tabindex", "0");
 
     await user.click(within(list).getByRole("checkbox", { name: "选择 reviewer" }));
+    expect(within(list).getByText("已选 1 项")).toBeInTheDocument();
+
+    await user.click(within(list).getByRole("button", { name: "完成" }));
+    expect(within(list).getByRole("button", { name: "选择" })).toBeInTheDocument();
+    expect(within(list).queryByText("已选 1 项")).not.toBeInTheDocument();
+    expect(checkbox).toHaveAttribute("tabindex", "-1");
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it("本机列表默认隐藏勾选框，选择模式可进入退出", async () => {
+    const user = await renderLoaded();
+    const list = screen.getByRole("region", { name: "Skill 列表" });
+
+    const checkbox = within(list).getByRole("checkbox", {
+      name: "选择 brainstorming",
+    });
+    expect(checkbox).toHaveAttribute("tabindex", "-1");
+
+    await user.click(within(list).getByRole("button", { name: "选择" }));
+    expect(within(list).getByRole("button", { name: "完成" })).toBeInTheDocument();
+    expect(checkbox).toHaveAttribute("tabindex", "0");
+
+    await user.click(checkbox);
     expect(within(list).getByText("已选 1 项")).toBeInTheDocument();
 
     await user.click(within(list).getByRole("button", { name: "完成" }));

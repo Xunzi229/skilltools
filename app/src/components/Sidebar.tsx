@@ -6,6 +6,8 @@ import type {
   SkillSummary,
   Tag,
 } from "../model/skill";
+import { skillProviders } from "../model/skill";
+import { countUniqueSkills } from "../utils/skillDisplay";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NameDialog } from "./NameDialog";
 import { PanelToggle } from "./PanelToggle";
@@ -402,14 +404,24 @@ export function Sidebar({
         )}
 
         {sectionLabel("本机")}
-        {navItem("all", "已安装", skills.filter((skill) => skill.status === "active").length)}
+        {navItem(
+          "all",
+          "已安装",
+          countUniqueSkills(skills, (skill) => skill.status === "active"),
+        )}
         {providers.map(({ id, label }) =>
-          navItem(id, label, skills.filter((skill) => skill.provider === id).length),
+          navItem(
+            id,
+            label,
+            countUniqueSkills(skills, (skill) =>
+              skillProviders(skill).includes(id),
+            ),
+          ),
         )}
         {navItem(
           "paused",
           "已暂停",
-          skills.filter((skill) => skill.status === "paused").length,
+          countUniqueSkills(skills, (skill) => skill.status === "paused"),
         )}
 
         {sectionLabel("数据")}

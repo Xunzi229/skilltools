@@ -6,6 +6,7 @@ import type {
   SkillDetail,
   SkillSummary,
 } from "../model/skill";
+import { skillMemberIds } from "../model/skill";
 import { normalizeCommandError } from "../utils/errors";
 
 export function useSkills(api: SkillApi) {
@@ -72,7 +73,8 @@ export function useSkills(api: SkillApi) {
           ? null
           : selectedSkillIdRef.current;
         const nextSelectedId =
-          currentId && nextSkills.some((skill) => skill.id === currentId)
+          currentId &&
+          nextSkills.some((skill) => skillMemberIds(skill).includes(currentId))
             ? currentId
             : options?.clearSelection
               ? null

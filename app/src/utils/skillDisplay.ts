@@ -1,3 +1,38 @@
+import type { Provider, SkillSummary } from "../model/skill";
+import { skillCanonicalKey, skillProviders } from "../model/skill";
+
+const providerOrder: Record<Provider, number> = {
+  cursor: 0,
+  claude: 1,
+  codex: 2,
+};
+
+/** 侧栏计数：按 canonical 源路径去重 */
+export function countUniqueSkills(
+  skills: SkillSummary[],
+  predicate: (skill: SkillSummary) => boolean,
+): number {
+  const keys = new Set<string>();
+  for (const skill of skills) {
+    if (!predicate(skill)) continue;
+    keys.add(skillCanonicalKey(skill));
+  }
+  return keys.size;
+}
+
+/** 列表标签：多 Provider 时显示 Cursor+Claude+… */
+export function formatProviderLabels(skill: SkillSummary): string {
+  const providers = [...skillProviders(skill)].sort(
+    (left, right) => providerOrder[left] - providerOrder[right],
+  );
+  const names: Record<Provider, string> = {
+    cursor: "Cursor",
+    claude: "Claude",
+    codex: "Codex",
+  };
+  return providers.map((provider) => names[provider]).join("+");
+}
+
 /** 从 Git URL 提取展示名：优先 `owner/repo`（去掉 `.git`）。 */
 export function projectNameFromGitUrl(url: string): string {
   const trimmed = url.trim();

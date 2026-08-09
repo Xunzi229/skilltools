@@ -2,6 +2,13 @@ export type Provider = "cursor" | "claude" | "codex";
 export type SkillStatus = "active" | "paused";
 export type BackupReason = "manual" | "beforeDelete";
 
+export interface SkillProviderInstall {
+  id: string;
+  provider: Provider;
+  currentPath: string;
+  status: SkillStatus;
+}
+
 export interface SkillSummary {
   id: string;
   name: string;
@@ -12,6 +19,10 @@ export interface SkillSummary {
   currentPath: string;
   /** 符号链接解析后的真实 Skill 路径 */
   resolvedPath?: string | null;
+  /** 同一源路径下的全部 Provider（含自身） */
+  providers?: Provider[];
+  /** 除主条目外的同名源安装 */
+  alsoInstalled?: SkillProviderInstall[];
   warnings: string[];
 }
 
@@ -23,6 +34,51 @@ export interface ScanResult {
 export interface SkillDetail extends SkillSummary {
   skillMarkdown: string;
   files: string[];
+}
+
+/** 列表/侧栏：同一源路径去重后的 Provider 集合 */
+export function skillProviders(skill: Pick<SkillSummary, "provider" | "providers">): Provider[] {
+  if (skill.providers && skill.providers.length > 0) {
+    return skill.providers;
+  }
+  return [skill.provider];
+}
+
+/** 去重键：resolvedPath（symlink 目标）优先，否则 currentPath */
+export function skillCanonicalKey(
+  skill: Pick<SkillSummary, "resolvedPath" | "currentPath">,
+): string {
+  const raw = (skill.resolvedPath ?? skill.currentPath).trim();
+  return raw.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+export function skillMemberIds(skill: SkillSummary): string[] {
+  const ids = [skill.id];
+  for (const item of skill.alsoInstalled ?? []) {
+    if (!ids.includes(item.id)) ids.push(item.id);
+  }
+  return ids;
+}
+
+/** 按侧栏 Provider 筛选时，优先定位到该 Provider 的安装 id */
+export function skillIdForProviderFilter(
+  skill: SkillSummary,
+  filter: Provider | "all" | "paused" | string,
+): string {
+  if (filter === "cursor" || filter === "claude" || filter === "codex") {
+    if (skill.provider === filter) return skill.id;
+    const alt = skill.alsoInstalled?.find((item) => item.provider === filter);
+    if (alt) return alt.id;
+  }
+  return skill.id;
+}
+
+export function skillMatchesSelection(
+  skill: SkillSummary,
+  selectedId: string | null,
+): boolean {
+  if (!selectedId) return false;
+  return skillMemberIds(skill).includes(selectedId);
 }
 
 export type FileNodeKind = "file" | "directory";

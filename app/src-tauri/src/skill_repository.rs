@@ -10,7 +10,9 @@ use walkdir::WalkDir;
 use crate::error::AppError;
 use crate::fs_ops::{copy_directory, rename_directory_no_replace, verify_directory_copy};
 use crate::json_store::{read_json, write_json};
-use crate::model::{PauseRecord, Provider, ScanResult, SkillDetail, SkillStatus, SkillSummary};
+use crate::model::{
+    PauseRecord, Provider, ScanResult, SkillDetail, SkillProviderInstall, SkillStatus, SkillSummary,
+};
 use crate::paths::AppPaths;
 use crate::transaction_lock::lock_app_transaction;
 
@@ -32,10 +34,17 @@ impl SkillRepository {
     }
 
     pub fn scan(&self) -> Result<Vec<SkillSummary>, AppError> {
-        Ok(self.scan_with_warnings()?.skills)
+        // 内部操作（暂停/详情/备份）需要未去重的完整安装列表
+        Ok(self.collect_skills()?.skills)
     }
 
     pub fn scan_with_warnings(&self) -> Result<ScanResult, AppError> {
+        let mut result = self.collect_skills()?;
+        result.skills = merge_skills_by_canonical_path(result.skills);
+        Ok(result)
+    }
+
+    fn collect_skills(&self) -> Result<ScanResult, AppError> {
         let mut skills = Vec::new();
         let mut warnings = Vec::new();
 
@@ -173,16 +182,17 @@ impl SkillRepository {
     }
 
     pub fn detail(&self, skill_id: &str) -> Result<SkillDetail, AppError> {
-        let summary = self
-            .scan()?
-            .into_iter()
+        let skills = self.scan()?;
+        let summary = skills
+            .iter()
             .find(|skill| skill.id == skill_id)
+            .cloned()
             .ok_or_else(|| AppError::SkillNotFound {
                 id: skill_id.to_owned(),
             })?;
         self.paths.assert_skill_access(&summary.current_path)?;
 
-        let mut warnings = summary.warnings;
+        let mut warnings = summary.warnings.clone();
         let skill_markdown = match fs::read_to_string(summary.current_path.join("SKILL.md")) {
             Ok(markdown) => markdown,
             Err(error) => {
@@ -217,6 +227,29 @@ impl SkillRepository {
         }
         files.sort();
 
+        let key = skill_canonical_key(&summary);
+        let mut siblings = skills
+            .into_iter()
+            .filter(|skill| skill_canonical_key(skill) == key)
+            .collect::<Vec<_>>();
+        siblings.sort_by(|left, right| {
+            provider_sort_key(left.provider).cmp(&provider_sort_key(right.provider))
+        });
+        let providers = siblings
+            .iter()
+            .map(|skill| skill.provider)
+            .collect::<Vec<_>>();
+        let also_installed = siblings
+            .into_iter()
+            .filter(|skill| skill.id != summary.id)
+            .map(|skill| SkillProviderInstall {
+                id: skill.id,
+                provider: skill.provider,
+                current_path: skill.current_path,
+                status: skill.status,
+            })
+            .collect();
+
         Ok(SkillDetail {
             id: summary.id,
             name: summary.name,
@@ -226,6 +259,8 @@ impl SkillRepository {
             original_path: summary.original_path,
             current_path: summary.current_path,
             resolved_path: summary.resolved_path,
+            providers,
+            also_installed,
             warnings,
             skill_markdown,
             files,
@@ -677,8 +712,92 @@ fn summary_with_warnings(
         original_path: current_path.clone(),
         current_path,
         resolved_path,
+        providers: vec![provider],
+        also_installed: Vec::new(),
         warnings,
     }
+}
+
+fn provider_sort_key(provider: Provider) -> u8 {
+    match provider {
+        Provider::Cursor => 0,
+        Provider::Claude => 1,
+        Provider::Codex => 2,
+    }
+}
+
+/// 去重键：symlink 解析目标，否则 canonicalize(current_path)，再退回 current_path。
+fn skill_canonical_key(skill: &SkillSummary) -> std::path::PathBuf {
+    if let Some(resolved) = &skill.resolved_path {
+        return resolved.clone();
+    }
+    fs::canonicalize(&skill.current_path).unwrap_or_else(|_| skill.current_path.clone())
+}
+
+/// 同一原始源路径（多 Provider 仅引用/symlink）合并为一行。
+pub(crate) fn merge_skills_by_canonical_path(skills: Vec<SkillSummary>) -> Vec<SkillSummary> {
+    use std::collections::BTreeMap;
+
+    let mut groups: BTreeMap<String, Vec<SkillSummary>> = BTreeMap::new();
+    for skill in skills {
+        let key = skill_canonical_key(&skill);
+        // Windows 下统一比较形态
+        let key = key.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
+        groups.entry(key).or_default().push(skill);
+    }
+
+    let mut merged = groups
+        .into_values()
+        .map(|mut group| {
+            group.sort_by(|left, right| {
+                provider_sort_key(left.provider)
+                    .cmp(&provider_sort_key(right.provider))
+                    .then_with(|| left.id.cmp(&right.id))
+            });
+            let mut primary = group.remove(0);
+            let mut providers = vec![primary.provider];
+            let mut also_installed = Vec::new();
+            for other in group {
+                if !providers.contains(&other.provider) {
+                    providers.push(other.provider);
+                }
+                also_installed.push(SkillProviderInstall {
+                    id: other.id,
+                    provider: other.provider,
+                    current_path: other.current_path,
+                    status: other.status,
+                });
+                for warning in other.warnings {
+                    if !primary.warnings.contains(&warning) {
+                        primary.warnings.push(warning);
+                    }
+                }
+                // 优先保留已解析的源路径，便于前端展示真实位置
+                if primary.resolved_path.is_none() {
+                    if let Some(resolved) = other.resolved_path {
+                        primary.resolved_path = Some(resolved);
+                    }
+                }
+                if primary.description.is_empty() && !other.description.is_empty() {
+                    primary.description = other.description;
+                }
+                if primary.name.is_empty() && !other.name.is_empty() {
+                    primary.name = other.name;
+                }
+            }
+            primary.providers = providers;
+            primary.also_installed = also_installed;
+            primary
+        })
+        .collect::<Vec<_>>();
+
+    merged.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    merged
 }
 
 pub(crate) use crate::skill_metadata::frontmatter_yaml;
@@ -691,11 +810,11 @@ mod tests {
 
     use super::{
         append_incomplete_file_list_warning, commit_verified_copy,
-        recover_summary_after_file_type_error, SkillRepository,
+        merge_skills_by_canonical_path, recover_summary_after_file_type_error, SkillRepository,
     };
     use crate::error::AppError;
     use crate::json_store::replace_existing_index_with_backup;
-    use crate::model::{PauseRecord, Provider, SkillStatus};
+    use crate::model::{Provider, SkillStatus, SkillSummary};
     use crate::paths::AppPaths;
 
     fn write_skill(paths: &AppPaths, root_index: usize, directory: &str, markdown: &str) {
@@ -773,6 +892,107 @@ mod tests {
         );
 
         assert!(summary.is_none());
+    }
+
+    #[test]
+    fn merge_skills_by_canonical_path_dedups_same_source_keeps_different_sources() {
+        use std::path::PathBuf;
+
+        let shared = PathBuf::from("/library/grill-me");
+        let a = SkillSummary {
+            id: "cursor-1".into(),
+            name: "grill-me".into(),
+            description: "desc".into(),
+            provider: Provider::Cursor,
+            status: SkillStatus::Active,
+            original_path: PathBuf::from("/cursor/grill-me"),
+            current_path: PathBuf::from("/cursor/grill-me"),
+            resolved_path: Some(shared.clone()),
+            providers: vec![Provider::Cursor],
+            also_installed: vec![],
+            warnings: vec![],
+        };
+        let b = SkillSummary {
+            id: "claude-1".into(),
+            name: "grill-me".into(),
+            description: "desc".into(),
+            provider: Provider::Claude,
+            status: SkillStatus::Active,
+            original_path: PathBuf::from("/claude/grill-me"),
+            current_path: PathBuf::from("/claude/grill-me"),
+            resolved_path: Some(shared),
+            providers: vec![Provider::Claude],
+            also_installed: vec![],
+            warnings: vec![],
+        };
+        let other = SkillSummary {
+            id: "cursor-2".into(),
+            name: "grill-me".into(),
+            description: "other source".into(),
+            provider: Provider::Cursor,
+            status: SkillStatus::Active,
+            original_path: PathBuf::from("/other/grill-me"),
+            current_path: PathBuf::from("/other/grill-me"),
+            resolved_path: Some(PathBuf::from("/library/other-grill-me")),
+            providers: vec![Provider::Cursor],
+            also_installed: vec![],
+            warnings: vec![],
+        };
+
+        let merged = merge_skills_by_canonical_path(vec![a, b, other]);
+        assert_eq!(merged.len(), 2);
+
+        let grouped = merged
+            .iter()
+            .find(|skill| skill.also_installed.len() == 1)
+            .unwrap();
+        assert_eq!(grouped.provider, Provider::Cursor);
+        assert_eq!(
+            grouped.providers,
+            vec![Provider::Cursor, Provider::Claude]
+        );
+        assert_eq!(grouped.also_installed[0].provider, Provider::Claude);
+        assert_eq!(grouped.also_installed[0].id, "claude-1");
+
+        let distinct = merged
+            .iter()
+            .find(|skill| skill.id == "cursor-2")
+            .unwrap();
+        assert!(distinct.also_installed.is_empty());
+        assert_eq!(distinct.providers, vec![Provider::Cursor]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_with_warnings_merges_multi_provider_symlinks_to_same_source() {
+        use std::os::unix::fs::symlink;
+
+        let base = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        fs::create_dir_all(&paths.skill_roots[0].path).unwrap();
+        fs::create_dir_all(&paths.skill_roots[1].path).unwrap();
+        fs::create_dir_all(&paths.skill_roots[2].path).unwrap();
+        fs::write(
+            outside.path().join("SKILL.md"),
+            "---\nname: grill-me\ndescription: shared\n---\nBody",
+        )
+        .unwrap();
+        for root in &paths.skill_roots {
+            symlink(outside.path(), root.path.join("grill-me")).unwrap();
+        }
+
+        let repository = SkillRepository::new(paths);
+        assert_eq!(repository.scan().unwrap().len(), 3);
+
+        let result = repository.scan_with_warnings().unwrap();
+        assert_eq!(result.skills.len(), 1);
+        assert_eq!(
+            result.skills[0].providers,
+            vec![Provider::Cursor, Provider::Claude, Provider::Codex]
+        );
+        assert_eq!(result.skills[0].also_installed.len(), 2);
+        assert_eq!(result.skills[0].name, "grill-me");
     }
 
     #[cfg(unix)]
