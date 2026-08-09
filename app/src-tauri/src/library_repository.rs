@@ -15,9 +15,8 @@ use crate::git_ops::{
 };
 use crate::json_store::{read_json_value, write_json_value};
 use crate::model::{
-    FileContent, FileNode, InstallHealthIssue, InstallHealthKind, InstallHealthReport,
-    LibrarySkillDetail, LibrarySkillSummary, MigrateResult, Project, ProjectSourceType, Provider,
-    SkillGroup, SkillInstallation, Tag,
+    FileContent, FileNode, InstallHealthReport, LibrarySkillDetail, LibrarySkillSummary,
+    MigrateResult, Project, ProjectSourceType, Provider, SkillGroup, SkillInstallation, Tag,
 };
 use crate::paths::AppPaths;
 use crate::skill_files::{list_skill_tree_at, read_skill_file_at};
@@ -26,12 +25,12 @@ use crate::transaction_lock::lock_app_transaction;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-struct LibraryIndex {
-    projects: Vec<Project>,
-    library_skills: Vec<LibrarySkillSummary>,
-    installations: Vec<SkillInstallation>,
-    tags: Vec<Tag>,
-    groups: Vec<SkillGroup>,
+pub(crate) struct LibraryIndex {
+    pub(crate) projects: Vec<Project>,
+    pub(crate) library_skills: Vec<LibrarySkillSummary>,
+    pub(crate) installations: Vec<SkillInstallation>,
+    pub(crate) tags: Vec<Tag>,
+    pub(crate) groups: Vec<SkillGroup>,
 }
 
 pub struct LibraryRepository {
@@ -45,6 +44,10 @@ impl LibraryRepository {
 
     pub fn set_paths(&mut self, paths: AppPaths) {
         self.paths = paths;
+    }
+
+    pub(crate) fn paths(&self) -> &AppPaths {
+        &self.paths
     }
 
     pub fn add_local_project(&self, path: impl AsRef<Path>) -> Result<Project, AppError> {
@@ -444,7 +447,7 @@ impl LibraryRepository {
     pub fn scan_install_health(&self) -> Result<InstallHealthReport, AppError> {
         let index = self.load_index()?;
         Ok(InstallHealthReport {
-            issues: collect_health_issues(&index, &self.paths),
+            issues: crate::install_health::collect_health_issues(&index, &self.paths),
             repaired: 0,
         })
     }
@@ -452,55 +455,10 @@ impl LibraryRepository {
     pub fn repair_installations(&self) -> Result<InstallHealthReport, AppError> {
         let _guard = lock_app_transaction(&self.paths)?;
         let mut index = self.load_index()?;
-        let issues = collect_health_issues(&index, &self.paths);
-        let mut repaired = 0usize;
-        for issue in &issues {
-            if !issue.repairable {
-                continue;
-            }
-            match issue.kind {
-                InstallHealthKind::MissingTarget
-                | InstallHealthKind::BrokenLink
-                | InstallHealthKind::SourceMismatch
-                | InstallHealthKind::IndexOrphan => {
-                    if matches!(
-                        issue.kind,
-                        InstallHealthKind::BrokenLink | InstallHealthKind::SourceMismatch
-                    ) {
-                        if let Ok(metadata) = fs::symlink_metadata(&issue.target_path) {
-                            if metadata.file_type().is_symlink() {
-                                let _ = fs::remove_file(&issue.target_path);
-                            }
-                        }
-                    }
-                    let before = index.installations.len();
-                    index.installations.retain(|installation| {
-                        installation.target_path != issue.target_path
-                            && !(issue.library_skill_id.as_ref().is_some_and(|id| {
-                                &installation.library_skill_id == id
-                                    && installation.provider == issue.provider
-                            }))
-                    });
-                    if index.installations.len() != before {
-                        repaired += 1;
-                    }
-                }
-                InstallHealthKind::DiskOrphan => {
-                    if let Ok(metadata) = fs::symlink_metadata(&issue.target_path) {
-                        if metadata.file_type().is_symlink() {
-                            fs::remove_file(&issue.target_path)?;
-                            repaired += 1;
-                        }
-                    }
-                }
-                InstallHealthKind::NotSymlink => {}
-            }
-        }
-        sync_installation_statuses(&mut index);
+        let (repaired, report) = crate::install_health::repair_index(&mut index, &self.paths)?;
         self.write_index(&index)?;
-        let remaining = collect_health_issues(&index, &self.paths);
         Ok(InstallHealthReport {
-            issues: remaining,
+            issues: report.issues,
             repaired,
         })
     }
@@ -814,7 +772,7 @@ impl LibraryRepository {
             })
     }
 
-    fn load_index(&self) -> Result<LibraryIndex, AppError> {
+    pub(crate) fn load_index(&self) -> Result<LibraryIndex, AppError> {
         read_json_value(
             &self.paths.library_index,
             LibraryIndex::default,
@@ -822,13 +780,46 @@ impl LibraryRepository {
         )
     }
 
-    fn write_index(&self, index: &LibraryIndex) -> Result<(), AppError> {
+    pub(crate) fn write_index(&self, index: &LibraryIndex) -> Result<(), AppError> {
         self.paths.assert_allowed(&self.paths.library_index)?;
         fs::create_dir_all(&self.paths.app_data_dir)?;
         write_json_value(&self.paths.library_index, index, |message| {
             AppError::LibraryIndex { message }
         })
     }
+}
+
+pub(crate) fn validate_skill_dirname(name: &str) -> Result<String, AppError> {
+    let name = name.trim();
+    if name.is_empty()
+        || name.len() > 64
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err(AppError::Io {
+            message: "Skill 名称仅允许字母、数字、连字符与下划线".into(),
+        });
+    }
+    Ok(name.to_string())
+}
+
+pub(crate) fn replace_project_skills(
+    index: &mut LibraryIndex,
+    project: &Project,
+) -> Result<(), AppError> {
+    let previous: Vec<LibrarySkillSummary> = index
+        .library_skills
+        .iter()
+        .filter(|skill| skill.project_id == project.id)
+        .cloned()
+        .collect();
+    let scanned = scan_project(project, &previous)?;
+    index
+        .library_skills
+        .retain(|skill| skill.project_id != project.id);
+    index.library_skills.extend(scanned);
+    Ok(())
 }
 
 fn canonical_project_path(path: &Path) -> Result<PathBuf, AppError> {
@@ -858,7 +849,7 @@ fn ensure_project_path_is_new(index: &LibraryIndex, path: &Path) -> Result<(), A
     Ok(())
 }
 
-fn project_for_source(
+pub(crate) fn project_for_source(
     source_type: ProjectSourceType,
     local_path: PathBuf,
     remote_url: Option<String>,
@@ -1142,111 +1133,7 @@ fn prune_missing_installations(index: &mut LibraryIndex) {
     });
 }
 
-fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<InstallHealthIssue> {
-    let mut issues = Vec::new();
-    let mut indexed_targets = HashSet::new();
-
-    for installation in &index.installations {
-        indexed_targets.insert(installation.target_path.clone());
-        let skill = index
-            .library_skills
-            .iter()
-            .find(|skill| skill.id == installation.library_skill_id);
-        let expected_source = skill.and_then(|skill| skill.absolute_path.canonicalize().ok());
-
-        match fs::symlink_metadata(&installation.target_path) {
-            Err(_) => issues.push(InstallHealthIssue {
-                kind: InstallHealthKind::MissingTarget,
-                provider: installation.provider,
-                library_skill_id: Some(installation.library_skill_id.clone()),
-                target_path: installation.target_path.clone(),
-                message: "索引中的安装目标不存在".into(),
-                repairable: true,
-            }),
-            Ok(metadata) if !metadata.file_type().is_symlink() => issues.push(InstallHealthIssue {
-                kind: InstallHealthKind::NotSymlink,
-                provider: installation.provider,
-                library_skill_id: Some(installation.library_skill_id.clone()),
-                target_path: installation.target_path.clone(),
-                message: "目标存在但不是符号链接，需手动处理".into(),
-                repairable: false,
-            }),
-            Ok(_) => match fs::canonicalize(&installation.target_path) {
-                Err(_) => issues.push(InstallHealthIssue {
-                    kind: InstallHealthKind::BrokenLink,
-                    provider: installation.provider,
-                    library_skill_id: Some(installation.library_skill_id.clone()),
-                    target_path: installation.target_path.clone(),
-                    message: "符号链接已损坏".into(),
-                    repairable: true,
-                }),
-                Ok(resolved) => {
-                    if expected_source
-                        .as_ref()
-                        .is_some_and(|expected| expected != &resolved)
-                    {
-                        issues.push(InstallHealthIssue {
-                            kind: InstallHealthKind::SourceMismatch,
-                            provider: installation.provider,
-                            library_skill_id: Some(installation.library_skill_id.clone()),
-                            target_path: installation.target_path.clone(),
-                            message: "链接指向与库源不一致".into(),
-                            repairable: true,
-                        });
-                    } else if skill.is_none() {
-                        issues.push(InstallHealthIssue {
-                            kind: InstallHealthKind::IndexOrphan,
-                            provider: installation.provider,
-                            library_skill_id: Some(installation.library_skill_id.clone()),
-                            target_path: installation.target_path.clone(),
-                            message: "安装记录对应的库 Skill 已不存在".into(),
-                            repairable: true,
-                        });
-                    }
-                }
-            },
-        }
-    }
-
-    for provider in [Provider::Cursor, Provider::Claude, Provider::Codex] {
-        let Ok(root) = paths.provider_root(provider) else {
-            continue;
-        };
-        let Ok(entries) = fs::read_dir(root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(metadata) = fs::symlink_metadata(&path) else {
-                continue;
-            };
-            if !metadata.file_type().is_symlink() {
-                continue;
-            }
-            if indexed_targets.contains(&path) {
-                continue;
-            }
-            let Ok(resolved) = fs::canonicalize(&path) else {
-                continue;
-            };
-            if !resolved.starts_with(&paths.library_dir) {
-                continue;
-            }
-            issues.push(InstallHealthIssue {
-                kind: InstallHealthKind::DiskOrphan,
-                provider,
-                library_skill_id: None,
-                target_path: path,
-                message: "磁盘上存在指向库的链接，但未登记到索引".into(),
-                repairable: true,
-            });
-        }
-    }
-
-    issues
-}
-
-fn sync_installation_statuses(index: &mut LibraryIndex) {
+pub(crate) fn sync_installation_statuses(index: &mut LibraryIndex) {
     for skill in &mut index.library_skills {
         skill.installed_providers = index
             .installations

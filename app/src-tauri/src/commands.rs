@@ -8,7 +8,7 @@ use crate::backup_repository::BackupRepository;
 use crate::error::AppError;
 use crate::external_open::{self, ExternalEditor};
 use crate::library_repository::LibraryRepository;
-use crate::batch::{self, map_item};
+use crate::batch::{self, map_item, skipped};
 use crate::model::{
     BackupReason, BackupRecord, BatchResult, FileContent, FileNode, InstallHealthReport,
     LibrarySkillDetail, LibrarySkillSummary, MigrateResult, Project, Provider, ScanResult,
@@ -780,6 +780,48 @@ pub fn repair_installations(
 }
 
 #[tauri::command]
+pub fn create_library_skill(
+    state: State<'_, AppState>,
+    name: String,
+    description: String,
+    project_id: Option<String>,
+) -> Result<LibrarySkillSummary, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .create_library_skill(name, description, project_id)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn rename_library_skill(
+    state: State<'_, AppState>,
+    skill_id: String,
+    new_name: String,
+) -> Result<LibrarySkillSummary, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .rename_library_skill(&skill_id, new_name)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn delete_library_skill(
+    state: State<'_, AppState>,
+    skill_id: String,
+) -> Result<(), CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .delete_library_skill(&skill_id)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
 pub fn migrate_provider_skill(
     state: State<'_, AppState>,
     skill_id: String,
@@ -892,8 +934,14 @@ pub fn batch_install_skills(
     let items = skill_ids
         .into_iter()
         .map(|id| {
-            let result = library.install_skill(&id, provider);
-            map_item(id, result)
+            match library.has_installation(&id, provider) {
+                Ok(true) => skipped(id, "已安装，已跳过"),
+                Ok(false) => {
+                    let result = library.install_skill(&id, provider);
+                    map_item(id, result)
+                }
+                Err(error) => map_item::<(), _>(id, Err(error)),
+            }
         })
         .collect();
     Ok(batch::collect(items))
@@ -909,8 +957,14 @@ pub fn batch_uninstall_skills(
     let items = skill_ids
         .into_iter()
         .map(|id| {
-            let result = library.uninstall_skill(&id, provider);
-            map_item(id, result)
+            match library.has_installation(&id, provider) {
+                Ok(false) => skipped(id, "未安装，已跳过"),
+                Ok(true) => {
+                    let result = library.uninstall_skill(&id, provider);
+                    map_item(id, result)
+                }
+                Err(error) => map_item::<(), _>(id, Err(error)),
+            }
         })
         .collect();
     Ok(batch::collect(items))

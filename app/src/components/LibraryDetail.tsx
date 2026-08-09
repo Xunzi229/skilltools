@@ -1,10 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { SkillApi } from "../api/skillApi";
+import { useSkillFiles } from "../hooks/useSkillFiles";
 import type {
   CommandError,
-  ExternalEditor,
-  FileContent,
-  FileNode,
   LibrarySkillDetail as LibrarySkillDetailModel,
   Provider,
   SkillGroup,
@@ -12,6 +10,7 @@ import type {
 } from "../model/skill";
 import { displayDescription } from "../utils/skillDisplay";
 import { pickSaveZip } from "../utils/dialogs";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { FileTree } from "./FileTree";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { NameDialog } from "./NameDialog";
@@ -33,14 +32,9 @@ interface LibraryDetailProps {
   onInstall: (id: string, provider: Provider) => Promise<void>;
   onUninstall: (id: string, provider: Provider) => Promise<void>;
   onExportZip: (id: string, destPath: string) => Promise<void>;
+  onRename: (id: string, newName: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
   onClearError: () => void;
-}
-
-function messageOf(error: unknown) {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    return String(error.message);
-  }
-  return "文件加载失败，请重试";
 }
 
 async function copyText(value: string) {
@@ -71,59 +65,18 @@ export function LibraryDetail({
   onInstall,
   onUninstall,
   onExportZip,
+  onRename,
+  onDelete,
   onClearError,
 }: LibraryDetailProps) {
-  const [tree, setTree] = useState<FileNode[]>([]);
-  const [preview, setPreview] = useState<FileContent | null>(null);
-  const [treeLoading, setTreeLoading] = useState(false);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [nameDialog, setNameDialog] = useState<"group" | "tag" | null>(null);
-  const [editors, setEditors] = useState<ExternalEditor[]>([]);
-  const [savingFile, setSavingFile] = useState(false);
-  const request = useRef(0);
-
-  useEffect(() => {
-    void api
-      .listExternalEditors()
-      .then(setEditors)
-      .catch(() => setEditors([]));
-  }, [api]);
-
-  const loadPreview = (id: string, relativePath: string) => {
-    const requestId = ++request.current;
-    setPreviewLoading(true);
-    setFileError(null);
-    void api
-      .readLibrarySkillFile(id, relativePath)
-      .then((content) => {
-        if (requestId === request.current) setPreview(content);
-      })
-      .catch((error: unknown) => {
-        if (requestId === request.current) setFileError(messageOf(error));
-      })
-      .finally(() => {
-        if (requestId === request.current) setPreviewLoading(false);
-      });
-  };
-
-  useEffect(() => {
-    const id = skill?.id;
-    request.current += 1;
-    setTree([]);
-    setPreview(null);
-    setFileError(null);
-    setCopied(false);
-    if (!id) return;
-    setTreeLoading(true);
-    void api
-      .listLibrarySkillTree(id)
-      .then(setTree)
-      .catch((error: unknown) => setFileError(messageOf(error)))
-      .finally(() => setTreeLoading(false));
-    loadPreview(id, "SKILL.md");
-  }, [api, skill?.id]);
+  const [nameDialog, setNameDialog] = useState<"group" | "tag" | "rename" | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const files = useSkillFiles({
+    api,
+    source: skill ? { kind: "library", skillId: skill.id } : null,
+    reloadToken: skill?.skillMarkdown,
+  });
 
   if (loading) {
     return (
@@ -144,7 +97,9 @@ export function LibraryDetail({
     );
   }
 
-  const busy = pendingAction !== null;
+  const busy = pendingAction !== null || files.saving;
+  const fileError = files.treeError ?? files.previewError ?? files.openError;
+
   return (
     <section
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel"
@@ -156,10 +111,32 @@ export function LibraryDetail({
             子 Skill
           </span>
         )}
-        <h2 className="m-0 text-[28px] font-bold leading-tight text-ink">{skill.name}</h2>
-        <p className="mt-2 max-w-3xl text-[14px] leading-6 text-ink-2">
-          {displayDescription(skill.description) || "暂无描述"}
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="m-0 text-[28px] font-bold leading-tight text-ink">{skill.name}</h2>
+            <p className="mt-2 max-w-3xl text-[14px] leading-6 text-ink-2">
+              {displayDescription(skill.description) || "暂无描述"}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+              disabled={busy}
+              onClick={() => setNameDialog("rename")}
+            >
+              重命名
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[12px] text-red-700 hover:bg-red-100 disabled:opacity-55"
+              disabled={busy}
+              onClick={() => setDeleteOpen(true)}
+            >
+              删除
+            </button>
+          </div>
+        </div>
         <div className="mt-3 flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-3">
             {skill.absolutePath}
@@ -307,49 +284,36 @@ export function LibraryDetail({
 
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line-strong">
           <FileTree
-            nodes={tree}
-            selectedPath={preview?.relativePath ?? null}
-            loading={treeLoading}
+            nodes={files.tree}
+            selectedPath={files.preview?.relativePath ?? null}
+            loading={files.treeLoading}
             errorMessage={fileError}
-            editors={editors}
-            onSelect={(path) => loadPreview(skill.id, path)}
-            onOpenWith={async (relativePath, editorId) => {
-              setFileError(null);
-              try {
-                await api.openLibrarySkillFileExternal(
-                  skill.id,
-                  relativePath,
-                  editorId,
-                );
-              } catch (error: unknown) {
-                setFileError(messageOf(error));
-              }
-            }}
+            editors={files.editors}
+            onSelect={files.selectFile}
+            onOpenWith={files.openWith}
           />
           <MarkdownViewer
-            file={preview}
-            loading={previewLoading}
+            file={files.preview}
+            loading={files.previewLoading}
             errorMessage={fileError}
             editable
-            saving={savingFile}
-            onSave={async (content) => {
-              if (!preview) return;
-              setSavingFile(true);
-              try {
-                await api.writeLibrarySkillFile(skill.id, preview.relativePath, content);
-                loadPreview(skill.id, preview.relativePath);
-              } finally {
-                setSavingFile(false);
-              }
-            }}
+            saving={files.saving}
+            onSave={files.saveFile}
           />
         </div>
       </div>
 
       <NameDialog
         open={nameDialog !== null}
-        title={nameDialog === "group" ? "新建分组" : "新建标签"}
-        confirmLabel="创建并应用"
+        title={
+          nameDialog === "group"
+            ? "新建分组"
+            : nameDialog === "tag"
+              ? "新建标签"
+              : "重命名 Skill"
+        }
+        initialValue={nameDialog === "rename" ? skill.name : ""}
+        confirmLabel={nameDialog === "rename" ? "重命名" : "创建并应用"}
         showColorPicker={nameDialog === "tag"}
         busy={busy}
         onCancel={() => setNameDialog(null)}
@@ -366,7 +330,21 @@ export function LibraryDetail({
             void onCreateTag(name, color ?? null).then((tag) => {
               if (tag) void onSetTags(skillId, [...currentTagIds, tag.id]);
             });
+          } else if (kind === "rename") {
+            void onRename(skillId, name);
           }
+        }}
+      />
+      <ConfirmDialog
+        open={deleteOpen}
+        title={`删除 ${skill.name}？`}
+        message="将先卸载所有工具中的安装链接，再删除库目录内的文件。外部引用项目中的 Skill 请到「项目」页移除。"
+        confirmLabel="删除"
+        tone="danger"
+        busy={busy}
+        onCancel={() => setDeleteOpen(false)}
+        onConfirm={() => {
+          void onDelete(skill.id).then(() => setDeleteOpen(false));
         }}
       />
     </section>

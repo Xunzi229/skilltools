@@ -18,7 +18,6 @@ pub fn map_item<T, E: ToString>(
     }
 }
 
-#[allow(dead_code)]
 pub fn skipped(id: String, message: impl Into<String>) -> BatchItemResult {
     BatchItemResult {
         id,

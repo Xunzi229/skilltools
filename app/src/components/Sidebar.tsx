@@ -15,6 +15,7 @@ export type SkillFilter =
   | "all"
   | Provider
   | "paused"
+  | "installations"
   | "projects"
   | "backups"
   | "settings"
@@ -28,6 +29,7 @@ interface SidebarProps {
   tags: Tag[];
   projectCount: number;
   backupCount: number;
+  installationCount: number;
   activeFilter: SkillFilter;
   loading: boolean;
   busy?: boolean;
@@ -67,6 +69,7 @@ export function Sidebar({
   tags,
   projectCount,
   backupCount,
+  installationCount,
   activeFilter,
   loading,
   busy = false,
@@ -326,6 +329,7 @@ export function Sidebar({
         )}
 
         {sectionLabel("数据")}
+        {navItem("installations", "安装", installationCount)}
         {navItem("projects", "项目", projectCount)}
         {navItem("backups", "备份记录", backupCount)}
       </nav>

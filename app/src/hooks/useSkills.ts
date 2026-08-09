@@ -6,17 +6,7 @@ import type {
   SkillDetail,
   SkillSummary,
 } from "../model/skill";
-
-function normalizeError(error: unknown): CommandError {
-  if (typeof error === "object" && error !== null) {
-    const candidate = error as Record<string, unknown>;
-    if (typeof candidate.code === "string" && typeof candidate.message === "string") {
-      return { code: candidate.code, message: candidate.message };
-    }
-  }
-
-  return { code: "UNKNOWN", message: "操作失败，请重试" };
-}
+import { normalizeCommandError } from "../utils/errors";
 
 export function useSkills(api: SkillApi) {
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -61,7 +51,7 @@ export function useSkills(api: SkillApi) {
         setDetailEpoch((epoch) => epoch + 1);
       }
     } catch (error) {
-      setScanError(normalizeError(error));
+      setScanError(normalizeCommandError(error));
     } finally {
       setListLoading(false);
     }
@@ -90,7 +80,7 @@ export function useSkills(api: SkillApi) {
       .catch((error: unknown) => {
         if (requestId === detailRequest.current) {
           setSelectedSkill(null);
-          setDetailError(normalizeError(error));
+          setDetailError(normalizeCommandError(error));
         }
       })
       .finally(() => {
@@ -110,7 +100,7 @@ export function useSkills(api: SkillApi) {
     try {
       setBackups(await api.listBackups());
     } catch (error) {
-      setBackupsError(normalizeError(error));
+      setBackupsError(normalizeCommandError(error));
     } finally {
       setBackupsLoading(false);
     }
@@ -127,7 +117,7 @@ export function useSkills(api: SkillApi) {
       try {
         await action();
       } catch (error) {
-        setActionError(normalizeError(error));
+        setActionError(normalizeCommandError(error));
       } finally {
         pendingActionRef.current = null;
         setPendingAction(null);

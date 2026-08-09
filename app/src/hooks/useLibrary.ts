@@ -9,16 +9,7 @@ import type {
   SkillGroup,
   Tag,
 } from "../model/skill";
-
-function normalizeError(error: unknown): CommandError {
-  if (typeof error === "object" && error !== null) {
-    const candidate = error as Record<string, unknown>;
-    if (typeof candidate.code === "string" && typeof candidate.message === "string") {
-      return { code: candidate.code, message: candidate.message };
-    }
-  }
-  return { code: "UNKNOWN", message: "操作失败，请重试" };
-}
+import { normalizeCommandError } from "../utils/errors";
 
 export function useLibrary(api: SkillApi) {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -60,7 +51,7 @@ export function useLibrary(api: SkillApi) {
         setSelectedLibrarySkill(null);
       }
     } catch (error) {
-      setLoadError(normalizeError(error));
+      setLoadError(normalizeCommandError(error));
     } finally {
       setLoading(false);
     }
@@ -83,7 +74,9 @@ export function useLibrary(api: SkillApi) {
         if (requestId === detailRequest.current) setSelectedLibrarySkill(detail);
       })
       .catch((error: unknown) => {
-        if (requestId === detailRequest.current) setActionError(normalizeError(error));
+        if (requestId === detailRequest.current) {
+          setActionError(normalizeCommandError(error));
+        }
       })
       .finally(() => {
         if (requestId === detailRequest.current) setDetailLoading(false);
@@ -101,7 +94,7 @@ export function useLibrary(api: SkillApi) {
     try {
       return await action();
     } catch (error) {
-      setActionError(normalizeError(error));
+      setActionError(normalizeCommandError(error));
       return undefined;
     } finally {
       pendingRef.current = null;
@@ -176,6 +169,29 @@ export function useLibrary(api: SkillApi) {
       mutateAndRefresh(`library:export:${id}`, () =>
         api.exportLibrarySkillZip(id, destPath),
       ),
+    createLibrarySkill: async (
+      name: string,
+      description: string,
+      projectId?: string | null,
+    ): Promise<LibrarySkillSummary | undefined> =>
+      runAction("library:create", async () => {
+        const skill = await api.createLibrarySkill(name.trim(), description.trim(), projectId);
+        await refresh();
+        setSelectedLibrarySkillId(skill.id);
+        return skill;
+      }),
+    renameLibrarySkill: async (
+      id: string,
+      newName: string,
+    ): Promise<LibrarySkillSummary | undefined> =>
+      runAction(`library:rename:${id}`, async () => {
+        const skill = await api.renameLibrarySkill(id, newName.trim());
+        await refresh();
+        setSelectedLibrarySkillId(skill.id);
+        return skill;
+      }),
+    deleteLibrarySkill: (id: string) =>
+      mutateAndRefresh(`library:delete:${id}`, () => api.deleteLibrarySkill(id)),
     createGroup: async (
       name: string,
       order?: number,

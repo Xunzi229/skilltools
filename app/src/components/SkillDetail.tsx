@@ -1,12 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { SkillApi } from "../api/skillApi";
-import type {
-  CommandError,
-  ExternalEditor,
-  FileContent,
-  FileNode,
-  SkillDetail as SkillDetailModel,
-} from "../model/skill";
+import { useSkillFiles } from "../hooks/useSkillFiles";
+import type { CommandError, SkillDetail as SkillDetailModel } from "../model/skill";
+import { errorMessage } from "../utils/errors";
 import { displayDescription } from "../utils/skillDisplay";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { FileTree } from "./FileTree";
@@ -32,16 +28,6 @@ const providerNames = {
   claude: "Claude",
   codex: "Codex",
 };
-
-function errorMessage(error: unknown): string {
-  if (typeof error === "object" && error !== null) {
-    const candidate = error as Record<string, unknown>;
-    if (typeof candidate.message === "string") {
-      return candidate.message;
-    }
-  }
-  return "文件加载失败，请重试";
-}
 
 async function copyText(value: string) {
   if (navigator.clipboard?.writeText) {
@@ -75,84 +61,12 @@ export function SkillDetail({
   const [replaceWithLink, setReplaceWithLink] = useState(true);
   const [migrateBusy, setMigrateBusy] = useState(false);
   const [migrateError, setMigrateError] = useState<string | null>(null);
-  const [tree, setTree] = useState<FileNode[]>([]);
-  const [treeLoading, setTreeLoading] = useState(false);
-  const [treeError, setTreeError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<FileContent | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [editors, setEditors] = useState<ExternalEditor[]>([]);
-  const [openError, setOpenError] = useState<string | null>(null);
-  const treeRequest = useRef(0);
-  const previewRequest = useRef(0);
-
-  useEffect(() => {
-    void api
-      .listExternalEditors()
-      .then(setEditors)
-      .catch(() => setEditors([]));
-  }, [api]);
-
-  const loadPreview = (skillId: string, relativePath: string) => {
-    const requestId = ++previewRequest.current;
-    setPreviewLoading(true);
-    setPreviewError(null);
-    void api
-      .readSkillFile(skillId, relativePath)
-      .then((content) => {
-        if (requestId === previewRequest.current) {
-          setPreview(content);
-        }
-      })
-      .catch((previewFailure: unknown) => {
-        if (requestId === previewRequest.current) {
-          setPreview(null);
-          setPreviewError(errorMessage(previewFailure));
-        }
-      })
-      .finally(() => {
-        if (requestId === previewRequest.current) {
-          setPreviewLoading(false);
-        }
-      });
-  };
-
-  useEffect(() => {
-    const skillId = skill?.id;
-    const requestId = ++treeRequest.current;
-    previewRequest.current += 1;
-    setTree([]);
-    setPreview(null);
-    setTreeError(null);
-    setPreviewError(null);
-    setCopied(false);
-    if (!skillId) {
-      setTreeLoading(false);
-      setPreviewLoading(false);
-      return;
-    }
-
-    setTreeLoading(true);
-    void api
-      .listSkillTree(skillId)
-      .then((nodes) => {
-        if (requestId === treeRequest.current) {
-          setTree(nodes);
-        }
-      })
-      .catch((treeFailure: unknown) => {
-        if (requestId === treeRequest.current) {
-          setTreeError(errorMessage(treeFailure));
-        }
-      })
-      .finally(() => {
-        if (requestId === treeRequest.current) {
-          setTreeLoading(false);
-        }
-      });
-    loadPreview(skillId, "SKILL.md");
-  }, [api, skill?.id, skill?.skillMarkdown]);
+  const files = useSkillFiles({
+    api,
+    source: skill ? { kind: "provider", skillId: skill.id } : null,
+    reloadToken: skill?.skillMarkdown,
+  });
 
   if (loading) {
     return (
@@ -186,8 +100,9 @@ export function SkillDetail({
     );
   }
 
-  const busy = pendingAction !== null;
+  const busy = pendingAction !== null || files.saving || migrateBusy;
   const deleteBusy = pendingAction === `delete:${skill.id}`;
+  const fileError = files.treeError ?? files.previewError ?? files.openError;
 
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
@@ -235,7 +150,7 @@ export function SkillDetail({
               <button
                 type="button"
                 className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-hover disabled:opacity-55"
-                disabled={busy || migrateBusy}
+                disabled={busy}
                 onClick={() => {
                   setMigrateError(null);
                   setMigrateOpen(true);
@@ -318,16 +233,16 @@ export function SkillDetail({
             </ul>
           </aside>
         )}
-        {openError && (
+        {fileError && (
           <div
             className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
             role="alert"
           >
-            <span>{openError}</span>
+            <span>{fileError}</span>
             <button
               type="button"
               className="rounded bg-red-100 px-2 py-1"
-              onClick={() => setOpenError(null)}
+              onClick={files.clearOpenError}
             >
               关闭
             </button>
@@ -335,32 +250,21 @@ export function SkillDetail({
         )}
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line-strong">
           <FileTree
-            nodes={tree}
-            selectedPath={preview?.relativePath ?? null}
-            loading={treeLoading}
-            errorMessage={treeError}
-            editors={editors}
-            onSelect={(relativePath) => loadPreview(skill.id, relativePath)}
-            onOpenWith={async (relativePath, editorId) => {
-              setOpenError(null);
-              try {
-                await api.openSkillFileExternal(skill.id, relativePath, editorId);
-              } catch (failure: unknown) {
-                setOpenError(errorMessage(failure));
-              }
-            }}
+            nodes={files.tree}
+            selectedPath={files.preview?.relativePath ?? null}
+            loading={files.treeLoading}
+            errorMessage={files.treeError}
+            editors={files.editors}
+            onSelect={files.selectFile}
+            onOpenWith={files.openWith}
           />
           <MarkdownViewer
-            file={preview}
-            loading={previewLoading}
-            errorMessage={previewError}
+            file={files.preview}
+            loading={files.previewLoading}
+            errorMessage={files.previewError}
             editable
-            saving={pendingAction === `write:${skill.id}:${preview?.relativePath ?? ""}`}
-            onSave={async (content) => {
-              if (!preview) return;
-              await api.writeSkillFile(skill.id, preview.relativePath, content);
-              loadPreview(skill.id, preview.relativePath);
-            }}
+            saving={files.saving}
+            onSave={files.saveFile}
           />
         </div>
       </div>

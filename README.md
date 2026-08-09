@@ -13,11 +13,12 @@ Skill Manager 用于管理 Cursor / Claude / Codex 本机 Skill，以及中央 S
 ## 功能特性
 
 - 三栏界面管理本机已安装 Skill 与中央库
+- 库内 Skill 新建 / 重命名 / 删除（删前卸载安装；仅删 `library_dir` 内源）
 - 库安装使用受管符号链接；冲突不覆盖
+- 安装总览（安装列表、健康扫描与安全修复）
 - 暂停/恢复、手动备份、删除前自动备份
-- 安装健康扫描与安全修复
 - 本机 Skill 复制迁入中央库（可选替换为库链接）
-- 后端批量操作（部分成功汇总）
+- 后端批量操作（部分成功 / skipped；破坏性操作需确认）
 - ZIP 导入导出、应用内文件编辑
 - 备份保留策略（按天 / 按数量）与应用内检查更新
 
@@ -60,21 +61,13 @@ cd src-tauri && cargo test
 - `TAURI_SIGNING_PRIVATE_KEY`：与 `tauri.conf.json` 中 `plugins.updater.pubkey` 对应的私钥全文
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：可选
 
-本地生成密钥：
-
-```bash
-cd app
-npx tauri signer generate -w src-tauri/updater-keys
-```
-
-私钥勿提交仓库（已在 `.gitignore`）。
-
 ## 路线图
 
 - [x] 应用内文件编辑
 - [x] ZIP 导入导出
-- [x] 批量操作（后端协议）
+- [x] 批量操作（后端协议 + 安全确认）
 - [x] 安装健康检查 / 迁入库
+- [x] 库 Skill 生命周期与安装总览
 - [x] 备份保留策略
 - [x] 自动更新（依赖 Releases 签名配置）
 - [ ] 在线技能市场

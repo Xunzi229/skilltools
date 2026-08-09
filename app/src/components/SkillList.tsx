@@ -61,6 +61,7 @@ export function SkillList({
   onClearBatchResult,
 }: SkillListProps) {
   const [migrateOpen, setMigrateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [replaceWithLink, setReplaceWithLink] = useState(true);
   let content;
 
@@ -154,7 +155,7 @@ export function SkillList({
             <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchResume}>恢复</button>
             <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchBackup}>备份</button>
             <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={() => setMigrateOpen(true)}>迁入库</button>
-            <button type="button" className="rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55" disabled={batchBusy} onClick={onBatchDelete}>删除</button>
+            <button type="button" className="rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55" disabled={batchBusy} onClick={() => setDeleteOpen(true)}>删除</button>
             <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover" disabled={batchBusy} onClick={onClearSelection}>清除</button>
           </div>
         )}
@@ -188,6 +189,19 @@ export function SkillList({
           迁移后替换为库链接安装
         </label>
       </ConfirmDialog>
+      <ConfirmDialog
+        open={deleteOpen}
+        title={`删除 ${selectedIds.size} 个 Skill？`}
+        message="将逐项先备份再删除。单项失败不会中断其余项。"
+        confirmLabel="备份并删除"
+        tone="danger"
+        busy={batchBusy}
+        onCancel={() => setDeleteOpen(false)}
+        onConfirm={() => {
+          onBatchDelete();
+          setDeleteOpen(false);
+        }}
+      />
       {warnings.length > 0 && (
         <aside
           className="mx-3 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"

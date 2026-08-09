@@ -8,6 +8,7 @@ import type {
 } from "../model/skill";
 import { formatBatchSummary } from "../hooks/useBatchActions";
 import { displayDescription } from "../utils/skillDisplay";
+import { NameDialog } from "./NameDialog";
 import { SkillCard } from "./SkillCard";
 
 type StatusTab = "all" | "uninstalled" | "installed" | "custom";
@@ -32,6 +33,7 @@ interface LibraryListProps {
   onBatchUninstall: (provider: Provider) => void;
   onBatchSetGroup: (groupId: string | null) => void;
   onBatchAddTag: (tagId: string) => void;
+  onCreateSkill: (name: string) => Promise<void>;
   onRetry: () => void;
   onClearBatchResult: () => void;
 }
@@ -56,11 +58,14 @@ export function LibraryList({
   onBatchUninstall,
   onBatchSetGroup,
   onBatchAddTag,
+  onCreateSkill,
   onRetry,
   onClearBatchResult,
 }: LibraryListProps) {
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
 
   const filtered = useMemo(() => {
     return skills.filter((skill) => {
@@ -178,8 +183,20 @@ export function LibraryList({
       aria-label="库 Skill 列表"
     >
       <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
-        <h2 className="m-0 text-[18px] font-semibold text-ink">{title}</h2>
-        <p className="mt-1 text-[12px] text-ink-2">浏览和管理可用的 Skills</p>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h2 className="m-0 text-[18px] font-semibold text-ink">{title}</h2>
+            <p className="mt-1 text-[12px] text-ink-2">浏览和管理可用的 Skills</p>
+          </div>
+          <button
+            type="button"
+            className="shrink-0 rounded-lg border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
+            disabled={batchBusy || createBusy}
+            onClick={() => setCreateOpen(true)}
+          >
+            新建
+          </button>
+        </div>
         <label className="mt-3 flex h-[38px] items-center gap-2 rounded-lg border border-line bg-panel px-3">
           <span className="text-ink-3" aria-hidden="true">
             ⌕
@@ -377,6 +394,19 @@ export function LibraryList({
           </ul>
         )}
       </div>
+      <NameDialog
+        open={createOpen}
+        title="新建库 Skill"
+        confirmLabel="创建"
+        busy={createBusy}
+        onCancel={() => setCreateOpen(false)}
+        onConfirm={(name) => {
+          setCreateBusy(true);
+          void onCreateSkill(name)
+            .then(() => setCreateOpen(false))
+            .finally(() => setCreateBusy(false));
+        }}
+      />
     </section>
   );
 }

@@ -10,6 +10,7 @@ import type {
 } from "../model/skill";
 import { APP_VERSION } from "../version";
 import { pickDirectory } from "../utils/dialogs";
+import { formatUpdaterError } from "../utils/errors";
 
 interface SettingsPanelProps {
   api: SkillApi;
@@ -196,13 +197,8 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
       setUpdateMessage("更新已安装，即将重启…");
       await relaunch();
     } catch (err: unknown) {
-      const text =
-        err instanceof Error
-          ? err.message
-          : typeof err === "object" && err && "message" in err
-            ? String((err as { message: unknown }).message)
-            : "检查更新失败";
-      setUpdateMessage(text);
+      // plugin-updater 的 Error 经 IPC 序列化为纯字符串，不能只认 Error/message
+      setUpdateMessage(formatUpdaterError(err));
     } finally {
       setUpdateBusy(false);
     }

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { SkillApi } from "./api/skillApi";
 import { tauriSkillApi } from "./api/skillApi";
 import { BackupList } from "./components/BackupList";
+import { InstallationsPanel } from "./components/InstallationsPanel";
 import { LibraryDetail } from "./components/LibraryDetail";
 import { LibraryList } from "./components/LibraryList";
 import { ProjectPanel } from "./components/ProjectPanel";
@@ -12,7 +13,7 @@ import { SkillList } from "./components/SkillList";
 import { useBatchActions } from "./hooks/useBatchActions";
 import { useSkills } from "./hooks/useSkills";
 import { useLibrary } from "./hooks/useLibrary";
-import type { Provider } from "./model/skill";
+import type { Provider, SkillInstallation } from "./model/skill";
 import "./styles.css";
 
 interface AppProps {
@@ -26,6 +27,7 @@ const filterTitles: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
   paused: "已暂停",
+  installations: "安装",
   projects: "项目",
   backups: "备份记录",
   settings: "设置",
@@ -78,6 +80,15 @@ function App({ api = tauriSkillApi }: AppProps) {
     clearActionError,
   } = useSkills(api);
   const library = useLibrary(api);
+  const [installations, setInstallations] = useState<SkillInstallation[]>([]);
+
+  const refreshInstallations = useCallback(async () => {
+    try {
+      setInstallations(await api.listInstallations());
+    } catch {
+      setInstallations([]);
+    }
+  }, [api]);
 
   useEffect(() => {
     void api
@@ -90,8 +101,17 @@ function App({ api = tauriSkillApi }: AppProps) {
       });
   }, [api]);
 
+  useEffect(() => {
+    void refreshInstallations();
+  }, [refreshInstallations, library.librarySkills]);
+
   const visibleSkills = useMemo(() => {
-    if (filter === "backups" || filter === "settings" || filter === "projects") {
+    if (
+      filter === "backups" ||
+      filter === "settings" ||
+      filter === "projects" ||
+      filter === "installations"
+    ) {
       return [];
     }
 
@@ -171,6 +191,7 @@ function App({ api = tauriSkillApi }: AppProps) {
         tags={library.tags}
         projectCount={library.projects.length}
         backupCount={backups.length}
+        installationCount={installations.length}
         activeFilter={filter}
         loading={listLoading || library.loading}
         busy={library.pendingAction !== null}
@@ -184,6 +205,7 @@ function App({ api = tauriSkillApi }: AppProps) {
         onRefresh={() => {
           void refresh();
           void library.refresh();
+          void refreshInstallations();
         }}
         onCreateGroup={async (name) => {
           await library.createGroup(name);
@@ -216,7 +238,19 @@ function App({ api = tauriSkillApi }: AppProps) {
           onSettingsSaved={() => {
             void refresh();
             void library.refresh();
+            void refreshInstallations();
           }}
+        />
+      ) : filter === "installations" ? (
+        <InstallationsPanel
+          api={api}
+          librarySkills={library.librarySkills}
+          onUninstalled={() => {
+            void library.refresh();
+            void refresh();
+            void refreshInstallations();
+          }}
+          onOpenSettingsHealth={() => setFilter("settings")}
         />
       ) : filter === "projects" ? (
         <ProjectPanel
@@ -282,6 +316,10 @@ function App({ api = tauriSkillApi }: AppProps) {
               if (batchBusy || ids.length === 0) return;
               void batchAddSkillTags(ids, tagId).then(() => void library.refresh());
             }}
+            onCreateSkill={async (name) => {
+              await library.createLibrarySkill(name, "");
+              void refreshInstallations();
+            }}
             onRetry={() => void library.refresh()}
             onClearBatchResult={clearBatchResult}
           />
@@ -297,9 +335,22 @@ function App({ api = tauriSkillApi }: AppProps) {
             onSetGroup={library.setSkillGroup}
             onCreateTag={(name, color) => library.createTag(name, color ?? null)}
             onCreateGroup={(name) => library.createGroup(name)}
-            onInstall={library.installSkill}
-            onUninstall={library.uninstallSkill}
+            onInstall={async (id, provider) => {
+              await library.installSkill(id, provider);
+              void refreshInstallations();
+            }}
+            onUninstall={async (id, provider) => {
+              await library.uninstallSkill(id, provider);
+              void refreshInstallations();
+            }}
             onExportZip={library.exportLibrarySkillZip}
+            onRename={async (id, newName) => {
+              await library.renameLibrarySkill(id, newName);
+            }}
+            onDelete={async (id) => {
+              await library.deleteLibrarySkill(id);
+              void refreshInstallations();
+            }}
             onClearError={library.clearActionError}
           />
         </>

@@ -5,7 +5,9 @@ pub mod error;
 mod external_open;
 mod fs_ops;
 pub mod git_ops;
+mod install_health;
 mod json_store;
+mod library_lifecycle;
 pub mod library_repository;
 pub mod model;
 pub mod paths;
@@ -83,6 +85,9 @@ pub fn run() {
             commands::scan_install_health,
             commands::repair_installations,
             commands::migrate_provider_skill,
+            commands::create_library_skill,
+            commands::rename_library_skill,
+            commands::delete_library_skill,
             commands::list_tags,
             commands::create_tag,
             commands::rename_tag,

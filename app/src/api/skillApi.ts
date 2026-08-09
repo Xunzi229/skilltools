@@ -73,6 +73,13 @@ export interface SkillApi {
     skillId: string,
     replaceWithLink: boolean,
   ): Promise<MigrateResult>;
+  createLibrarySkill(
+    name: string,
+    description: string,
+    projectId?: string | null,
+  ): Promise<LibrarySkillSummary>;
+  renameLibrarySkill(skillId: string, newName: string): Promise<LibrarySkillSummary>;
+  deleteLibrarySkill(skillId: string): Promise<void>;
   listTags(): Promise<Tag[]>;
   createTag(name: string, color: string | null): Promise<Tag>;
   renameTag(id: string, name: string): Promise<Tag>;
@@ -179,6 +186,11 @@ export const tauriSkillApi: SkillApi = {
   repairInstallations: () => call("repair_installations"),
   migrateProviderSkill: (skillId, replaceWithLink) =>
     call("migrate_provider_skill", { skillId, replaceWithLink }),
+  createLibrarySkill: (name, description, projectId = null) =>
+    call("create_library_skill", { name, description, projectId }),
+  renameLibrarySkill: (skillId, newName) =>
+    call("rename_library_skill", { skillId, newName }),
+  deleteLibrarySkill: (skillId) => call("delete_library_skill", { skillId }),
   listTags: () => call("list_tags"),
   createTag: (name, color) => call("create_tag", { name, color }),
   renameTag: (id, name) => call("rename_tag", { id, name }),
