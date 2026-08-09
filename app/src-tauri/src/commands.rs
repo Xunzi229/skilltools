@@ -1037,8 +1037,7 @@ pub fn validate_skill_frontmatter(content: String) -> FrontmatterValidation {
 pub fn update_skill_metadata(
     state: State<'_, AppState>,
     skill_id: String,
-    name: String,
-    description: String,
+    fields: std::collections::HashMap<String, String>,
 ) -> Result<FrontmatterValidation, CommandError> {
     let detail = state
         .skills
@@ -1047,15 +1046,14 @@ pub fn update_skill_metadata(
         .detail(&skill_id)
         .map_err(map_app_error)?;
     let path = detail.resolved_path.unwrap_or(detail.current_path);
-    skill_metadata::write_skill_metadata(&path, &name, &description).map_err(map_app_error)
+    skill_metadata::write_skill_metadata(&path, &fields).map_err(map_app_error)
 }
 
 #[tauri::command]
 pub fn update_library_skill_metadata(
     state: State<'_, AppState>,
     library_skill_id: String,
-    name: String,
-    description: String,
+    fields: std::collections::HashMap<String, String>,
 ) -> Result<FrontmatterValidation, CommandError> {
     let detail = state
         .library
@@ -1063,7 +1061,7 @@ pub fn update_library_skill_metadata(
         .map_err(|_| state_lock_error())?
         .get_library_skill_detail(&library_skill_id)
         .map_err(map_app_error)?;
-    skill_metadata::write_skill_metadata(&detail.summary.absolute_path, &name, &description)
+    skill_metadata::write_skill_metadata(&detail.summary.absolute_path, &fields)
         .map_err(map_app_error)
 }
 

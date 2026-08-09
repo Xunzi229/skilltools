@@ -287,11 +287,12 @@ export function LibraryDetail({
 
         {files.preview?.relativePath.replace(/\\/g, "/") === "SKILL.md" && (
           <SkillMetaForm
+            markdown={files.preview.content ?? skill.skillMarkdown}
             name={skill.name}
             description={skill.description}
             busy={busy}
-            onSave={async (name, description) => {
-              await api.updateLibrarySkillMetadata(skill.id, name, description);
+            onSave={async (fields) => {
+              await api.updateLibrarySkillMetadata(skill.id, fields);
               onMetadataSaved?.();
             }}
           />

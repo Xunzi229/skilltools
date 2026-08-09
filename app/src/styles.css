@@ -23,6 +23,8 @@
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+    --preview-font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    --preview-font-size: 14px;
   }
 
   :root[data-theme="dark"] {
@@ -71,8 +73,17 @@
 }
 
 @layer components {
+  .file-preview-body,
+  .file-preview-editor,
+  .file-preview-text,
+  .markdown-body,
+  .code-panel {
+    font-family: var(--preview-font-family);
+    font-size: var(--preview-font-size);
+  }
+
   .markdown-body {
-    @apply px-4 py-3 text-sm leading-6 text-ink;
+    @apply px-4 py-3 leading-relaxed text-ink;
   }
 
   .markdown-body h1,
@@ -82,15 +93,15 @@
   }
 
   .markdown-body h1 {
-    font-size: 20px;
+    font-size: 1.45em;
   }
 
   .markdown-body h2 {
-    font-size: 18px;
+    font-size: 1.25em;
   }
 
   .markdown-body h3 {
-    font-size: 16px;
+    font-size: 1.1em;
   }
 
   .markdown-body p,
@@ -99,15 +110,160 @@
     @apply mb-3;
   }
 
+  .markdown-body ul,
+  .markdown-body ol {
+    @apply pl-5;
+  }
+
+  .markdown-body li {
+    @apply mb-1;
+  }
+
+  .markdown-body blockquote {
+    @apply mb-3 border-l-4 border-line pl-3 text-ink-2;
+  }
+
+  .markdown-body table {
+    @apply mb-3 w-full border-collapse text-[0.95em];
+  }
+
+  .markdown-body th,
+  .markdown-body td {
+    @apply border border-line px-2 py-1 text-left;
+  }
+
   .markdown-body code {
-    @apply rounded bg-hover px-1 py-0.5 font-mono text-[12px];
+    @apply rounded bg-hover px-1 py-0.5 font-mono text-[0.9em];
   }
 
-  .markdown-body pre {
-    @apply mb-3 overflow-auto rounded-lg border border-line bg-hover p-3 font-mono text-[12px];
+  .markdown-body pre,
+  .markdown-body .md-code-block {
+    @apply mb-3 overflow-auto rounded-lg border border-line bg-hover p-0 font-mono text-[0.9em];
   }
 
+  .markdown-body .md-code-block {
+    @apply p-0;
+  }
+
+  .markdown-body .md-code-lang {
+    @apply border-b border-line px-3 py-1 text-[10px] tracking-wide text-ink-3 uppercase;
+  }
+
+  .markdown-body .md-code-block code,
   .markdown-body pre code {
-    @apply bg-transparent p-0;
+    @apply block bg-transparent p-3;
+  }
+
+  .code-panel {
+    @apply grid min-h-full grid-cols-[auto_minmax(0,1fr)] bg-panel;
+  }
+
+  .code-gutter {
+    @apply select-none border-r border-line bg-hover px-2 py-3 text-right text-ink-3;
+  }
+
+  .code-gutter span {
+    @apply block;
+  }
+
+  .code-pre {
+    @apply m-0 overflow-auto px-3 py-3;
+  }
+
+  .code-pre code {
+    @apply block whitespace-pre bg-transparent p-0;
+  }
+
+  /* highlight.js token colors (light / dark) */
+  .hljs {
+    color: var(--color-ink);
+    background: transparent;
+  }
+
+  .hljs-comment,
+  .hljs-quote {
+    color: #64748b;
+    font-style: italic;
+  }
+
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-addition {
+    color: #7c3aed;
+  }
+
+  .hljs-string,
+  .hljs-meta .hljs-string,
+  .hljs-attribute,
+  .hljs-template-tag,
+  .hljs-template-variable {
+    color: #059669;
+  }
+
+  .hljs-number,
+  .hljs-literal,
+  .hljs-symbol,
+  .hljs-bullet {
+    color: #d97706;
+  }
+
+  .hljs-title,
+  .hljs-section,
+  .hljs-name,
+  .hljs-selector-id,
+  .hljs-selector-class {
+    color: #2563eb;
+  }
+
+  .hljs-type,
+  .hljs-class .hljs-title,
+  .hljs-built_in {
+    color: #0891b2;
+  }
+
+  .hljs-attr,
+  .hljs-variable,
+  .hljs-params {
+    color: #0f766e;
+  }
+
+  .hljs-deletion {
+    color: #dc2626;
+  }
+
+  :root[data-theme="dark"] .hljs-comment,
+  :root[data-theme="dark"] .hljs-quote {
+    color: #94a3b8;
+  }
+
+  :root[data-theme="dark"] .hljs-keyword,
+  :root[data-theme="dark"] .hljs-selector-tag {
+    color: #c4b5fd;
+  }
+
+  :root[data-theme="dark"] .hljs-string,
+  :root[data-theme="dark"] .hljs-meta .hljs-string {
+    color: #6ee7b7;
+  }
+
+  :root[data-theme="dark"] .hljs-number,
+  :root[data-theme="dark"] .hljs-literal {
+    color: #fbbf24;
+  }
+
+  :root[data-theme="dark"] .hljs-title,
+  :root[data-theme="dark"] .hljs-section,
+  :root[data-theme="dark"] .hljs-name {
+    color: #93c5fd;
+  }
+
+  :root[data-theme="dark"] .hljs-type,
+  :root[data-theme="dark"] .hljs-built_in {
+    color: #67e8f9;
+  }
+
+  :root[data-theme="dark"] .hljs-attr,
+  :root[data-theme="dark"] .hljs-variable {
+    color: #5eead4;
   }
 }

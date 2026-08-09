@@ -33,6 +33,8 @@ interface SidebarProps {
   activeFilter: SkillFilter;
   loading: boolean;
   busy?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
   onFilterChange: (filter: SkillFilter) => void;
   onRefresh: () => void;
   onCreateGroup: (name: string) => Promise<void>;
@@ -73,6 +75,8 @@ export function Sidebar({
   activeFilter,
   loading,
   busy = false,
+  collapsed = false,
+  onToggleCollapse,
   onFilterChange,
   onRefresh,
   onCreateGroup,
@@ -88,6 +92,32 @@ export function Sidebar({
   const [menuKey, setMenuKey] = useState<string | null>(null);
 
   const sortedGroups = [...groups].sort((left, right) => left.order - right.order);
+
+  if (collapsed) {
+    return (
+      <aside
+        className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-3 overflow-hidden bg-sidebar px-1.5 py-4 text-slate-300"
+        aria-label="导航栏（已折叠）"
+      >
+        <div
+          className="grid size-9 place-items-center rounded-[10px] bg-slate-700 text-[15px] font-bold text-white"
+          aria-hidden="true"
+        >
+          S
+        </div>
+        <button
+          type="button"
+          className="rounded-md border border-white/15 px-2 py-1.5 text-[11px] text-slate-200 hover:bg-white/10"
+          aria-expanded={false}
+          aria-label="展开侧边栏"
+          title="展开侧边栏"
+          onClick={onToggleCollapse}
+        >
+          »»
+        </button>
+      </aside>
+    );
+  }
 
   const navItem = (id: SkillFilter, label: string, count: number) => (
     <button
@@ -240,20 +270,35 @@ export function Sidebar({
   };
 
   return (
-    <aside className="flex h-full min-h-0 min-w-0 w-[240px] flex-col overflow-hidden bg-sidebar px-3.5 pb-4 pt-6 text-slate-300">
-      <header className="mb-6 flex items-center gap-3 px-2">
+    <aside
+      className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-sidebar px-3.5 pb-4 pt-6 text-slate-300"
+      aria-label="导航栏"
+    >
+      <header className="mb-4 flex items-start gap-2 px-2">
         <div
           className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-slate-700 text-[17px] font-bold text-white"
           aria-hidden="true"
         >
           S
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="m-0 text-[16px] font-semibold leading-tight text-white">
             Skill Manager
           </h1>
           <p className="m-0 mt-0.5 text-[12px] text-slate-400">本地 Skill 管理工具</p>
         </div>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            className="mt-0.5 shrink-0 rounded-md border border-white/15 px-2 py-1 text-[11px] text-slate-300 hover:bg-white/10"
+            aria-expanded={true}
+            aria-label="折叠侧边栏"
+            title="折叠侧边栏"
+            onClick={onToggleCollapse}
+          >
+            ««
+          </button>
+        )}
       </header>
 
       <nav

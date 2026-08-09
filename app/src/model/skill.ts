@@ -134,6 +134,9 @@ export interface AppSettings {
   backupRetentionDays: number | null;
   /** null = 不限制条数 */
   backupMaxCount: number | null;
+  /** 预览区字体名，如 Microsoft YaHei */
+  previewFontFamily: string;
+  previewFontSize: number;
 }
 
 export interface AppPathsInfo {
@@ -233,5 +236,7 @@ export interface FrontmatterValidation {
   ok: boolean;
   name: string | null;
   description: string | null;
+  /** 解析出的全部 frontmatter 字段（标量/嵌套均以字符串表示） */
+  fields: Record<string, string>;
   warnings: string[];
 }

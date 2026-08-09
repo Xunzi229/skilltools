@@ -10,6 +10,13 @@ import type {
 import { APP_VERSION } from "../version";
 import { pickDirectory } from "../utils/dialogs";
 import { formatUpdaterError } from "../utils/errors";
+import {
+  DEFAULT_PREVIEW_FONT_FAMILY,
+  DEFAULT_PREVIEW_FONT_SIZE,
+  PREVIEW_FONT_OPTIONS,
+  PREVIEW_FONT_SIZE_OPTIONS,
+  applyPreviewTypography,
+} from "../utils/previewTypography";
 
 interface SettingsPanelProps {
   api: SkillApi;
@@ -47,6 +54,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
         if (cancelled) return;
         setSettings(nextSettings);
         setPaths(nextPaths);
+        applyPreviewTypography(nextSettings);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -70,6 +78,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
       setSettings(saved);
       setPaths(await api.getAppPaths());
       document.documentElement.dataset.theme = saved.theme;
+      applyPreviewTypography(saved);
       setMessage("设置已保存");
       onSettingsSaved();
     } catch (err: unknown) {
@@ -171,7 +180,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         <h2 className="m-0 text-[28px] font-bold text-ink">设置</h2>
         <p className="mt-2 text-[14px] text-ink-2">
-          主题、路径、备份策略与更新（v{APP_VERSION}）。安装健康见「安装」页。
+          主题、预览字体、路径、备份策略与更新（v{APP_VERSION}）。安装健康见「安装」页。
         </p>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
@@ -209,6 +218,80 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                   </button>
                 ))}
               </div>
+            </section>
+            <section className="mb-8">
+              <h3 className="m-0 text-[15px] font-semibold text-ink">预览字体</h3>
+              <p className="mt-2 text-[12px] text-ink-3">
+                用于文件预览与编辑区的字体类型和字号。
+              </p>
+              <div className="mt-3 flex flex-wrap gap-4">
+                <label className="flex flex-col gap-1 text-[12px] text-ink-2">
+                  字体类型
+                  <select
+                    className="min-w-[200px] rounded-lg border border-line bg-panel px-3 py-1.5 text-[13px] text-ink"
+                    value={settings?.previewFontFamily || DEFAULT_PREVIEW_FONT_FAMILY}
+                    disabled={saving || !settings}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      void save({
+                        ...settings,
+                        previewFontFamily: event.target.value,
+                      });
+                    }}
+                    style={{
+                      fontFamily: `"${settings?.previewFontFamily || DEFAULT_PREVIEW_FONT_FAMILY}"`,
+                    }}
+                  >
+                    {PREVIEW_FONT_OPTIONS.map((font) => (
+                      <option
+                        key={font.family}
+                        value={font.family}
+                        style={{ fontFamily: `"${font.family}"` }}
+                      >
+                        {font.label}
+                      </option>
+                    ))}
+                    {settings?.previewFontFamily &&
+                      !PREVIEW_FONT_OPTIONS.some(
+                        (font) => font.family === settings.previewFontFamily,
+                      ) && (
+                        <option value={settings.previewFontFamily}>
+                          {settings.previewFontFamily}
+                        </option>
+                      )}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-[12px] text-ink-2">
+                  字号
+                  <select
+                    className="rounded-lg border border-line bg-panel px-3 py-1.5 text-[13px] text-ink"
+                    value={settings?.previewFontSize || DEFAULT_PREVIEW_FONT_SIZE}
+                    disabled={saving || !settings}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      void save({
+                        ...settings,
+                        previewFontSize: Number(event.target.value),
+                      });
+                    }}
+                  >
+                    {PREVIEW_FONT_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}px
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <p
+                className="mt-3 rounded-lg border border-line px-3 py-2 text-ink-2"
+                style={{
+                  fontFamily: `"${settings?.previewFontFamily || DEFAULT_PREVIEW_FONT_FAMILY}"`,
+                  fontSize: `${settings?.previewFontSize || DEFAULT_PREVIEW_FONT_SIZE}px`,
+                }}
+              >
+                预览效果：The quick brown fox 中文预览 0123456789
+              </p>
             </section>
             <section className="mb-8">
               <div className="flex items-center justify-between gap-3">

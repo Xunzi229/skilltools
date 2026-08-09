@@ -25,6 +25,8 @@ interface LibraryListProps {
   errorMessage: string | null;
   batchBusy: boolean;
   batchResult: BatchResult | null;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
   onSearchChange: (value: string) => void;
   onSelect: (id: string) => void;
   onToggleSelect: (id: string) => void;
@@ -50,6 +52,8 @@ export function LibraryList({
   errorMessage,
   batchBusy,
   batchResult,
+  collapsed: panelCollapsed = false,
+  onToggleCollapse,
   onSearchChange,
   onSelect,
   onToggleSelect,
@@ -177,25 +181,65 @@ export function LibraryList({
     });
   };
 
+  if (panelCollapsed) {
+    return (
+      <section
+        className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-3 overflow-hidden border-r border-line-strong bg-panel px-1.5 py-4"
+        aria-label="库 Skill 列表（已折叠）"
+      >
+        <button
+          type="button"
+          className="rounded-md border border-line px-2 py-1.5 text-[11px] text-ink-2 hover:bg-hover"
+          aria-expanded={false}
+          aria-label="展开列表"
+          title="展开列表"
+          onClick={onToggleCollapse}
+        >
+          »»
+        </button>
+        <span
+          className="mt-2 text-[11px] font-medium text-ink-3"
+          style={{ writingMode: "vertical-rl" }}
+        >
+          {title}
+        </span>
+      </section>
+    );
+  }
+
   return (
     <section
-      className="flex h-full min-h-0 min-w-0 w-[340px] flex-col overflow-hidden border-r border-line-strong bg-panel"
+      className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-r border-line-strong bg-panel"
       aria-label="库 Skill 列表"
     >
       <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
         <div className="flex items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0">
             <h2 className="m-0 text-[18px] font-semibold text-ink">{title}</h2>
             <p className="mt-1 text-[12px] text-ink-2">浏览和管理可用的 Skills</p>
           </div>
-          <button
-            type="button"
-            className="shrink-0 rounded-lg border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
-            disabled={batchBusy || createBusy}
-            onClick={() => setCreateOpen(true)}
-          >
-            新建
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              className="rounded-lg border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
+              disabled={batchBusy || createBusy}
+              onClick={() => setCreateOpen(true)}
+            >
+              新建
+            </button>
+            {onToggleCollapse && (
+              <button
+                type="button"
+                className="rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover"
+                aria-expanded={true}
+                aria-label="折叠列表"
+                title="折叠列表"
+                onClick={onToggleCollapse}
+              >
+                ««
+              </button>
+            )}
+          </div>
         </div>
         <label className="mt-3 flex h-[38px] items-center gap-2 rounded-lg border border-line bg-panel px-3">
           <span className="text-ink-3" aria-hidden="true">

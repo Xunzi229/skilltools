@@ -90,13 +90,11 @@ export interface SkillApi {
   validateSkillFrontmatter(content: string): Promise<FrontmatterValidation>;
   updateSkillMetadata(
     skillId: string,
-    name: string,
-    description: string,
+    fields: Record<string, string>,
   ): Promise<FrontmatterValidation>;
   updateLibrarySkillMetadata(
     librarySkillId: string,
-    name: string,
-    description: string,
+    fields: Record<string, string>,
   ): Promise<FrontmatterValidation>;
   createLibrarySkill(
     name: string,
@@ -219,10 +217,10 @@ export const tauriSkillApi: SkillApi = {
   applyInstallPreset: (id) => call("apply_install_preset", { id }),
   validateSkillFrontmatter: (content) =>
     call("validate_skill_frontmatter", { content }),
-  updateSkillMetadata: (skillId, name, description) =>
-    call("update_skill_metadata", { skillId, name, description }),
-  updateLibrarySkillMetadata: (librarySkillId, name, description) =>
-    call("update_library_skill_metadata", { librarySkillId, name, description }),
+  updateSkillMetadata: (skillId, fields) =>
+    call("update_skill_metadata", { skillId, fields }),
+  updateLibrarySkillMetadata: (librarySkillId, fields) =>
+    call("update_library_skill_metadata", { librarySkillId, fields }),
   createLibrarySkill: (name, description, projectId = null) =>
     call("create_library_skill", { name, description, projectId }),
   renameLibrarySkill: (skillId, newName) =>

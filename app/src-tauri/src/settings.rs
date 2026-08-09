@@ -48,6 +48,14 @@ fn default_backup_max_count() -> Option<u32> {
     Some(200)
 }
 
+fn default_preview_font_family() -> String {
+    "Microsoft YaHei".to_string()
+}
+
+fn default_preview_font_size() -> u32 {
+    14
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -60,6 +68,11 @@ pub struct AppSettings {
     /// None = no count cap
     #[serde(default = "default_backup_max_count")]
     pub backup_max_count: Option<u32>,
+    /// Preview font family name, e.g. "Microsoft YaHei"
+    #[serde(default = "default_preview_font_family")]
+    pub preview_font_family: String,
+    #[serde(default = "default_preview_font_size")]
+    pub preview_font_size: u32,
 }
 
 impl Default for AppSettings {
@@ -69,6 +82,8 @@ impl Default for AppSettings {
             skill_root_overrides: SkillRootOverrides::default(),
             backup_retention_days: default_backup_retention_days(),
             backup_max_count: default_backup_max_count(),
+            preview_font_family: default_preview_font_family(),
+            preview_font_size: default_preview_font_size(),
         }
     }
 }
@@ -124,6 +139,8 @@ mod tests {
             },
             backup_retention_days: Some(30),
             backup_max_count: Some(200),
+            preview_font_family: "Consolas".into(),
+            preview_font_size: 16,
         };
         save_settings(base.path(), &settings).unwrap();
         let loaded = load_settings(base.path()).unwrap();

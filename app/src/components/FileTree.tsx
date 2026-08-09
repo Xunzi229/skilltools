@@ -5,6 +5,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { useLocalStorageBool } from "../hooks/useLocalStorageBool";
 import type { ExternalEditor, FileNode } from "../model/skill";
 
 interface FileTreeProps {
@@ -180,6 +181,10 @@ export function FileTree({
   onOpenWith,
 }: FileTreeProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [panelCollapsed, setPanelCollapsed] = useLocalStorageBool(
+    "skilltools.ui.fileTreeCollapsed",
+    false,
+  );
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [openSubmenu, setOpenSubmenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -290,10 +295,54 @@ export function FileTree({
     [],
   );
 
+  if (panelCollapsed) {
+    return (
+      <section
+        className="relative flex min-h-0 w-10 shrink-0 flex-col items-center gap-2 overflow-hidden border-r border-line-strong bg-panel py-2"
+        aria-label="目录结构（已折叠）"
+      >
+        <button
+          type="button"
+          className="rounded-md border border-line px-1.5 py-1 text-[11px] text-ink-2 hover:bg-hover"
+          aria-expanded={false}
+          aria-label="展开目录结构"
+          title="展开目录结构"
+          onClick={() => setPanelCollapsed(false)}
+        >
+          »»
+        </button>
+        <span
+          className="text-[11px] font-medium text-ink-3"
+          style={{ writingMode: "vertical-rl" }}
+        >
+          目录结构
+        </span>
+      </section>
+    );
+  }
+
   return (
     <section className="relative flex min-h-0 w-[240px] shrink-0 flex-col overflow-hidden border-r border-line-strong bg-panel">
-      <div className="shrink-0 border-b border-line-strong px-3 py-2 text-[12px] font-medium text-ink-2">
-        目录结构
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line-strong px-3 py-2 text-[12px] font-medium text-ink-2">
+        <button
+          type="button"
+          className="min-w-0 flex-1 truncate text-left hover:text-ink"
+          aria-expanded={true}
+          aria-label="折叠目录结构"
+          title="折叠目录结构"
+          onClick={() => setPanelCollapsed(true)}
+        >
+          目录结构
+        </button>
+        <button
+          type="button"
+          className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[11px] text-ink-3 hover:bg-hover"
+          aria-label="折叠目录结构"
+          title="折叠目录结构"
+          onClick={() => setPanelCollapsed(true)}
+        >
+          ««
+        </button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
         {loading ? (

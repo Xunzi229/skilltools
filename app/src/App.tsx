@@ -12,9 +12,11 @@ import { SkillDetail } from "./components/SkillDetail";
 import { SkillList } from "./components/SkillList";
 import { useBatchActions } from "./hooks/useBatchActions";
 import { useInstallations } from "./hooks/useInstallations";
+import { useLocalStorageBool } from "./hooks/useLocalStorageBool";
 import { useSkills } from "./hooks/useSkills";
 import { useLibrary } from "./hooks/useLibrary";
 import type { Provider } from "./model/skill";
+import { applyPreviewTypography } from "./utils/previewTypography";
 import "./styles.css";
 
 interface AppProps {
@@ -40,6 +42,14 @@ function App({ api = tauriSkillApi }: AppProps) {
   const [skillSelectedIds, setSkillSelectedIds] = useState<Set<string>>(new Set());
   const [librarySelectedIds, setLibrarySelectedIds] = useState<Set<string>>(
     new Set(),
+  );
+  const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageBool(
+    "skilltools.ui.sidebarCollapsed",
+    false,
+  );
+  const [listCollapsed, setListCollapsed] = useLocalStorageBool(
+    "skilltools.ui.listCollapsed",
+    false,
   );
   const {
     batchBusy,
@@ -88,9 +98,14 @@ function App({ api = tauriSkillApi }: AppProps) {
       .getSettings()
       .then((settings) => {
         document.documentElement.dataset.theme = settings.theme;
+        applyPreviewTypography(settings);
       })
       .catch(() => {
         document.documentElement.dataset.theme = "light";
+        applyPreviewTypography({
+          previewFontFamily: "Microsoft YaHei",
+          previewFontSize: 14,
+        });
       });
   }, [api]);
 
@@ -175,8 +190,16 @@ function App({ api = tauriSkillApi }: AppProps) {
     });
   };
 
+  const sidebarWidth = sidebarCollapsed ? 44 : 240;
+  const listWidth = listCollapsed ? 44 : 340;
+
   return (
-    <main className="grid h-screen min-h-[600px] w-screen grid-cols-[240px_340px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-panel">
+    <main
+      className="grid h-screen min-h-[600px] w-screen grid-rows-[minmax(0,1fr)] overflow-hidden bg-panel"
+      style={{
+        gridTemplateColumns: `${sidebarWidth}px ${listWidth}px minmax(0,1fr)`,
+      }}
+    >
       <Sidebar
         skills={skills}
         librarySkills={library.librarySkills}
@@ -188,6 +211,8 @@ function App({ api = tauriSkillApi }: AppProps) {
         activeFilter={filter}
         loading={listLoading || library.loading}
         busy={library.pendingAction !== null}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
         onFilterChange={(nextFilter) => {
           setFilter(nextFilter);
           setSearch("");
@@ -285,6 +310,8 @@ function App({ api = tauriSkillApi }: AppProps) {
             errorMessage={library.loadError?.message ?? null}
             batchBusy={batchBusy}
             batchResult={batchResult}
+            collapsed={listCollapsed}
+            onToggleCollapse={() => setListCollapsed((value) => !value)}
             onSearchChange={setSearch}
             onSelect={library.selectLibrarySkill}
             onToggleSelect={(id) => toggleSet(setLibrarySelectedIds, id)}
@@ -368,6 +395,8 @@ function App({ api = tauriSkillApi }: AppProps) {
             hasScannedSkills={skills.length > 0}
             batchBusy={batchBusy}
             batchResult={batchResult}
+            collapsed={listCollapsed}
+            onToggleCollapse={() => setListCollapsed((value) => !value)}
             onSearchChange={setSearch}
             onSelect={selectSkill}
             onToggleSelect={(id) => toggleSet(setSkillSelectedIds, id)}

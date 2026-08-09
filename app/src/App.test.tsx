@@ -268,6 +268,7 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
       ok: true,
       name: null,
       description: null,
+      fields: {},
       warnings: [],
     }),
     updateSkillMetadata: unavailable,
@@ -292,6 +293,8 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
       skillRootOverrides: { cursor: null, claude: null, codex: null },
       backupRetentionDays: 30,
       backupMaxCount: 200,
+      previewFontFamily: "Microsoft YaHei",
+      previewFontSize: 14,
     }),
     saveSettings: async (settings) => settings,
     getAppPaths: async () => ({
@@ -505,7 +508,7 @@ describe("Skill Manager", () => {
     expect(settingsButton).toBeEnabled();
     await user.click(settingsButton);
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
-    expect(screen.getByText(/主题、路径、备份策略/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "预览字体" })).toBeInTheDocument();
   });
 
   it("快速切换时忽略过期的详情响应", async () => {

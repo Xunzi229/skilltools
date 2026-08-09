@@ -17,6 +17,8 @@ interface SkillListProps {
   hasScannedSkills: boolean;
   batchBusy: boolean;
   batchResult: BatchResult | null;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
   onSearchChange: (value: string) => void;
   onSelect: (skillId: string) => void;
   onToggleSelect: (skillId: string) => void;
@@ -48,6 +50,8 @@ export function SkillList({
   hasScannedSkills,
   batchBusy,
   batchResult,
+  collapsed = false,
+  onToggleCollapse,
   onSearchChange,
   onSelect,
   onToggleSelect,
@@ -63,6 +67,33 @@ export function SkillList({
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [replaceWithLink, setReplaceWithLink] = useState(true);
+
+  if (collapsed) {
+    return (
+      <section
+        className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-3 overflow-hidden border-r border-line-strong bg-panel px-1.5 py-4"
+        aria-label="Skill 列表（已折叠）"
+      >
+        <button
+          type="button"
+          className="rounded-md border border-line px-2 py-1.5 text-[11px] text-ink-2 hover:bg-hover"
+          aria-expanded={false}
+          aria-label="展开列表"
+          title="展开列表"
+          onClick={onToggleCollapse}
+        >
+          »»
+        </button>
+        <span
+          className="mt-2 write-vertical-right text-[11px] font-medium text-ink-3"
+          style={{ writingMode: "vertical-rl" }}
+        >
+          {title}
+        </span>
+      </section>
+    );
+  }
+
   let content;
 
   if (loading) {
@@ -129,12 +160,28 @@ export function SkillList({
 
   return (
     <section
-      className="flex h-full min-h-0 min-w-0 w-[340px] flex-col overflow-hidden border-r border-line-strong bg-panel"
+      className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-r border-line-strong bg-panel"
       aria-label="Skill 列表"
     >
       <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
-        <h2 className="m-0 text-[18px] font-semibold text-ink">{title}</h2>
-        <p className="mt-1 text-[12px] text-ink-2">浏览本机已安装的 Skills</p>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="m-0 text-[18px] font-semibold text-ink">{title}</h2>
+            <p className="mt-1 text-[12px] text-ink-2">浏览本机已安装的 Skills</p>
+          </div>
+          {onToggleCollapse && (
+            <button
+              type="button"
+              className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover"
+              aria-expanded={true}
+              aria-label="折叠列表"
+              title="折叠列表"
+              onClick={onToggleCollapse}
+            >
+              ««
+            </button>
+          )}
+        </div>
         <label className="mt-3 flex h-[38px] items-center gap-2 rounded-lg border border-line bg-panel px-3">
           <span className="text-ink-3" aria-hidden="true">
             ⌕
