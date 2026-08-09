@@ -7,6 +7,7 @@ import { displayDescription } from "../utils/skillDisplay";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { FileTree } from "./FileTree";
 import { MarkdownViewer } from "./MarkdownViewer";
+import { SkillMetaForm } from "./SkillMetaForm";
 
 interface SkillDetailProps {
   api: SkillApi;
@@ -21,6 +22,7 @@ interface SkillDetailProps {
   onDelete: (skillId: string) => Promise<void>;
   onMigrated: () => void;
   onClearActionError: () => void;
+  onMetadataSaved?: () => void;
 }
 
 const providerNames = {
@@ -55,6 +57,7 @@ export function SkillDetail({
   onDelete,
   onMigrated,
   onClearActionError,
+  onMetadataSaved,
 }: SkillDetailProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
@@ -247,6 +250,17 @@ export function SkillDetail({
               关闭
             </button>
           </div>
+        )}
+        {files.preview?.relativePath.replace(/\\/g, "/") === "SKILL.md" && (
+          <SkillMetaForm
+            name={skill.name}
+            description={skill.description}
+            busy={busy}
+            onSave={async (name, description) => {
+              await api.updateSkillMetadata(skill.id, name, description);
+              onMetadataSaved?.();
+            }}
+          />
         )}
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line-strong">
           <FileTree

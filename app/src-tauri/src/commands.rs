@@ -8,12 +8,14 @@ use crate::backup_repository::BackupRepository;
 use crate::error::AppError;
 use crate::external_open::{self, ExternalEditor};
 use crate::library_repository::LibraryRepository;
-use crate::batch::{self, map_item, skipped};
+use crate::batch;
 use crate::model::{
     BackupReason, BackupRecord, BatchResult, FileContent, FileNode, InstallHealthReport,
-    LibrarySkillDetail, LibrarySkillSummary, MigrateResult, Project, Provider, ScanResult,
-    SkillDetail, SkillGroup, SkillInstallation, Tag,
+    InstallOverview, InstallPreset, LibrarySkillDetail, LibrarySkillSummary, MigrateResult,
+    Project, ProjectPullResult, Provider, ScanResult, SkillDetail, SkillGroup, SkillInstallation,
+    Tag,
 };
+use crate::skill_metadata::{self, FrontmatterValidation};
 use crate::paths::AppPaths;
 use crate::settings::{self, AppPathsInfo, AppSettings};
 use crate::skill_files::{
@@ -360,7 +362,7 @@ pub fn add_git_project(state: State<'_, AppState>, url: String) -> Result<Projec
 pub fn pull_git_project(
     state: State<'_, AppState>,
     project_id: String,
-) -> Result<Project, CommandError> {
+) -> Result<ProjectPullResult, CommandError> {
     state
         .library
         .lock()
@@ -478,6 +480,22 @@ pub fn list_installations(
         .lock()
         .map_err(|_| state_lock_error())?
         .list_installations()
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn get_install_overview(state: State<'_, AppState>) -> Result<InstallOverview, CommandError> {
+    let skills = state
+        .skills
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .scan()
+        .map_err(map_app_error)?;
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .get_install_overview(&skills)
         .map_err(map_app_error)
 }
 
@@ -869,14 +887,9 @@ pub fn batch_pause_skills(
     state: State<'_, AppState>,
     skill_ids: Vec<String>,
 ) -> Result<BatchResult, CommandError> {
-    let items = skill_ids
-        .into_iter()
-        .map(|id| {
-            let result = pause_skill_with_state(state.inner(), id.clone());
-            map_item(id, result)
-        })
-        .collect();
-    Ok(batch::collect(items))
+    Ok(batch::run_ids(skill_ids, |id| {
+        pause_skill_with_state(state.inner(), id.to_owned()).map(|_| ())
+    }))
 }
 
 #[tauri::command]
@@ -884,14 +897,9 @@ pub fn batch_resume_skills(
     state: State<'_, AppState>,
     skill_ids: Vec<String>,
 ) -> Result<BatchResult, CommandError> {
-    let items = skill_ids
-        .into_iter()
-        .map(|id| {
-            let result = resume_skill_with_state(state.inner(), id.clone());
-            map_item(id, result)
-        })
-        .collect();
-    Ok(batch::collect(items))
+    Ok(batch::run_ids(skill_ids, |id| {
+        resume_skill_with_state(state.inner(), id.to_owned()).map(|_| ())
+    }))
 }
 
 #[tauri::command]
@@ -899,14 +907,9 @@ pub fn batch_backup_skills(
     state: State<'_, AppState>,
     skill_ids: Vec<String>,
 ) -> Result<BatchResult, CommandError> {
-    let items = skill_ids
-        .into_iter()
-        .map(|id| {
-            let result = create_backup_with_state(state.inner(), id.clone());
-            map_item(id, result)
-        })
-        .collect();
-    Ok(batch::collect(items))
+    Ok(batch::run_ids(skill_ids, |id| {
+        create_backup_with_state(state.inner(), id.to_owned()).map(|_| ())
+    }))
 }
 
 #[tauri::command]
@@ -914,14 +917,9 @@ pub fn batch_delete_skills(
     state: State<'_, AppState>,
     skill_ids: Vec<String>,
 ) -> Result<BatchResult, CommandError> {
-    let items = skill_ids
-        .into_iter()
-        .map(|id| {
-            let result = delete_skill_with_state(state.inner(), id.clone());
-            map_item(id, result)
-        })
-        .collect();
-    Ok(batch::collect(items))
+    Ok(batch::run_ids(skill_ids, |id| {
+        delete_skill_with_state(state.inner(), id.to_owned()).map(|_| ())
+    }))
 }
 
 #[tauri::command]
@@ -931,20 +929,7 @@ pub fn batch_install_skills(
     provider: Provider,
 ) -> Result<BatchResult, CommandError> {
     let library = state.library.lock().map_err(|_| state_lock_error())?;
-    let items = skill_ids
-        .into_iter()
-        .map(|id| {
-            match library.has_installation(&id, provider) {
-                Ok(true) => skipped(id, "已安装，已跳过"),
-                Ok(false) => {
-                    let result = library.install_skill(&id, provider);
-                    map_item(id, result)
-                }
-                Err(error) => map_item::<(), _>(id, Err(error)),
-            }
-        })
-        .collect();
-    Ok(batch::collect(items))
+    Ok(batch::batch_install_skills(&library, skill_ids, provider))
 }
 
 #[tauri::command]
@@ -954,20 +939,7 @@ pub fn batch_uninstall_skills(
     provider: Provider,
 ) -> Result<BatchResult, CommandError> {
     let library = state.library.lock().map_err(|_| state_lock_error())?;
-    let items = skill_ids
-        .into_iter()
-        .map(|id| {
-            match library.has_installation(&id, provider) {
-                Ok(false) => skipped(id, "未安装，已跳过"),
-                Ok(true) => {
-                    let result = library.uninstall_skill(&id, provider);
-                    map_item(id, result)
-                }
-                Err(error) => map_item::<(), _>(id, Err(error)),
-            }
-        })
-        .collect();
-    Ok(batch::collect(items))
+    Ok(batch::batch_uninstall_skills(&library, skill_ids, provider))
 }
 
 #[tauri::command]
@@ -977,14 +949,7 @@ pub fn batch_set_skill_group(
     group_id: Option<String>,
 ) -> Result<BatchResult, CommandError> {
     let library = state.library.lock().map_err(|_| state_lock_error())?;
-    let items = skill_ids
-        .into_iter()
-        .map(|id| {
-            let result = library.set_skill_group(&id, group_id.clone());
-            map_item(id, result)
-        })
-        .collect();
-    Ok(batch::collect(items))
+    Ok(batch::batch_set_skill_group(&library, skill_ids, group_id))
 }
 
 #[tauri::command]
@@ -994,24 +959,7 @@ pub fn batch_add_skill_tags(
     tag_id: String,
 ) -> Result<BatchResult, CommandError> {
     let library = state.library.lock().map_err(|_| state_lock_error())?;
-    let index_skills = library.list_library_skills().map_err(map_app_error)?;
-    let items = skill_ids
-        .into_iter()
-        .map(|id| {
-            let current = index_skills
-                .iter()
-                .find(|skill| skill.id == id)
-                .map(|skill| skill.tag_ids.clone())
-                .unwrap_or_default();
-            let mut next = current;
-            if !next.contains(&tag_id) {
-                next.push(tag_id.clone());
-            }
-            let result = library.set_skill_tags(&id, next);
-            map_item(id, result)
-        })
-        .collect();
-    Ok(batch::collect(items))
+    Ok(batch::batch_add_skill_tags(&library, skill_ids, tag_id))
 }
 
 #[tauri::command]
@@ -1020,43 +968,103 @@ pub fn batch_migrate_provider_skills(
     skill_ids: Vec<String>,
     replace_with_link: bool,
 ) -> Result<BatchResult, CommandError> {
-    let items = skill_ids
+    let skills = state.skills.lock().map_err(|_| state_lock_error())?;
+    let library = state.library.lock().map_err(|_| state_lock_error())?;
+    Ok(batch::batch_migrate_provider_skills(
+        &skills,
+        &library,
+        skill_ids,
+        replace_with_link,
+    ))
+}
+
+#[tauri::command]
+pub fn list_install_presets(state: State<'_, AppState>) -> Result<Vec<InstallPreset>, CommandError> {
+    let paths = current_paths(state.inner())?;
+    crate::install_presets::list_presets(&paths.app_data_dir).map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn save_install_preset(
+    state: State<'_, AppState>,
+    id: Option<String>,
+    name: String,
+    skill_ids: Vec<String>,
+    providers: Vec<Provider>,
+) -> Result<InstallPreset, CommandError> {
+    let paths = current_paths(state.inner())?;
+    crate::install_presets::save_preset(&paths.app_data_dir, id, name, skill_ids, providers)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn delete_install_preset(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), CommandError> {
+    let paths = current_paths(state.inner())?;
+    crate::install_presets::delete_preset(&paths.app_data_dir, &id).map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn apply_install_preset(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<BatchResult, CommandError> {
+    let paths = current_paths(state.inner())?;
+    let presets = crate::install_presets::list_presets(&paths.app_data_dir).map_err(map_app_error)?;
+    let preset = presets
         .into_iter()
-        .map(|id| {
-            let result = (|| {
-                let detail = state
-                    .skills
-                    .lock()
-                    .map_err(|_| state_lock_error())?
-                    .detail(&id)
-                    .map_err(map_app_error)?;
-                state
-                    .library
-                    .lock()
-                    .map_err(|_| state_lock_error())?
-                    .migrate_provider_skill(
-                        &detail.name,
-                        detail.provider,
-                        &detail.current_path,
-                        replace_with_link,
-                    )
-                    .map_err(map_app_error)
-            })();
-            match result {
-                Ok(_) => crate::model::BatchItemResult {
-                    id,
-                    status: crate::model::BatchItemStatus::Success,
-                    message: None,
-                },
-                Err(error) => crate::model::BatchItemResult {
-                    id,
-                    status: crate::model::BatchItemStatus::Failed,
-                    message: Some(error.message),
-                },
-            }
-        })
-        .collect();
-    Ok(batch::collect(items))
+        .find(|preset| preset.id == id)
+        .ok_or_else(|| CommandError {
+            code: "SETTINGS",
+            message: format!("预设不存在：{id}"),
+        })?;
+    let library = state.library.lock().map_err(|_| state_lock_error())?;
+    Ok(batch::apply_install_preset(
+        &library,
+        preset.skill_ids,
+        preset.providers,
+    ))
+}
+
+#[tauri::command]
+pub fn validate_skill_frontmatter(content: String) -> FrontmatterValidation {
+    skill_metadata::validate_skill_frontmatter(&content)
+}
+
+#[tauri::command]
+pub fn update_skill_metadata(
+    state: State<'_, AppState>,
+    skill_id: String,
+    name: String,
+    description: String,
+) -> Result<FrontmatterValidation, CommandError> {
+    let detail = state
+        .skills
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .detail(&skill_id)
+        .map_err(map_app_error)?;
+    let path = detail.resolved_path.unwrap_or(detail.current_path);
+    skill_metadata::write_skill_metadata(&path, &name, &description).map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn update_library_skill_metadata(
+    state: State<'_, AppState>,
+    library_skill_id: String,
+    name: String,
+    description: String,
+) -> Result<FrontmatterValidation, CommandError> {
+    let detail = state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .get_library_skill_detail(&library_skill_id)
+        .map_err(map_app_error)?;
+    skill_metadata::write_skill_metadata(&detail.summary.absolute_path, &name, &description)
+        .map_err(map_app_error)
 }
 
 #[cfg(test)]

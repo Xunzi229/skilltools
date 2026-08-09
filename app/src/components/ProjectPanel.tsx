@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CommandError, Project } from "../model/skill";
+import type { CommandError, Project, ProjectPullResult } from "../model/skill";
 import { pickDirectory, pickSaveZip, pickZipFile } from "../utils/dialogs";
 
 interface ProjectPanelProps {
@@ -9,7 +9,7 @@ interface ProjectPanelProps {
   pendingAction: string | null;
   onAddLocal: (path: string) => Promise<void>;
   onAddGit: (url: string) => Promise<void>;
-  onPull: (id: string) => Promise<void>;
+  onPull: (id: string) => Promise<ProjectPullResult | undefined>;
   onRemove: (id: string) => Promise<void>;
   onImportZip: (zipPath: string) => Promise<void>;
   onExportZip: (projectId: string, destPath: string) => Promise<void>;
@@ -49,6 +49,7 @@ export function ProjectPanel({
 }: ProjectPanelProps) {
   const [localPath, setLocalPath] = useState("");
   const [gitUrl, setGitUrl] = useState("");
+  const [pullSummary, setPullSummary] = useState<string | null>(null);
   const busy = pendingAction !== null;
 
   return (
@@ -86,6 +87,18 @@ export function ProjectPanel({
           >
             <span>{error.message}</span>
             <button type="button" className="rounded bg-red-100 px-2 py-1" onClick={onClearError}>
+              关闭
+            </button>
+          </div>
+        )}
+        {pullSummary && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-line bg-hover px-3 py-2 text-[12px] text-ink-2">
+            <span>{pullSummary}</span>
+            <button
+              type="button"
+              className="rounded border border-line px-2 py-1"
+              onClick={() => setPullSummary(null)}
+            >
               关闭
             </button>
           </div>
@@ -191,7 +204,19 @@ export function ProjectPanel({
                       className="rounded-md bg-brand px-2.5 py-2 text-[11px] text-white disabled:opacity-55"
                       aria-label={`拉取 ${project.name}`}
                       disabled={busy}
-                      onClick={() => void onPull(project.id)}
+                      onClick={() => {
+                        void onPull(project.id).then((result) => {
+                          if (!result) return;
+                          const names = (skills: { name: string }[]) =>
+                            skills
+                              .slice(0, 5)
+                              .map((skill) => skill.name)
+                              .join("、");
+                          setPullSummary(
+                            `拉取完成：新增 ${result.added.length}（${names(result.added) || "无"}），移除 ${result.removed.length}，变更 ${result.changed.length}`,
+                          );
+                        });
+                      }}
                     >
                       {pendingAction === `project:pull:${project.id}` ? "拉取中…" : "拉取"}
                     </button>

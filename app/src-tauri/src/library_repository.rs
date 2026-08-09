@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,8 +15,8 @@ use crate::git_ops::{
 };
 use crate::json_store::{read_json_value, write_json_value};
 use crate::model::{
-    FileContent, FileNode, InstallHealthReport, LibrarySkillDetail, LibrarySkillSummary,
-    MigrateResult, Project, ProjectSourceType, Provider, SkillGroup, SkillInstallation, Tag,
+    FileContent, FileNode, LibrarySkillDetail, LibrarySkillSummary, Project, ProjectSourceType,
+    Provider, SkillGroup, SkillInstallation, Tag,
 };
 use crate::paths::AppPaths;
 use crate::skill_files::{list_skill_tree_at, read_skill_file_at};
@@ -112,7 +112,7 @@ impl LibraryRepository {
         Ok(project)
     }
 
-    pub fn pull_git_project(&self, project_id: &str) -> Result<Project, AppError> {
+    pub fn pull_git_project(&self, project_id: &str) -> Result<crate::model::ProjectPullResult, AppError> {
         let _guard = lock_app_transaction(&self.paths)?;
         let mut index = self.load_index()?;
         let position = project_position(&index, project_id)?;
@@ -124,19 +124,70 @@ impl LibraryRepository {
         let path = index.projects[position].local_path.clone();
         self.paths
             .assert_within(&path, &self.paths.library_projects_dir)?;
+        let previous = project_skills(&index, project_id);
+        let previous_fingerprints = previous
+            .iter()
+            .map(|skill| {
+                (
+                    skill.relative_path.clone(),
+                    (
+                        skill.name.clone(),
+                        skill.description.clone(),
+                        crate::skill_metadata::skill_content_fingerprint(&skill.absolute_path),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>();
         pull_fast_forward(&path)?;
         index.projects[position].last_synced_at = Some(Utc::now());
         index.projects[position].last_updated_at =
             latest_commit_time(&path)?.or_else(|| Some(Utc::now()));
         let project = index.projects[position].clone();
-        let previous = project_skills(&index, project_id);
         let rescanned = scan_project(&project, &previous)?;
+        let previous_by_rel = previous
+            .iter()
+            .map(|skill| (skill.relative_path.clone(), skill.clone()))
+            .collect::<HashMap<_, _>>();
+        let mut added = Vec::new();
+        let mut changed = Vec::new();
+        for skill in &rescanned {
+            match previous_by_rel.get(&skill.relative_path) {
+                None => added.push(skill.clone()),
+                Some(_) => {
+                    let fingerprint =
+                        crate::skill_metadata::skill_content_fingerprint(&skill.absolute_path);
+                    if previous_fingerprints
+                        .get(&skill.relative_path)
+                        .is_some_and(|(name, description, prev_fp)| {
+                            name != &skill.name
+                                || description != &skill.description
+                                || prev_fp != &fingerprint
+                        })
+                    {
+                        changed.push(skill.clone());
+                    }
+                }
+            }
+        }
+        let rescanned_rels = rescanned
+            .iter()
+            .map(|skill| skill.relative_path.clone())
+            .collect::<HashSet<_>>();
+        let removed = previous
+            .into_iter()
+            .filter(|skill| !rescanned_rels.contains(&skill.relative_path))
+            .collect::<Vec<_>>();
         index
             .library_skills
             .retain(|skill| skill.project_id != project_id);
         index.library_skills.extend(rescanned);
         self.write_index(&index)?;
-        Ok(project)
+        Ok(crate::model::ProjectPullResult {
+            project,
+            added,
+            removed,
+            changed,
+        })
     }
 
     pub fn remove_project(&self, project_id: &str) -> Result<(), AppError> {
@@ -284,474 +335,8 @@ impl LibraryRepository {
         }
     }
 
-    pub fn install_skill(
-        &self,
-        library_skill_id: &str,
-        provider: Provider,
-    ) -> Result<SkillInstallation, AppError> {
-        let _guard = lock_app_transaction(&self.paths)?;
-        let mut index = self.load_index()?;
-        let skill = index
-            .library_skills
-            .iter()
-            .find(|skill| skill.id == library_skill_id)
-            .cloned()
-            .ok_or_else(|| AppError::LibrarySkillNotFound {
-                id: library_skill_id.to_owned(),
-            })?;
-        let source_path =
-            skill
-                .absolute_path
-                .canonicalize()
-                .map_err(|_| AppError::InvalidProjectPath {
-                    path: skill.absolute_path.display().to_string(),
-                })?;
-        if !source_path.is_dir() {
-            return Err(AppError::InvalidProjectPath {
-                path: source_path.display().to_string(),
-            });
-        }
-        let root = self.paths.provider_root(provider)?;
-        self.paths.assert_allowed(root)?;
-        fs::create_dir_all(root)?;
-        adopt_existing_installations(&mut index, &self.paths);
-        prune_missing_installations(&mut index);
-        let managed_position = index.installations.iter().position(|installation| {
-            installation.library_skill_id == library_skill_id && installation.provider == provider
-        });
-        let target_path = match managed_position {
-            Some(position) => index.installations[position].target_path.clone(),
-            None => safe_skill_target(root, &skill.name)?,
-        };
-        let old_link = match fs::symlink_metadata(&target_path) {
-            Ok(metadata) if !metadata.file_type().is_symlink() => {
-                return Err(AppError::TargetConflict {
-                    path: target_path.display().to_string(),
-                });
-            }
-            Ok(_) if managed_position.is_none() => {
-                return Err(AppError::TargetConflict {
-                    path: target_path.display().to_string(),
-                });
-            }
-            Ok(_) => Some(fs::read_link(&target_path)?),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
-        };
 
-        if old_link.is_some() {
-            fs::remove_file(&target_path)?;
-        }
-        if let Err(error) = create_directory_symlink(&source_path, &target_path) {
-            if let Some(old_target) = old_link {
-                create_directory_symlink(&old_target, &target_path).map_err(|rollback_error| {
-                    AppError::RollbackFailed {
-                        original_error: error.to_string(),
-                        rollback_error: rollback_error.to_string(),
-                    }
-                })?;
-            }
-            return Err(error);
-        }
-
-        let installation = SkillInstallation {
-            library_skill_id: library_skill_id.to_owned(),
-            provider,
-            source_path,
-            target_path: target_path.clone(),
-            installed_at: Utc::now(),
-        };
-        if let Some(position) = managed_position {
-            index.installations[position] = installation.clone();
-        } else {
-            index.installations.push(installation.clone());
-        }
-        sync_installation_statuses(&mut index);
-        if let Err(error) = self.write_index(&index) {
-            fs::remove_file(&target_path).map_err(|rollback_error| AppError::RollbackFailed {
-                original_error: error.to_string(),
-                rollback_error: rollback_error.to_string(),
-            })?;
-            if let Some(old_target) = old_link {
-                create_directory_symlink(&old_target, &target_path).map_err(|rollback_error| {
-                    AppError::RollbackFailed {
-                        original_error: error.to_string(),
-                        rollback_error: rollback_error.to_string(),
-                    }
-                })?;
-            }
-            return Err(error);
-        }
-        Ok(installation)
-    }
-
-    pub fn uninstall_skill(
-        &self,
-        library_skill_id: &str,
-        provider: Provider,
-    ) -> Result<(), AppError> {
-        let _guard = lock_app_transaction(&self.paths)?;
-        let mut index = self.load_index()?;
-        let skill_name = index
-            .library_skills
-            .iter()
-            .find(|skill| skill.id == library_skill_id)
-            .map(|skill| skill.name.clone())
-            .ok_or_else(|| AppError::LibrarySkillNotFound {
-                id: library_skill_id.to_owned(),
-            })?;
-        let root = self.paths.provider_root(provider)?;
-        self.paths.assert_allowed(root)?;
-        adopt_existing_installations(&mut index, &self.paths);
-        prune_missing_installations(&mut index);
-        let managed_position = index.installations.iter().position(|installation| {
-            installation.library_skill_id == library_skill_id && installation.provider == provider
-        });
-        let target_path = match managed_position {
-            Some(position) => index.installations[position].target_path.clone(),
-            None => safe_skill_target(root, &skill_name)?,
-        };
-        match fs::symlink_metadata(&target_path) {
-            Ok(metadata) if !metadata.file_type().is_symlink() => {
-                return Err(AppError::TargetConflict {
-                    path: target_path.display().to_string(),
-                });
-            }
-            Ok(_) if managed_position.is_none() => {
-                return Err(AppError::TargetConflict {
-                    path: target_path.display().to_string(),
-                });
-            }
-            Ok(_) => fs::remove_file(&target_path)?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-        if let Some(position) = managed_position {
-            index.installations.remove(position);
-            sync_installation_statuses(&mut index);
-            self.write_index(&index)?;
-        }
-        Ok(())
-    }
-
-    pub fn list_installations(&self) -> Result<Vec<SkillInstallation>, AppError> {
-        let mut installations = self.load_index()?.installations;
-        installations.sort_by(|left, right| {
-            left.library_skill_id
-                .cmp(&right.library_skill_id)
-                .then(provider_order(left.provider).cmp(&provider_order(right.provider)))
-        });
-        Ok(installations)
-    }
-
-    pub fn scan_install_health(&self) -> Result<InstallHealthReport, AppError> {
-        let index = self.load_index()?;
-        Ok(InstallHealthReport {
-            issues: crate::install_health::collect_health_issues(&index, &self.paths),
-            repaired: 0,
-        })
-    }
-
-    pub fn repair_installations(&self) -> Result<InstallHealthReport, AppError> {
-        let _guard = lock_app_transaction(&self.paths)?;
-        let mut index = self.load_index()?;
-        let (repaired, report) = crate::install_health::repair_index(&mut index, &self.paths)?;
-        self.write_index(&index)?;
-        Ok(InstallHealthReport {
-            issues: report.issues,
-            repaired,
-        })
-    }
-
-    /// Copy a provider skill directory into the library and optionally replace it with a managed link.
-    pub fn migrate_provider_skill(
-        &self,
-        skill_name: &str,
-        provider: Provider,
-        source_path: &Path,
-        replace_with_link: bool,
-    ) -> Result<MigrateResult, AppError> {
-        let _guard = lock_app_transaction(&self.paths)?;
-        self.paths.assert_skill_access(source_path)?;
-        let meta = fs::symlink_metadata(source_path)?;
-        if meta.file_type().is_symlink() {
-            let resolved = fs::canonicalize(source_path)?;
-            if resolved.starts_with(&self.paths.library_dir) {
-                return Err(AppError::Io {
-                    message: "该 Skill 已是库安装链接，无需迁移".into(),
-                });
-            }
-            return Err(AppError::Io {
-                message: "不支持迁移符号链接 Skill，请迁移真实目录".into(),
-            });
-        }
-        if !source_path.is_dir() {
-            return Err(AppError::InvalidProjectPath {
-                path: source_path.display().to_string(),
-            });
-        }
-
-        let replace_target = if replace_with_link {
-            let root = self.paths.provider_root(provider)?;
-            let target = safe_skill_target(root, skill_name)?;
-            if target != source_path && fs::symlink_metadata(&target).is_ok() {
-                return Err(AppError::TargetConflict {
-                    path: target.display().to_string(),
-                });
-            }
-            Some(target)
-        } else {
-            None
-        };
-
-        let project_id = Uuid::new_v4().to_string();
-        let dest_root = self.paths.library_projects_dir.join(&project_id);
-        let dest_skill = dest_root.join(skill_name);
-        self.paths.assert_allowed(&dest_root)?;
-        self.paths.assert_allowed(&dest_skill)?;
-        fs::create_dir_all(&dest_root)?;
-        if let Err(error) = crate::fs_ops::copy_directory(source_path, &dest_skill) {
-            let _ = fs::remove_dir_all(&dest_root);
-            return Err(error);
-        }
-        if !dest_skill.join("SKILL.md").is_file() {
-            let _ = fs::remove_dir_all(&dest_root);
-            return Err(AppError::Io {
-                message: "迁移结果缺少 SKILL.md".into(),
-            });
-        }
-
-        let mut index = self.load_index()?;
-        ensure_project_path_is_new(&index, &dest_root)?;
-        let project = project_for_source(ProjectSourceType::Local, dest_root.clone(), None);
-        let skills = scan_project(&project, &[])?;
-        let library_skill_id = skills
-            .iter()
-            .find(|skill| skill.name == skill_name || skill.relative_path.as_os_str().is_empty())
-            .or_else(|| skills.first())
-            .map(|skill| skill.id.clone())
-            .ok_or_else(|| AppError::Io {
-                message: "迁移后未扫描到 Skill".into(),
-            })?;
-        index.projects.push(project.clone());
-        index.library_skills.extend(skills);
-        self.write_index(&index)?;
-
-        let mut replaced_with_link = false;
-        if let Some(target) = replace_target {
-            // Remove original real directory then link.
-            fs::remove_dir_all(source_path)?;
-            let source_canon = dest_skill.canonicalize().map_err(AppError::from)?;
-            if let Err(error) = create_directory_symlink(&source_canon, &target) {
-                // Best-effort: leave library copy; surface error.
-                return Err(error);
-            }
-            let mut index = self.load_index()?;
-            index.installations.retain(|installation| {
-                !(installation.library_skill_id == library_skill_id
-                    && installation.provider == provider)
-            });
-            index.installations.push(SkillInstallation {
-                library_skill_id: library_skill_id.clone(),
-                provider,
-                source_path: source_canon,
-                target_path: target,
-                installed_at: Utc::now(),
-            });
-            sync_installation_statuses(&mut index);
-            self.write_index(&index)?;
-            replaced_with_link = true;
-        }
-
-        Ok(MigrateResult {
-            project,
-            library_skill_id,
-            replaced_with_link,
-        })
-    }
-
-    pub fn list_tags(&self) -> Result<Vec<Tag>, AppError> {
-        let mut tags = self.load_index()?.tags;
-        tags.sort_by(|left, right| left.name.cmp(&right.name));
-        Ok(tags)
-    }
-
-    pub fn create_tag(&self, name: String, color: Option<String>) -> Result<Tag, AppError> {
-        self.mutate_index(|index| {
-            ensure_unique_name(&index.tags, &name, None, "标签", |tag| {
-                (&tag.id, &tag.name)
-            })?;
-            let tag = Tag {
-                id: Uuid::new_v4().to_string(),
-                name,
-                color,
-            };
-            index.tags.push(tag.clone());
-            Ok(tag)
-        })
-    }
-
-    pub fn rename_tag(&self, id: &str, name: String) -> Result<Tag, AppError> {
-        self.mutate_index(|index| {
-            ensure_unique_name(&index.tags, &name, Some(id), "标签", |tag| {
-                (&tag.id, &tag.name)
-            })?;
-            let tag = index
-                .tags
-                .iter_mut()
-                .find(|tag| tag.id == id)
-                .ok_or_else(|| AppError::TagNotFound { id: id.to_owned() })?;
-            tag.name = name;
-            Ok(tag.clone())
-        })
-    }
-
-    pub fn update_tag(
-        &self,
-        id: &str,
-        name: String,
-        color: Option<String>,
-    ) -> Result<Tag, AppError> {
-        self.mutate_index(|index| {
-            ensure_unique_name(&index.tags, &name, Some(id), "标签", |tag| {
-                (&tag.id, &tag.name)
-            })?;
-            let tag = index
-                .tags
-                .iter_mut()
-                .find(|tag| tag.id == id)
-                .ok_or_else(|| AppError::TagNotFound { id: id.to_owned() })?;
-            tag.name = name;
-            tag.color = color;
-            Ok(tag.clone())
-        })
-    }
-
-    pub fn delete_tag(&self, id: &str) -> Result<(), AppError> {
-        self.mutate_index(|index| {
-            let original_len = index.tags.len();
-            index.tags.retain(|tag| tag.id != id);
-            if index.tags.len() == original_len {
-                return Err(AppError::TagNotFound { id: id.to_owned() });
-            }
-            for skill in &mut index.library_skills {
-                skill.tag_ids.retain(|tag_id| tag_id != id);
-            }
-            Ok(())
-        })
-    }
-
-    pub fn set_skill_tags(
-        &self,
-        skill_id: &str,
-        tag_ids: Vec<String>,
-    ) -> Result<LibrarySkillSummary, AppError> {
-        self.mutate_index(|index| {
-            let unique = tag_ids.iter().collect::<HashSet<_>>();
-            if unique.len() != tag_ids.len()
-                || tag_ids
-                    .iter()
-                    .any(|id| !index.tags.iter().any(|tag| tag.id == *id))
-            {
-                return Err(AppError::TagNotFound {
-                    id: tag_ids
-                        .into_iter()
-                        .find(|id| !index.tags.iter().any(|tag| tag.id == *id))
-                        .unwrap_or_else(|| "重复标签".to_string()),
-                });
-            }
-            let skill = find_skill_mut(index, skill_id)?;
-            skill.tag_ids = tag_ids;
-            Ok(skill.clone())
-        })
-    }
-
-    pub fn list_groups(&self) -> Result<Vec<SkillGroup>, AppError> {
-        let mut groups = self.load_index()?.groups;
-        groups.sort_by(|left, right| {
-            left.order
-                .cmp(&right.order)
-                .then(left.name.cmp(&right.name))
-        });
-        Ok(groups)
-    }
-
-    pub fn create_group(&self, name: String, order: i32) -> Result<SkillGroup, AppError> {
-        self.mutate_index(|index| {
-            ensure_unique_name(&index.groups, &name, None, "分组", |group| {
-                (&group.id, &group.name)
-            })?;
-            let group = SkillGroup {
-                id: Uuid::new_v4().to_string(),
-                name,
-                order,
-            };
-            index.groups.push(group.clone());
-            Ok(group)
-        })
-    }
-
-    pub fn rename_group(&self, id: &str, name: String) -> Result<SkillGroup, AppError> {
-        self.mutate_index(|index| {
-            ensure_unique_name(&index.groups, &name, Some(id), "分组", |group| {
-                (&group.id, &group.name)
-            })?;
-            let group = index
-                .groups
-                .iter_mut()
-                .find(|group| group.id == id)
-                .ok_or_else(|| AppError::GroupNotFound { id: id.to_owned() })?;
-            group.name = name;
-            Ok(group.clone())
-        })
-    }
-
-    pub fn update_group_order(&self, id: &str, order: i32) -> Result<SkillGroup, AppError> {
-        self.mutate_index(|index| {
-            let group = index
-                .groups
-                .iter_mut()
-                .find(|group| group.id == id)
-                .ok_or_else(|| AppError::GroupNotFound { id: id.to_owned() })?;
-            group.order = order;
-            Ok(group.clone())
-        })
-    }
-
-    pub fn delete_group(&self, id: &str) -> Result<(), AppError> {
-        self.mutate_index(|index| {
-            let original_len = index.groups.len();
-            index.groups.retain(|group| group.id != id);
-            if index.groups.len() == original_len {
-                return Err(AppError::GroupNotFound { id: id.to_owned() });
-            }
-            for skill in &mut index.library_skills {
-                if skill.group_id.as_deref() == Some(id) {
-                    skill.group_id = None;
-                }
-            }
-            Ok(())
-        })
-    }
-
-    pub fn set_skill_group(
-        &self,
-        skill_id: &str,
-        group_id: Option<String>,
-    ) -> Result<LibrarySkillSummary, AppError> {
-        self.mutate_index(|index| {
-            if let Some(id) = &group_id {
-                if !index.groups.iter().any(|group| group.id == *id) {
-                    return Err(AppError::GroupNotFound { id: id.clone() });
-                }
-            }
-            let skill = find_skill_mut(index, skill_id)?;
-            skill.group_id = group_id;
-            Ok(skill.clone())
-        })
-    }
-
-    fn mutate_index<T>(
+    pub(crate) fn mutate_index<T>(
         &self,
         action: impl FnOnce(&mut LibraryIndex) -> Result<T, AppError>,
     ) -> Result<T, AppError> {
@@ -836,7 +421,7 @@ fn canonical_project_path(path: &Path) -> Result<PathBuf, AppError> {
     Ok(canonical)
 }
 
-fn ensure_project_path_is_new(index: &LibraryIndex, path: &Path) -> Result<(), AppError> {
+pub(crate) fn ensure_project_path_is_new(index: &LibraryIndex, path: &Path) -> Result<(), AppError> {
     if index
         .projects
         .iter()
@@ -913,7 +498,7 @@ fn normalize_projects(projects: &mut [Project]) -> bool {
     dirty
 }
 
-fn scan_project(
+pub(crate) fn scan_project(
     project: &Project,
     previous: &[LibrarySkillSummary],
 ) -> Result<Vec<LibrarySkillSummary>, AppError> {
@@ -1047,7 +632,7 @@ fn stable_id(value: &str) -> String {
         .collect()
 }
 
-fn safe_skill_target(root: &Path, name: &str) -> Result<PathBuf, AppError> {
+pub(crate) fn safe_skill_target(root: &Path, name: &str) -> Result<PathBuf, AppError> {
     let path = Path::new(name);
     let mut components = path.components();
     let valid = matches!(components.next(), Some(std::path::Component::Normal(_)))
@@ -1061,17 +646,17 @@ fn safe_skill_target(root: &Path, name: &str) -> Result<PathBuf, AppError> {
 }
 
 #[cfg(unix)]
-fn create_directory_symlink(source: &Path, target: &Path) -> Result<(), AppError> {
+pub(crate) fn create_directory_symlink(source: &Path, target: &Path) -> Result<(), AppError> {
     std::os::unix::fs::symlink(source, target).map_err(AppError::from)
 }
 
 #[cfg(windows)]
-fn create_directory_symlink(source: &Path, target: &Path) -> Result<(), AppError> {
+pub(crate) fn create_directory_symlink(source: &Path, target: &Path) -> Result<(), AppError> {
     std::os::windows::fs::symlink_dir(source, target).map_err(AppError::from)
 }
 
 /// 发现各 provider 根下已指向库 Skill 的符号链接，回填到 installations。
-fn adopt_existing_installations(index: &mut LibraryIndex, paths: &AppPaths) {
+pub(crate) fn adopt_existing_installations(index: &mut LibraryIndex, paths: &AppPaths) {
     let sources = index
         .library_skills
         .iter()
@@ -1125,7 +710,7 @@ fn adopt_existing_installations(index: &mut LibraryIndex, paths: &AppPaths) {
     }
 }
 
-fn prune_missing_installations(index: &mut LibraryIndex) {
+pub(crate) fn prune_missing_installations(index: &mut LibraryIndex) {
     index.installations.retain(|installation| {
         fs::symlink_metadata(&installation.target_path)
             .map(|metadata| metadata.file_type().is_symlink())
@@ -1148,7 +733,7 @@ pub(crate) fn sync_installation_statuses(index: &mut LibraryIndex) {
     }
 }
 
-fn provider_order(provider: Provider) -> u8 {
+pub(crate) fn provider_order(provider: Provider) -> u8 {
     match provider {
         Provider::Cursor => 0,
         Provider::Claude => 1,
@@ -1173,7 +758,7 @@ fn project_skills(index: &LibraryIndex, project_id: &str) -> Vec<LibrarySkillSum
         .collect()
 }
 
-fn find_skill_mut<'a>(
+pub(crate) fn find_skill_mut<'a>(
     index: &'a mut LibraryIndex,
     skill_id: &str,
 ) -> Result<&'a mut LibrarySkillSummary, AppError> {
@@ -1186,7 +771,7 @@ fn find_skill_mut<'a>(
         })
 }
 
-fn ensure_unique_name<T>(
+pub(crate) fn ensure_unique_name<T>(
     values: &[T],
     name: &str,
     excluded_id: Option<&str>,

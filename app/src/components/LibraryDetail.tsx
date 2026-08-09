@@ -14,6 +14,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { FileTree } from "./FileTree";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { NameDialog } from "./NameDialog";
+import { SkillMetaForm } from "./SkillMetaForm";
 import { TagColorDot } from "./TagColorPicker";
 import { TargetSelector } from "./TargetSelector";
 
@@ -35,6 +36,7 @@ interface LibraryDetailProps {
   onRename: (id: string, newName: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onClearError: () => void;
+  onMetadataSaved?: () => void;
 }
 
 async function copyText(value: string) {
@@ -68,6 +70,7 @@ export function LibraryDetail({
   onRename,
   onDelete,
   onClearError,
+  onMetadataSaved,
 }: LibraryDetailProps) {
   const [copied, setCopied] = useState(false);
   const [nameDialog, setNameDialog] = useState<"group" | "tag" | "rename" | null>(null);
@@ -280,6 +283,18 @@ export function LibraryDetail({
               ))}
             </ul>
           </aside>
+        )}
+
+        {files.preview?.relativePath.replace(/\\/g, "/") === "SKILL.md" && (
+          <SkillMetaForm
+            name={skill.name}
+            description={skill.description}
+            busy={busy}
+            onSave={async (name, description) => {
+              await api.updateLibrarySkillMetadata(skill.id, name, description);
+              onMetadataSaved?.();
+            }}
+          />
         )}
 
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line-strong">

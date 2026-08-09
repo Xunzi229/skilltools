@@ -251,9 +251,27 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     installSkill: unavailable,
     uninstallSkill: unavailable,
     listInstallations: async () => [],
+    getInstallOverview: async () => ({
+      managed: [],
+      unmanaged: [],
+      duplicates: [],
+      health: { issues: [], repaired: 0 },
+    }),
     scanInstallHealth: async () => ({ issues: [], repaired: 0 }),
     repairInstallations: async () => ({ issues: [], repaired: 0 }),
     migrateProviderSkill: unavailable,
+    listInstallPresets: async () => [],
+    saveInstallPreset: unavailable,
+    deleteInstallPreset: unavailable,
+    applyInstallPreset: unavailable,
+    validateSkillFrontmatter: async () => ({
+      ok: true,
+      name: null,
+      description: null,
+      warnings: [],
+    }),
+    updateSkillMetadata: unavailable,
+    updateLibrarySkillMetadata: unavailable,
     createLibrarySkill: unavailable,
     renameLibrarySkill: unavailable,
     deleteLibrarySkill: unavailable,
@@ -487,7 +505,7 @@ describe("Skill Manager", () => {
     expect(settingsButton).toBeEnabled();
     await user.click(settingsButton);
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
-    expect(screen.getByText(/主题、路径、安装健康/)).toBeInTheDocument();
+    expect(screen.getByText(/主题、路径、备份策略/)).toBeInTheDocument();
   });
 
   it("快速切换时忽略过期的详情响应", async () => {

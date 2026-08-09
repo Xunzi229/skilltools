@@ -4,7 +4,6 @@ import type {
   AppPathsInfo,
   AppSettings,
   CommandError,
-  InstallHealthReport,
   Provider,
   ThemePreference,
 } from "../model/skill";
@@ -23,15 +22,6 @@ const providerLabels: Record<Provider, string> = {
   codex: "Codex",
 };
 
-const healthKindLabel: Record<string, string> = {
-  missingTarget: "目标缺失",
-  notSymlink: "非符号链接",
-  brokenLink: "断链",
-  sourceMismatch: "源不匹配",
-  indexOrphan: "索引孤儿",
-  diskOrphan: "磁盘孤儿",
-};
-
 function asCommandError(err: unknown, fallback: string): CommandError {
   return typeof err === "object" && err && "message" in err
     ? (err as CommandError)
@@ -45,8 +35,6 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<CommandError | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [health, setHealth] = useState<InstallHealthReport | null>(null);
-  const [healthBusy, setHealthBusy] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
@@ -128,35 +116,6 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
     });
   };
 
-  const scanHealth = async () => {
-    setHealthBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      setHealth(await api.scanInstallHealth());
-    } catch (err: unknown) {
-      setError(asCommandError(err, "健康扫描失败"));
-    } finally {
-      setHealthBusy(false);
-    }
-  };
-
-  const repairHealth = async () => {
-    setHealthBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const report = await api.repairInstallations();
-      setHealth(report);
-      setMessage(`已修复 ${report.repaired} 项安全问题`);
-      onSettingsSaved();
-    } catch (err: unknown) {
-      setError(asCommandError(err, "修复失败"));
-    } finally {
-      setHealthBusy(false);
-    }
-  };
-
   const runCleanup = async () => {
     setCleanupBusy(true);
     setError(null);
@@ -204,8 +163,6 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
     }
   };
 
-  const repairableCount = health?.issues.filter((issue) => issue.repairable).length ?? 0;
-
   return (
     <section
       className="col-span-2 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel"
@@ -214,7 +171,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         <h2 className="m-0 text-[28px] font-bold text-ink">设置</h2>
         <p className="mt-2 text-[14px] text-ink-2">
-          主题、路径、安装健康、备份策略与更新（v{APP_VERSION}）。
+          主题、路径、备份策略与更新（v{APP_VERSION}）。安装健康见「安装」页。
         </p>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
@@ -331,64 +288,6 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                   );
                 })}
               </ul>
-            </section>
-            <section className="mb-8">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="m-0 text-[15px] font-semibold text-ink">安装健康</h3>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
-                    disabled={healthBusy}
-                    onClick={() => void scanHealth()}
-                  >
-                    {healthBusy ? "扫描中…" : "扫描"}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
-                    disabled={healthBusy || repairableCount === 0}
-                    onClick={() => void repairHealth()}
-                  >
-                    一键修复安全项
-                  </button>
-                </div>
-              </div>
-              <p className="mt-2 text-[12px] text-ink-3">
-                仅修复断链、索引漂移与磁盘孤儿链接；真实目录冲突不会自动覆盖。
-              </p>
-              {health && (
-                <div className="mt-3 rounded-lg border border-line px-3 py-3">
-                  <p className="m-0 text-[12px] text-ink-2">
-                    共 {health.issues.length} 项问题
-                    {health.repaired > 0 ? `，本次已修复 ${health.repaired}` : ""}
-                  </p>
-                  {health.issues.length === 0 ? (
-                    <p className="mt-2 text-[12px] text-emerald-700">安装状态正常</p>
-                  ) : (
-                    <ul className="mt-2 max-h-48 list-none overflow-auto p-0">
-                      {health.issues.map((issue) => (
-                        <li
-                          key={`${issue.kind}:${issue.targetPath}`}
-                          className="border-t border-line py-2 text-[12px] first:border-t-0"
-                        >
-                          <strong className="text-ink">
-                            {healthKindLabel[issue.kind] ?? issue.kind}
-                            {issue.repairable ? "" : "（需手动）"}
-                          </strong>
-                          <span className="ml-2 text-ink-3">
-                            {providerLabels[issue.provider]}
-                          </span>
-                          <p className="m-0 mt-1 text-ink-2">{issue.message}</p>
-                          <p className="m-0 mt-1 break-all font-mono text-[11px] text-ink-3">
-                            {issue.targetPath}
-                          </p>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
             </section>
             <section className="mb-8">
               <h3 className="m-0 text-[15px] font-semibold text-ink">备份保留</h3>

@@ -534,11 +534,7 @@ struct Frontmatter {
     description: Option<String>,
 }
 
-pub(crate) struct SkillMetadata {
-    pub name: String,
-    pub description: String,
-    pub warnings: Vec<String>,
-}
+pub(crate) use crate::skill_metadata::SkillMetadata;
 
 fn read_root_entries_or_isolate(
     root_path: &Path,
@@ -649,37 +645,7 @@ fn read_summary(provider: Provider, skill_path: &Path) -> SkillSummary {
 }
 
 pub(crate) fn read_skill_metadata(skill_path: &Path) -> SkillMetadata {
-    let mut metadata = SkillMetadata {
-        name: skill_path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        description: String::new(),
-        warnings: Vec::new(),
-    };
-    match fs::read_to_string(skill_path.join("SKILL.md")) {
-        Ok(markdown) => {
-            if let Some(yaml) = frontmatter_yaml(&markdown) {
-                match serde_yaml::from_str::<Frontmatter>(yaml) {
-                    Ok(frontmatter) => {
-                        if let Some(name) = frontmatter.name {
-                            metadata.name = name;
-                        }
-                        if let Some(description) = frontmatter.description {
-                            metadata.description = description;
-                        }
-                    }
-                    Err(error) => metadata
-                        .warnings
-                        .push(format!("SKILL.md 的 YAML 格式错误：{error}")),
-                }
-            }
-        }
-        Err(error) => metadata
-            .warnings
-            .push(format!("无法读取 SKILL.md：{error}")),
-    }
-    metadata
+    crate::skill_metadata::read_skill_metadata(skill_path)
 }
 
 fn summary_with_warnings(
@@ -715,24 +681,7 @@ fn summary_with_warnings(
     }
 }
 
-fn frontmatter_yaml(markdown: &str) -> Option<&str> {
-    let mut lines = markdown.split_inclusive('\n');
-    let opening = lines.next()?;
-    if opening.trim_end_matches(['\r', '\n']) != "---" {
-        return None;
-    }
-
-    let content_start = opening.len();
-    let mut offset = content_start;
-    for line in lines {
-        let line_end = offset + line.len();
-        if line.trim_end_matches(['\r', '\n']) == "---" {
-            return Some(&markdown[content_start..offset]);
-        }
-        offset = line_end;
-    }
-    None
-}
+pub(crate) use crate::skill_metadata::frontmatter_yaml;
 
 #[cfg(test)]
 mod tests {

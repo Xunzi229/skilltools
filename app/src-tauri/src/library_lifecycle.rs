@@ -254,43 +254,7 @@ fn is_under_library(library_dir: &Path, path: &Path) -> bool {
 }
 
 fn rewrite_skill_frontmatter_name(skill_dir: &Path, new_name: &str) -> Result<(), AppError> {
-    let path = skill_dir.join("SKILL.md");
-    let content = fs::read_to_string(&path)?;
-    let updated = if content.starts_with("---") {
-        let mut lines = content.lines();
-        let _ = lines.next();
-        let mut out = String::from("---\n");
-        let mut replaced = false;
-        let mut closed = false;
-        for line in lines {
-            if !closed && line.trim() == "---" {
-                if !replaced {
-                    out.push_str(&format!("name: {new_name}\n"));
-                }
-                out.push_str("---");
-                out.push('\n');
-                closed = true;
-                continue;
-            }
-            if !closed && line.starts_with("name:") {
-                out.push_str(&format!("name: {new_name}\n"));
-                replaced = true;
-                continue;
-            }
-            out.push_str(line);
-            out.push('\n');
-        }
-        if !closed {
-            return Err(AppError::Io {
-                message: "SKILL.md frontmatter 不完整".into(),
-            });
-        }
-        out
-    } else {
-        format!("---\nname: {new_name}\ndescription: {new_name}\n---\n\n{content}")
-    };
-    fs::write(path, updated)?;
-    Ok(())
+    crate::skill_metadata::rewrite_skill_frontmatter_name(skill_dir, new_name)
 }
 
 #[cfg(test)]

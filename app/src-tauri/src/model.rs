@@ -281,6 +281,52 @@ pub struct MigrateResult {
     pub replaced_with_link: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmanagedSkill {
+    pub skill_id: String,
+    pub name: String,
+    pub provider: Provider,
+    pub path: PathBuf,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateSkillGroup {
+    pub name: String,
+    pub providers: Vec<Provider>,
+    pub library_skill_ids: Vec<String>,
+    pub unmanaged_skill_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallOverview {
+    pub managed: Vec<SkillInstallation>,
+    pub unmanaged: Vec<UnmanagedSkill>,
+    pub duplicates: Vec<DuplicateSkillGroup>,
+    pub health: InstallHealthReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPullResult {
+    pub project: Project,
+    pub added: Vec<LibrarySkillSummary>,
+    pub removed: Vec<LibrarySkillSummary>,
+    pub changed: Vec<LibrarySkillSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallPreset {
+    pub id: String,
+    pub name: String,
+    pub skill_ids: Vec<String>,
+    pub providers: Vec<Provider>,
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

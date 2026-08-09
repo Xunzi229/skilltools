@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { SkillApi } from "./api/skillApi";
 import { tauriSkillApi } from "./api/skillApi";
 import { BackupList } from "./components/BackupList";
@@ -11,9 +11,10 @@ import { Sidebar, type SkillFilter } from "./components/Sidebar";
 import { SkillDetail } from "./components/SkillDetail";
 import { SkillList } from "./components/SkillList";
 import { useBatchActions } from "./hooks/useBatchActions";
+import { useInstallations } from "./hooks/useInstallations";
 import { useSkills } from "./hooks/useSkills";
 import { useLibrary } from "./hooks/useLibrary";
-import type { Provider, SkillInstallation } from "./model/skill";
+import type { Provider } from "./model/skill";
 import "./styles.css";
 
 interface AppProps {
@@ -80,15 +81,7 @@ function App({ api = tauriSkillApi }: AppProps) {
     clearActionError,
   } = useSkills(api);
   const library = useLibrary(api);
-  const [installations, setInstallations] = useState<SkillInstallation[]>([]);
-
-  const refreshInstallations = useCallback(async () => {
-    try {
-      setInstallations(await api.listInstallations());
-    } catch {
-      setInstallations([]);
-    }
-  }, [api]);
+  const installations = useInstallations(api);
 
   useEffect(() => {
     void api
@@ -102,8 +95,8 @@ function App({ api = tauriSkillApi }: AppProps) {
   }, [api]);
 
   useEffect(() => {
-    void refreshInstallations();
-  }, [refreshInstallations, library.librarySkills]);
+    void installations.refresh();
+  }, [library.librarySkills, installations.refresh]);
 
   const visibleSkills = useMemo(() => {
     if (
@@ -191,7 +184,7 @@ function App({ api = tauriSkillApi }: AppProps) {
         tags={library.tags}
         projectCount={library.projects.length}
         backupCount={backups.length}
-        installationCount={installations.length}
+        installationCount={installations.installationCount}
         activeFilter={filter}
         loading={listLoading || library.loading}
         busy={library.pendingAction !== null}
@@ -205,7 +198,7 @@ function App({ api = tauriSkillApi }: AppProps) {
         onRefresh={() => {
           void refresh();
           void library.refresh();
-          void refreshInstallations();
+          void installations.refresh();
         }}
         onCreateGroup={async (name) => {
           await library.createGroup(name);
@@ -238,19 +231,19 @@ function App({ api = tauriSkillApi }: AppProps) {
           onSettingsSaved={() => {
             void refresh();
             void library.refresh();
-            void refreshInstallations();
+            void installations.refresh();
           }}
         />
       ) : filter === "installations" ? (
         <InstallationsPanel
-          api={api}
+          installations={installations}
           librarySkills={library.librarySkills}
-          onUninstalled={() => {
+          selectedSkillIds={[...librarySelectedIds]}
+          onChanged={() => {
             void library.refresh();
             void refresh();
-            void refreshInstallations();
+            void installations.refresh();
           }}
-          onOpenSettingsHealth={() => setFilter("settings")}
         />
       ) : filter === "projects" ? (
         <ProjectPanel
@@ -299,12 +292,18 @@ function App({ api = tauriSkillApi }: AppProps) {
             onBatchInstall={(provider: Provider) => {
               const ids = [...librarySelectedIds];
               if (batchBusy || ids.length === 0) return;
-              void batchInstallSkills(ids, provider).then(() => void library.refresh());
+              void batchInstallSkills(ids, provider).then(() => {
+                void library.refresh();
+                void installations.refresh();
+              });
             }}
             onBatchUninstall={(provider: Provider) => {
               const ids = [...librarySelectedIds];
               if (batchBusy || ids.length === 0) return;
-              void batchUninstallSkills(ids, provider).then(() => void library.refresh());
+              void batchUninstallSkills(ids, provider).then(() => {
+                void library.refresh();
+                void installations.refresh();
+              });
             }}
             onBatchSetGroup={(groupId) => {
               const ids = [...librarySelectedIds];
@@ -318,7 +317,7 @@ function App({ api = tauriSkillApi }: AppProps) {
             }}
             onCreateSkill={async (name) => {
               await library.createLibrarySkill(name, "");
-              void refreshInstallations();
+              void installations.refresh();
             }}
             onRetry={() => void library.refresh()}
             onClearBatchResult={clearBatchResult}
@@ -337,11 +336,11 @@ function App({ api = tauriSkillApi }: AppProps) {
             onCreateGroup={(name) => library.createGroup(name)}
             onInstall={async (id, provider) => {
               await library.installSkill(id, provider);
-              void refreshInstallations();
+              void installations.refresh();
             }}
             onUninstall={async (id, provider) => {
               await library.uninstallSkill(id, provider);
-              void refreshInstallations();
+              void installations.refresh();
             }}
             onExportZip={library.exportLibrarySkillZip}
             onRename={async (id, newName) => {
@@ -349,9 +348,10 @@ function App({ api = tauriSkillApi }: AppProps) {
             }}
             onDelete={async (id) => {
               await library.deleteLibrarySkill(id);
-              void refreshInstallations();
+              void installations.refresh();
             }}
             onClearError={library.clearActionError}
+            onMetadataSaved={() => void library.refresh()}
           />
         </>
       ) : (
@@ -424,8 +424,10 @@ function App({ api = tauriSkillApi }: AppProps) {
             onMigrated={() => {
               void refresh();
               void library.refresh();
+              void installations.refresh();
             }}
             onClearActionError={clearActionError}
+            onMetadataSaved={() => void refresh()}
           />
         </>
       )}

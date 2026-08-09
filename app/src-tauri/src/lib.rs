@@ -6,9 +6,13 @@ mod external_open;
 mod fs_ops;
 pub mod git_ops;
 mod install_health;
+mod install_presets;
 mod json_store;
+mod library_install;
 mod library_lifecycle;
 pub mod library_repository;
+mod library_taxonomy;
+mod skill_metadata;
 pub mod model;
 pub mod paths;
 pub mod settings;
@@ -82,6 +86,7 @@ pub fn run() {
             commands::install_skill,
             commands::uninstall_skill,
             commands::list_installations,
+            commands::get_install_overview,
             commands::scan_install_health,
             commands::repair_installations,
             commands::migrate_provider_skill,
@@ -116,6 +121,13 @@ pub fn run() {
             commands::batch_set_skill_group,
             commands::batch_add_skill_tags,
             commands::batch_migrate_provider_skills,
+            commands::list_install_presets,
+            commands::save_install_preset,
+            commands::delete_install_preset,
+            commands::apply_install_preset,
+            commands::validate_skill_frontmatter,
+            commands::update_skill_metadata,
+            commands::update_library_skill_metadata,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|error| eprintln!("应用运行失败：{error}"));

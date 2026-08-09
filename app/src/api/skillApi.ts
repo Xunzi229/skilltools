@@ -8,11 +8,15 @@ import type {
   ExternalEditor,
   FileContent,
   FileNode,
+  FrontmatterValidation,
   InstallHealthReport,
+  InstallOverview,
+  InstallPreset,
   LibrarySkillDetail,
   LibrarySkillSummary,
   MigrateResult,
   Project,
+  ProjectPullResult,
   Provider,
   ScanResult,
   SkillDetail,
@@ -53,7 +57,7 @@ export interface SkillApi {
   listProjects(): Promise<Project[]>;
   addLocalProject(path: string): Promise<Project>;
   addGitProject(url: string): Promise<Project>;
-  pullGitProject(projectId: string): Promise<Project>;
+  pullGitProject(projectId: string): Promise<ProjectPullResult>;
   removeProject(projectId: string): Promise<void>;
   listLibrarySkills(): Promise<LibrarySkillSummary[]>;
   getLibrarySkillDetail(id: string): Promise<LibrarySkillDetail>;
@@ -67,12 +71,33 @@ export interface SkillApi {
   installSkill(librarySkillId: string, provider: Provider): Promise<SkillInstallation>;
   uninstallSkill(librarySkillId: string, provider: Provider): Promise<void>;
   listInstallations(): Promise<SkillInstallation[]>;
+  getInstallOverview(): Promise<InstallOverview>;
   scanInstallHealth(): Promise<InstallHealthReport>;
   repairInstallations(): Promise<InstallHealthReport>;
   migrateProviderSkill(
     skillId: string,
     replaceWithLink: boolean,
   ): Promise<MigrateResult>;
+  listInstallPresets(): Promise<InstallPreset[]>;
+  saveInstallPreset(
+    id: string | null,
+    name: string,
+    skillIds: string[],
+    providers: Provider[],
+  ): Promise<InstallPreset>;
+  deleteInstallPreset(id: string): Promise<void>;
+  applyInstallPreset(id: string): Promise<BatchResult>;
+  validateSkillFrontmatter(content: string): Promise<FrontmatterValidation>;
+  updateSkillMetadata(
+    skillId: string,
+    name: string,
+    description: string,
+  ): Promise<FrontmatterValidation>;
+  updateLibrarySkillMetadata(
+    librarySkillId: string,
+    name: string,
+    description: string,
+  ): Promise<FrontmatterValidation>;
   createLibrarySkill(
     name: string,
     description: string,
@@ -182,10 +207,22 @@ export const tauriSkillApi: SkillApi = {
   uninstallSkill: (librarySkillId, provider) =>
     call("uninstall_skill", { librarySkillId, provider }),
   listInstallations: () => call("list_installations"),
+  getInstallOverview: () => call("get_install_overview"),
   scanInstallHealth: () => call("scan_install_health"),
   repairInstallations: () => call("repair_installations"),
   migrateProviderSkill: (skillId, replaceWithLink) =>
     call("migrate_provider_skill", { skillId, replaceWithLink }),
+  listInstallPresets: () => call("list_install_presets"),
+  saveInstallPreset: (id, name, skillIds, providers) =>
+    call("save_install_preset", { id, name, skillIds, providers }),
+  deleteInstallPreset: (id) => call("delete_install_preset", { id }),
+  applyInstallPreset: (id) => call("apply_install_preset", { id }),
+  validateSkillFrontmatter: (content) =>
+    call("validate_skill_frontmatter", { content }),
+  updateSkillMetadata: (skillId, name, description) =>
+    call("update_skill_metadata", { skillId, name, description }),
+  updateLibrarySkillMetadata: (librarySkillId, name, description) =>
+    call("update_library_skill_metadata", { librarySkillId, name, description }),
   createLibrarySkill: (name, description, projectId = null) =>
     call("create_library_skill", { name, description, projectId }),
   renameLibrarySkill: (skillId, newName) =>

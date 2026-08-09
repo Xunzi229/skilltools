@@ -192,3 +192,46 @@ export interface MigrateResult {
   librarySkillId: string;
   replacedWithLink: boolean;
 }
+
+export interface UnmanagedSkill {
+  skillId: string;
+  name: string;
+  provider: Provider;
+  path: string;
+  description: string;
+}
+
+export interface DuplicateSkillGroup {
+  name: string;
+  providers: Provider[];
+  librarySkillIds: string[];
+  unmanagedSkillIds: string[];
+}
+
+export interface InstallOverview {
+  managed: SkillInstallation[];
+  unmanaged: UnmanagedSkill[];
+  duplicates: DuplicateSkillGroup[];
+  health: InstallHealthReport;
+}
+
+export interface ProjectPullResult {
+  project: Project;
+  added: LibrarySkillSummary[];
+  removed: LibrarySkillSummary[];
+  changed: LibrarySkillSummary[];
+}
+
+export interface InstallPreset {
+  id: string;
+  name: string;
+  skillIds: string[];
+  providers: Provider[];
+}
+
+export interface FrontmatterValidation {
+  ok: boolean;
+  name: string | null;
+  description: string | null;
+  warnings: string[];
+}

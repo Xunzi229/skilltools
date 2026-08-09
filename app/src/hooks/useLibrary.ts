@@ -131,7 +131,11 @@ export function useLibrary(api: SkillApi) {
     addGitProject: (url: string) =>
       mutateAndRefresh("project:add-git", () => api.addGitProject(url)),
     pullGitProject: (id: string) =>
-      mutateAndRefresh(`project:pull:${id}`, () => api.pullGitProject(id)),
+      runAction(`project:pull:${id}`, async () => {
+        const result = await api.pullGitProject(id);
+        await refresh();
+        return result;
+      }),
     removeProject: (id: string) =>
       mutateAndRefresh(`project:remove:${id}`, () => api.removeProject(id)),
     installSkill: (id: string, provider: Provider) =>

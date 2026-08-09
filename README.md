@@ -10,6 +10,27 @@ Skill Manager 用于管理 Cursor / Claude / Codex 本机 Skill，以及中央 S
 - **应用数据目录**：由 Tauri `app_data_dir()` 决定（Windows 通常为 `%APPDATA%\com.skilltools.manager`）
 - **默认 Skill 根目录**：`~/.cursor/skills`、`~/.claude/skills`、`~/.codex/skills`（可在设置中覆盖）
 
+## 界面预览
+
+三栏布局：左侧导航、中间列表、右侧详情。
+
+| 本机 Skill 详情 | 安装总览 |
+| --- | --- |
+| ![本机已安装 Skill](docs/screenshots/02-installed.png) | ![安装总览](docs/screenshots/03-installations.png) |
+
+| Skill 库 | 项目 |
+| --- | --- |
+| ![Skill 库](docs/screenshots/01-library.png) | ![项目](docs/screenshots/04-projects.png) |
+
+| 备份记录 | 设置 |
+| --- | --- |
+| ![备份记录](docs/screenshots/05-backups.png) | ![设置](docs/screenshots/06-settings.png) |
+
+- **本机 Skill**：扫描 Cursor / Claude / Codex，支持暂停、备份、迁入库、文件预览与 `SKILL.md` 元数据编辑（选中 `SKILL.md` 时显示）
+- **安装**：受管链接、未托管 Skill、健康扫描/安全修复、安装预设
+- **Skill 库 / 项目**：中央库管理、本地或 Git 项目、ZIP 导入导出
+- **设置**：主题、根目录覆盖、备份保留策略、检查更新
+
 ## 功能特性
 
 - 三栏界面管理本机已安装 Skill 与中央库
@@ -21,6 +42,9 @@ Skill Manager 用于管理 Cursor / Claude / Codex 本机 Skill，以及中央 S
 - 后端批量操作（部分成功 / skipped；破坏性操作需确认）
 - ZIP 导入导出、应用内文件编辑
 - 备份保留策略（按天 / 按数量）与应用内检查更新
+- 安装总览（受管 / 未托管 / 同名冲突 / 健康）与安装预设
+- Git 拉取变更摘要（新增 / 移除 / 变更）
+- SKILL.md 元数据表单（name / description）
 
 ## 技术栈
 
@@ -70,6 +94,7 @@ cd src-tauri && cargo test
 - [x] 库 Skill 生命周期与安装总览
 - [x] 备份保留策略
 - [x] 自动更新（依赖 Releases 签名配置）
+- [x] 安装图统一 / 安装预设 / Git 拉取摘要 / SKILL.md 元数据
 - [ ] 在线技能市场
 - [ ] 云同步（可选）
 - [ ] Git 多分支 / 冲突合并 UI
