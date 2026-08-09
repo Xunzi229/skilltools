@@ -45,9 +45,9 @@ export function NameDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-[2px]">
       <form
-        className="w-full max-w-sm rounded-xl border border-line bg-panel p-5 shadow-xl"
+        className="macos-sheet w-full max-w-sm p-5"
         role="dialog"
         aria-modal="true"
         aria-labelledby="name-dialog-title"
@@ -56,14 +56,17 @@ export function NameDialog({
           submit();
         }}
       >
-        <h2 id="name-dialog-title" className="m-0 text-[16px] font-semibold text-ink">
+        <h2
+          id="name-dialog-title"
+          className="m-0 text-center text-[15px] font-semibold tracking-tight text-ink"
+        >
           {title}
         </h2>
-        <label className="mt-3 block">
+        <label className="mt-4 block">
           <span className="sr-only">名称</span>
           <input
             ref={inputRef}
-            className="h-10 w-full rounded-lg border border-line bg-panel px-3 text-[13px] text-ink outline-none focus:border-brand"
+            className="macos-input h-10 w-full"
             value={value}
             disabled={busy}
             autoFocus
@@ -79,7 +82,7 @@ export function NameDialog({
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px] text-ink hover:bg-hover disabled:opacity-55"
+            className="macos-btn-ghost h-8 px-3.5 text-[13px]"
             disabled={busy}
             onClick={onCancel}
           >
@@ -87,7 +90,7 @@ export function NameDialog({
           </button>
           <button
             type="submit"
-            className="rounded-lg bg-brand px-3 py-1.5 text-[13px] text-white hover:bg-blue-700 disabled:opacity-55"
+            className="macos-btn-primary h-8 px-3.5 text-[13px]"
             disabled={busy || !trimmed}
           >
             {busy ? "处理中…" : confirmLabel}

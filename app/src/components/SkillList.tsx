@@ -3,6 +3,7 @@ import type { BatchResult, SkillSummary } from "../model/skill";
 import { formatBatchSummary } from "../hooks/useBatchActions";
 import { displayDescription } from "../utils/skillDisplay";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { PanelToggle } from "./PanelToggle";
 import { SkillCard } from "./SkillCard";
 
 interface SkillListProps {
@@ -74,16 +75,12 @@ export function SkillList({
         className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-3 overflow-hidden border-r border-line-strong bg-panel px-1.5 py-4"
         aria-label="Skill 列表（已折叠）"
       >
-        <button
-          type="button"
-          className="rounded-md border border-line px-2 py-1.5 text-[11px] text-ink-2 hover:bg-hover"
-          aria-expanded={false}
-          aria-label="展开列表"
-          title="展开列表"
-          onClick={onToggleCollapse}
-        >
-          »»
-        </button>
+        <PanelToggle
+          expanded={false}
+          labelExpand="展开列表"
+          labelCollapse="折叠列表"
+          onToggle={onToggleCollapse}
+        />
         <span
           className="mt-2 write-vertical-right text-[11px] font-medium text-ink-3"
           style={{ writingMode: "vertical-rl" }}
@@ -103,10 +100,10 @@ export function SkillList({
   } else if (errorMessage) {
     content = (
       <div className="px-3 py-8 text-center text-[13px]" role="alert">
-        <strong className="block text-red-600">扫描失败：{errorMessage}</strong>
+        <strong className="macos-alert-error block">扫描失败：{errorMessage}</strong>
         <button
           type="button"
-          className="mt-3 rounded-md bg-brand px-3 py-1.5 text-white"
+          className="macos-btn-primary mt-3"
           onClick={onRetry}
         >
           重试扫描
@@ -131,10 +128,10 @@ export function SkillList({
     content = (
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {skills.map((skill) => (
-          <li key={skill.id} className="flex items-start gap-1">
+          <li key={skill.id} className="flex items-center gap-1.5">
             <input
               type="checkbox"
-              className="mt-4 ml-1"
+              className="ml-1.5 size-3.5 shrink-0 accent-[var(--color-brand)]"
               checked={selectedIds.has(skill.id)}
               aria-label={`选择 ${skill.name}`}
               onChange={() => onToggleSelect(skill.id)}
@@ -166,29 +163,24 @@ export function SkillList({
       <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="m-0 text-[18px] font-semibold text-ink">{title}</h2>
+            <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">{title}</h2>
             <p className="mt-1 text-[12px] text-ink-2">浏览本机已安装的 Skills</p>
           </div>
           {onToggleCollapse && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover"
-              aria-expanded={true}
-              aria-label="折叠列表"
-              title="折叠列表"
-              onClick={onToggleCollapse}
-            >
-              ««
-            </button>
+            <PanelToggle
+              expanded
+              labelExpand="展开列表"
+              labelCollapse="折叠列表"
+              onToggle={onToggleCollapse}
+            />
           )}
         </div>
-        <label className="mt-3 flex h-[38px] items-center gap-2 rounded-lg border border-line bg-panel px-3">
-          <span className="text-ink-3" aria-hidden="true">
+        <label className="macos-search mt-3">
+          <span className="text-[13px] text-ink-3" aria-hidden="true">
             ⌕
           </span>
           <input
             type="search"
-            className="w-full border-0 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
             aria-label="搜索 Skill"
             placeholder="搜索名称或描述"
             value={search}
@@ -198,18 +190,18 @@ export function SkillList({
         {selectedIds.size > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
             <span className="w-full text-[11px] text-ink-2">已选 {selectedIds.size} 项</span>
-            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchPause}>暂停</button>
-            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchResume}>恢复</button>
-            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchBackup}>备份</button>
-            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={() => setMigrateOpen(true)}>迁入库</button>
-            <button type="button" className="rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55" disabled={batchBusy} onClick={() => setDeleteOpen(true)}>删除</button>
-            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover" disabled={batchBusy} onClick={onClearSelection}>清除</button>
+            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchPause}>暂停</button>
+            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchResume}>恢复</button>
+            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchBackup}>备份</button>
+            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => setMigrateOpen(true)}>迁入库</button>
+            <button type="button" className="macos-btn-danger-soft macos-btn-sm" disabled={batchBusy} onClick={() => setDeleteOpen(true)}>删除</button>
+            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onClearSelection}>清除</button>
           </div>
         )}
         {batchResult && (
-          <div className="mt-2 flex items-start justify-between gap-2 rounded border border-line bg-hover px-2 py-1.5 text-[11px] text-ink-2">
+          <div className="macos-alert-ok mt-2 flex items-start justify-between gap-2 py-1.5 text-[11px]">
             <span>{formatBatchSummary(batchResult)}</span>
-            <button type="button" className="shrink-0" onClick={onClearBatchResult}>
+            <button type="button" className="macos-link shrink-0" onClick={onClearBatchResult}>
               关闭
             </button>
           </div>
@@ -251,7 +243,7 @@ export function SkillList({
       />
       {warnings.length > 0 && (
         <aside
-          className="mx-3 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"
+          className="macos-alert-warn mx-3 mt-3"
           aria-label="扫描目录警告"
         >
           <strong>部分目录未扫描</strong>

@@ -191,6 +191,8 @@ pub struct SkillGroup {
     pub id: String,
     pub name: String,
     pub order: i32,
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

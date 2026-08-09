@@ -8,7 +8,8 @@ import type {
 } from "../model/skill";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NameDialog } from "./NameDialog";
-import { TagColorDot } from "./TagColorPicker";
+import { PanelToggle } from "./PanelToggle";
+import { DEFAULT_APPLE_COLOR, ListColorDot } from "./TagColorPicker";
 
 export type SkillFilter =
   | "library"
@@ -37,8 +38,8 @@ interface SidebarProps {
   onToggleCollapse?: () => void;
   onFilterChange: (filter: SkillFilter) => void;
   onRefresh: () => void;
-  onCreateGroup: (name: string) => Promise<void>;
-  onRenameGroup: (id: string, name: string) => Promise<void>;
+  onCreateGroup: (name: string, color: string | null) => Promise<void>;
+  onRenameGroup: (id: string, name: string, color: string | null) => Promise<void>;
   onDeleteGroup: (id: string) => Promise<void>;
   onMoveGroup: (id: string, order: number) => Promise<void>;
   onCreateTag: (name: string, color: string | null) => Promise<void>;
@@ -54,7 +55,7 @@ const providers: Array<{ id: Provider; label: string }> = [
 
 type DialogState =
   | { kind: "create-group" }
-  | { kind: "rename-group"; id: string; name: string }
+  | { kind: "rename-group"; id: string; name: string; color: string | null }
   | { kind: "create-tag" }
   | { kind: "rename-tag"; id: string; name: string; color: string | null }
   | null;
@@ -63,6 +64,12 @@ type ConfirmState =
   | { kind: "group"; id: string; name: string }
   | { kind: "tag"; id: string; name: string }
   | null;
+
+const rowActive =
+  "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active)] font-medium";
+const rowIdle =
+  "text-[var(--sidebar-ink)] hover:bg-[var(--sidebar-hover)]";
+const countClass = "shrink-0 text-[11px] text-[var(--sidebar-muted)] tabular-nums";
 
 export function Sidebar({
   skills,
@@ -99,10 +106,8 @@ export function Sidebar({
         key={id}
         type="button"
         className={[
-          "flex w-full flex-col items-center rounded-lg px-1 py-2 text-[11px] leading-tight transition-colors",
-          activeFilter === id
-            ? "bg-white/12 text-white"
-            : "text-slate-300 hover:bg-white/6 hover:text-white",
+          "flex w-full flex-col items-center rounded-[8px] px-1 py-2 text-[11px] leading-tight transition-colors",
+          activeFilter === id ? rowActive : rowIdle,
         ].join(" ")}
         aria-pressed={activeFilter === id}
         aria-label={title}
@@ -115,11 +120,11 @@ export function Sidebar({
 
     return (
       <aside
-        className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-1 overflow-hidden bg-sidebar px-1 py-3 text-slate-300"
+        className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-1 overflow-hidden border-r border-line bg-sidebar px-1 py-3"
         aria-label="导航栏（已折叠）"
       >
         <div
-          className="mb-1 grid size-8 place-items-center rounded-[10px] bg-slate-700 text-[13px] font-bold text-white"
+          className="mb-1 grid size-8 place-items-center rounded-[9px] bg-brand text-[13px] font-bold text-white"
           aria-hidden="true"
         >
           S
@@ -132,16 +137,13 @@ export function Sidebar({
           {railItem("backups", "备份", "备份记录")}
           {railItem("settings", "设置", "设置")}
         </nav>
-        <button
-          type="button"
-          className="mt-1 rounded-md border border-white/15 px-2 py-1.5 text-[11px] text-slate-200 hover:bg-white/10"
-          aria-expanded={false}
-          aria-label="展开侧边栏"
-          title="展开侧边栏"
-          onClick={onToggleCollapse}
-        >
-          »»
-        </button>
+        <PanelToggle
+          expanded={false}
+          labelExpand="展开侧边栏"
+          labelCollapse="折叠侧边栏"
+          onToggle={onToggleCollapse}
+          className="mt-1"
+        />
       </aside>
     );
   }
@@ -150,29 +152,27 @@ export function Sidebar({
     <button
       key={id}
       className={[
-        "flex w-full items-center justify-between rounded-lg px-3 py-2 text-[13px] transition-colors",
-        activeFilter === id
-          ? "bg-white/12 text-white"
-          : "text-slate-300 hover:bg-white/6 hover:text-white",
+        "flex w-full items-center justify-between rounded-[8px] px-3 py-[7px] text-[13px] transition-colors",
+        activeFilter === id ? rowActive : rowIdle,
       ].join(" ")}
       type="button"
       aria-pressed={activeFilter === id}
       onClick={() => onFilterChange(id)}
     >
       <span className="truncate">{label}</span>
-      <span className="shrink-0 text-[11px] text-slate-400">{count}</span>
+      <span className={countClass}>{count}</span>
     </button>
   );
 
   const sectionLabel = (text: string, onAdd?: () => void, addLabel?: string) => (
-    <div className="mb-1 mt-3 flex items-center justify-between px-3 first:mt-1">
-      <span className="text-[11px] font-medium tracking-wide text-slate-500 uppercase">
+    <div className="mb-1 mt-3.5 flex items-center justify-between px-3 first:mt-0.5">
+      <span className="text-[11px] font-semibold tracking-wide text-[var(--sidebar-muted)]">
         {text}
       </span>
       {onAdd && (
         <button
           type="button"
-          className="rounded px-1.5 py-0.5 text-[12px] text-slate-400 hover:bg-white/10 hover:text-white disabled:opacity-40"
+          className="grid size-5 place-items-center rounded-full text-[14px] leading-none text-brand hover:bg-[var(--sidebar-active-bg)] disabled:opacity-40"
           aria-label={addLabel}
           disabled={busy}
           onClick={onAdd}
@@ -202,15 +202,17 @@ export function Sidebar({
       <div
         key={key}
         className={[
-          "group relative flex items-center rounded-lg",
-          active ? "bg-white/12" : "hover:bg-white/6",
+          "group relative flex items-center rounded-[8px]",
+          active ? "bg-[var(--sidebar-active-bg)]" : "hover:bg-[var(--sidebar-hover)]",
         ].join(" ")}
       >
         <button
           type="button"
           className={[
-            "flex min-w-0 flex-1 items-center justify-between px-3 py-2 text-[13px]",
-            active ? "text-white" : "text-slate-300 hover:text-white",
+            "flex min-w-0 flex-1 items-center justify-between px-3 py-[7px] text-[13px]",
+            active
+              ? "font-medium text-[var(--sidebar-active)]"
+              : "text-[var(--sidebar-ink)]",
           ].join(" ")}
           aria-pressed={active}
           onClick={() => {
@@ -218,15 +220,15 @@ export function Sidebar({
             onFilterChange(filter);
           }}
         >
-          <span className="flex min-w-0 items-center gap-2">
+          <span className="flex min-w-0 items-center gap-2.5">
             {leading}
             <span className="truncate">{label}</span>
           </span>
-          <span className="shrink-0 text-[11px] text-slate-400">{count}</span>
+          <span className={countClass}>{count}</span>
         </button>
         <button
           type="button"
-          className="mr-1 shrink-0 rounded px-1.5 py-1 text-[12px] text-slate-400 opacity-70 hover:bg-white/10 hover:text-white group-hover:opacity-100"
+          className="mr-1 shrink-0 rounded-[6px] px-1.5 py-1 text-[12px] text-[var(--sidebar-muted)] opacity-0 hover:bg-black/5 group-hover:opacity-100"
           aria-label={`管理 ${label}`}
           aria-expanded={open}
           disabled={busy}
@@ -239,24 +241,24 @@ export function Sidebar({
         </button>
         {open && (
           <div
-            className="absolute top-full right-1 z-20 mt-0.5 min-w-[112px] rounded-lg border border-white/10 bg-slate-800 py-1 shadow-lg"
+            className="macos-menu absolute top-full right-1 z-20 mt-1 min-w-[124px]"
             role="menu"
           >
             <button
               type="button"
-              className="block w-full px-3 py-1.5 text-left text-[12px] text-slate-200 hover:bg-white/10"
+              className="macos-menu-item"
               role="menuitem"
               onClick={() => {
                 setMenuKey(null);
                 actions.onRename();
               }}
             >
-              重命名
+              编辑
             </button>
             {actions.onMoveUp && (
               <button
                 type="button"
-                className="block w-full px-3 py-1.5 text-left text-[12px] text-slate-200 hover:bg-white/10"
+                className="macos-menu-item"
                 role="menuitem"
                 onClick={() => {
                   setMenuKey(null);
@@ -269,7 +271,7 @@ export function Sidebar({
             {actions.onMoveDown && (
               <button
                 type="button"
-                className="block w-full px-3 py-1.5 text-left text-[12px] text-slate-200 hover:bg-white/10"
+                className="macos-menu-item"
                 role="menuitem"
                 onClick={() => {
                   setMenuKey(null);
@@ -279,9 +281,10 @@ export function Sidebar({
                 下移
               </button>
             )}
+            <div className="my-1 border-t border-line" />
             <button
               type="button"
-              className="block w-full px-3 py-1.5 text-left text-[12px] text-red-300 hover:bg-white/10"
+              className="macos-menu-item macos-menu-item-danger"
               role="menuitem"
               onClick={() => {
                 setMenuKey(null);
@@ -298,33 +301,32 @@ export function Sidebar({
 
   return (
     <aside
-      className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-sidebar px-3.5 pb-4 pt-6 text-slate-300"
+      className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-r border-line bg-sidebar px-3 pb-4 pt-5"
       aria-label="导航栏"
     >
-      <header className="mb-4 flex items-start gap-2 px-2">
+      <header className="mb-3 flex items-start gap-2.5 px-2">
         <div
-          className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-slate-700 text-[17px] font-bold text-white"
+          className="grid size-9 shrink-0 place-items-center rounded-[10px] bg-brand text-[15px] font-bold text-white shadow-sm"
           aria-hidden="true"
         >
           S
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="m-0 text-[16px] font-semibold leading-tight text-white">
+          <h1 className="m-0 text-[15px] font-semibold tracking-tight text-[var(--sidebar-ink)]">
             Skill Manager
           </h1>
-          <p className="m-0 mt-0.5 text-[12px] text-slate-400">本地 Skill 管理工具</p>
+          <p className="m-0 mt-0.5 text-[11px] text-[var(--sidebar-muted)]">
+            本地 Skill 管理工具
+          </p>
         </div>
         {onToggleCollapse && (
-          <button
-            type="button"
-            className="mt-0.5 shrink-0 rounded-md border border-white/15 px-2 py-1 text-[11px] text-slate-300 hover:bg-white/10"
-            aria-expanded={true}
-            aria-label="折叠侧边栏"
-            title="折叠侧边栏"
-            onClick={onToggleCollapse}
-          >
-            ««
-          </button>
+          <PanelToggle
+            expanded
+            labelExpand="展开侧边栏"
+            labelCollapse="折叠侧边栏"
+            onToggle={onToggleCollapse}
+            className="mt-0.5"
+          />
         )}
       </header>
 
@@ -338,7 +340,9 @@ export function Sidebar({
 
         {sectionLabel("分组", () => setDialog({ kind: "create-group" }), "新建分组")}
         {sortedGroups.length === 0 ? (
-          <p className="px-3 py-1 text-[11px] text-slate-500">暂无分组，点 + 创建</p>
+          <p className="px-3 py-1 text-[11px] text-[var(--sidebar-muted)]">
+            暂无分组，点 + 创建
+          </p>
         ) : (
           sortedGroups.map((group, index) =>
             taxonomyRow(
@@ -348,7 +352,12 @@ export function Sidebar({
               librarySkills.filter((skill) => skill.groupId === group.id).length,
               {
                 onRename: () =>
-                  setDialog({ kind: "rename-group", id: group.id, name: group.name }),
+                  setDialog({
+                    kind: "rename-group",
+                    id: group.id,
+                    name: group.name,
+                    color: group.color,
+                  }),
                 onDelete: () =>
                   setConfirm({ kind: "group", id: group.id, name: group.name }),
                 onMoveUp:
@@ -360,13 +369,16 @@ export function Sidebar({
                     ? () => void onMoveGroup(group.id, sortedGroups[index + 1].order + 1)
                     : undefined,
               },
+              <ListColorDot color={group.color ?? DEFAULT_APPLE_COLOR} />,
             ),
           )
         )}
 
         {sectionLabel("标签", () => setDialog({ kind: "create-tag" }), "新建标签")}
         {tags.length === 0 ? (
-          <p className="px-3 py-1 text-[11px] text-slate-500">暂无标签，点 + 创建</p>
+          <p className="px-3 py-1 text-[11px] text-[var(--sidebar-muted)]">
+            暂无标签，点 + 创建
+          </p>
         ) : (
           tags.map((tag) =>
             taxonomyRow(
@@ -384,7 +396,7 @@ export function Sidebar({
                   }),
                 onDelete: () => setConfirm({ kind: "tag", id: tag.id, name: tag.name }),
               },
-              <TagColorDot color={tag.color} />,
+              <ListColorDot color={tag.color} size="sm" />,
             ),
           )
         )}
@@ -406,9 +418,9 @@ export function Sidebar({
         {navItem("backups", "备份记录", backupCount)}
       </nav>
 
-      <div className="mt-auto flex flex-col gap-2 pt-4">
+      <div className="mt-auto flex flex-col gap-1.5 border-t border-line pt-3">
         <button
-          className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-[12px] text-slate-300 transition-colors hover:bg-white/8 disabled:opacity-55"
+          className="macos-btn-ghost h-8 w-full gap-2 text-[12px]"
           type="button"
           onClick={onRefresh}
           disabled={loading}
@@ -418,10 +430,8 @@ export function Sidebar({
         </button>
         <button
           className={[
-            "rounded-lg px-3 py-2 text-left text-[13px]",
-            activeFilter === "settings"
-              ? "bg-white/12 text-white"
-              : "text-slate-400 hover:bg-white/6 hover:text-white",
+            "rounded-[8px] px-3 py-2 text-left text-[13px] transition-colors",
+            activeFilter === "settings" ? rowActive : rowIdle,
           ].join(" ")}
           type="button"
           onClick={() => onFilterChange("settings")}
@@ -436,7 +446,7 @@ export function Sidebar({
           dialog?.kind === "create-group"
             ? "新建分组"
             : dialog?.kind === "rename-group"
-              ? "重命名分组"
+              ? "编辑分组"
               : dialog?.kind === "create-tag"
                 ? "新建标签"
                 : dialog?.kind === "rename-tag"
@@ -448,9 +458,18 @@ export function Sidebar({
             ? dialog.name
             : ""
         }
-        initialColor={dialog?.kind === "rename-tag" ? dialog.color : null}
+        initialColor={
+          dialog?.kind === "rename-group" || dialog?.kind === "rename-tag"
+            ? dialog.color
+            : dialog?.kind === "create-group" || dialog?.kind === "create-tag"
+              ? DEFAULT_APPLE_COLOR
+              : null
+        }
         showColorPicker={
-          dialog?.kind === "create-tag" || dialog?.kind === "rename-tag"
+          dialog?.kind === "create-group" ||
+          dialog?.kind === "rename-group" ||
+          dialog?.kind === "create-tag" ||
+          dialog?.kind === "rename-tag"
         }
         confirmLabel={
           dialog?.kind === "create-group" || dialog?.kind === "create-tag"
@@ -463,8 +482,9 @@ export function Sidebar({
           const current = dialog;
           setDialog(null);
           if (!current) return;
-          if (current.kind === "create-group") void onCreateGroup(name);
-          if (current.kind === "rename-group") void onRenameGroup(current.id, name);
+          if (current.kind === "create-group") void onCreateGroup(name, color ?? null);
+          if (current.kind === "rename-group")
+            void onRenameGroup(current.id, name, color ?? null);
           if (current.kind === "create-tag") void onCreateTag(name, color ?? null);
           if (current.kind === "rename-tag")
             void onRenameTag(current.id, name, color ?? null);

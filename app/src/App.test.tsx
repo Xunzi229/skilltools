@@ -208,8 +208,10 @@ const libraryDetail: LibrarySkillDetail = {
   files: ["SKILL.md"],
 };
 
-const tags: Tag[] = [{ id: "tag-backend", name: "后端", color: "#315fb5" }];
-const groups: SkillGroup[] = [{ id: "group-dev", name: "开发", order: 1 }];
+const tags: Tag[] = [{ id: "tag-backend", name: "后端", color: "#007AFF" }];
+const groups: SkillGroup[] = [
+  { id: "group-dev", name: "开发", order: 1, color: "#FF9500" },
+];
 
 function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
   const unavailable = async (): Promise<never> => {
@@ -283,9 +285,20 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     deleteTag: async () => undefined,
     setSkillTags: unavailable,
     listGroups: async () => groups,
-    createGroup: async (name, order) => ({ id: `group-${name}`, name, order }),
-    renameGroup: async (id, name) => ({ id, name, order: 0 }),
-    updateGroupOrder: async (id, order) => ({ id, name: "开发", order }),
+    createGroup: async (name, order, color = null) => ({
+      id: `group-${name}`,
+      name,
+      order,
+      color,
+    }),
+    renameGroup: async (id, name) => ({ id, name, order: 0, color: null }),
+    updateGroup: async (id, name, color) => ({ id, name, order: 0, color }),
+    updateGroupOrder: async (id, order) => ({
+      id,
+      name: "开发",
+      order,
+      color: "#FF9500",
+    }),
     deleteGroup: async () => undefined,
     setSkillGroup: unavailable,
     getSettings: async () => ({
@@ -917,14 +930,14 @@ describe("Skill Manager", () => {
     await user.type(screen.getByRole("textbox", { name: "名称" }), "前端");
     await user.click(screen.getByRole("button", { name: "创建" }));
 
-    await waitFor(() => expect(createTag).toHaveBeenCalledWith("前端", null));
+    await waitFor(() => expect(createTag).toHaveBeenCalledWith("前端", "#007AFF"));
     expect(
       await within(navigation).findByRole("button", { name: /^前端/ }),
     ).toBeInTheDocument();
   });
 
   it("详情可新建分组并应用到当前 Skill", async () => {
-    const created = { id: "group-ops", name: "运维", order: 2 };
+    const created = { id: "group-ops", name: "运维", order: 2, color: "#007AFF" };
     const createGroup = vi.fn(async () => created);
     const setSkillGroup = vi.fn(async () => ({
       ...librarySkills[0],

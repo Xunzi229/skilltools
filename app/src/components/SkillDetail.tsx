@@ -85,7 +85,7 @@ export function SkillDetail({
     return (
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         <div className="flex flex-1 flex-col items-center justify-center gap-1 text-[13px]" role="alert">
-          <strong className="text-red-600">详情加载失败</strong>
+          <strong className="macos-alert-error block">详情加载失败</strong>
           <span className="text-ink-3">{error.message}</span>
         </div>
       </section>
@@ -113,22 +113,22 @@ export function SkillDetail({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px]">
-              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-ink-2">
+              <span className="rounded-full bg-hover px-2 py-0.5 text-ink-2">
                 {providerNames[skill.provider]}
               </span>
               <span className="text-ink-3">
                 {skill.status === "active" ? "已启用" : "已暂停"}
               </span>
             </div>
-            <h2 className="m-0 text-[28px] font-bold leading-tight text-ink">{skill.name}</h2>
-            <p className="mt-2 max-w-3xl text-[14px] leading-6 text-ink-2">
+            <h2 className="macos-page-title leading-tight">{skill.name}</h2>
+            <p className="macos-page-sub max-w-3xl leading-6">
               {displayDescription(skill.description) || "暂无描述"}
             </p>
           </div>
-          <div className="flex shrink-0 gap-2" role="group" aria-label="Skill 操作">
+          <div className="flex shrink-0 gap-1.5" role="group" aria-label="Skill 操作">
             <button
               type="button"
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-hover disabled:opacity-55"
+              className="macos-btn-ghost"
               disabled={busy}
               onClick={() =>
                 void (skill.status === "active" ? onPause(skill.id) : onResume(skill.id))
@@ -143,7 +143,7 @@ export function SkillDetail({
             </button>
             <button
               type="button"
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-hover disabled:opacity-55"
+              className="macos-btn-ghost"
               disabled={busy}
               onClick={() => void onBackup(skill.id)}
             >
@@ -152,7 +152,7 @@ export function SkillDetail({
             {skill.status === "active" && !skill.resolvedPath && (
               <button
                 type="button"
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-hover disabled:opacity-55"
+                className="macos-btn-ghost"
                 disabled={busy}
                 onClick={() => {
                   setMigrateError(null);
@@ -164,7 +164,7 @@ export function SkillDetail({
             )}
             <button
               type="button"
-              className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[12px] text-red-700 hover:bg-red-100 disabled:opacity-55"
+              className="macos-btn-danger-soft"
               disabled={busy}
               onClick={() => setDeleteOpen(true)}
             >
@@ -179,7 +179,7 @@ export function SkillDetail({
             </span>
             <button
               type="button"
-              className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover"
+              className="macos-btn-ghost macos-btn-sm"
               aria-label="复制路径"
               onClick={() => {
                 void copyText(skill.resolvedPath ?? skill.originalPath).then(() => {
@@ -207,13 +207,13 @@ export function SkillDetail({
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
         {(actionError || migrateError) && (
           <div
-            className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
+            className="macos-alert-error flex shrink-0 items-center justify-between gap-3"
             role="alert"
           >
             <span>{migrateError ?? actionError?.message}</span>
             <button
               type="button"
-              className="rounded bg-red-100 px-2 py-1"
+              className="macos-btn-ghost macos-btn-sm"
               onClick={() => {
                 setMigrateError(null);
                 onClearActionError();
@@ -225,7 +225,7 @@ export function SkillDetail({
         )}
         {skill.warnings.length > 0 && (
           <aside
-            className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"
+            className="macos-alert-warn shrink-0"
             aria-label="扫描警告"
           >
             <strong>需要注意</strong>
@@ -238,13 +238,13 @@ export function SkillDetail({
         )}
         {fileError && (
           <div
-            className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
+            className="macos-alert-error flex shrink-0 items-center justify-between gap-3"
             role="alert"
           >
             <span>{fileError}</span>
             <button
               type="button"
-              className="rounded bg-red-100 px-2 py-1"
+              className="macos-btn-ghost macos-btn-sm"
               onClick={files.clearOpenError}
             >
               关闭
@@ -263,7 +263,7 @@ export function SkillDetail({
             }}
           />
         )}
-        <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line-strong">
+        <div className="macos-split flex min-h-0 flex-1">
           <FileTree
             nodes={files.tree}
             selectedPath={files.preview?.relativePath ?? null}

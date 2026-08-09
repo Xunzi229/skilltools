@@ -199,17 +199,22 @@ export function useLibrary(api: SkillApi) {
     createGroup: async (
       name: string,
       order?: number,
+      color: string | null = null,
     ): Promise<SkillGroup | undefined> =>
       runAction("group:create", async () => {
         const nextOrder =
           order ??
           groups.reduce((max, group) => Math.max(max, group.order), -1) + 1;
-        const group = await api.createGroup(name.trim(), nextOrder);
+        const group = await api.createGroup(name.trim(), nextOrder, color);
         await refresh();
         return group;
       }),
     renameGroup: (id: string, name: string) =>
       mutateAndRefresh(`group:rename:${id}`, () => api.renameGroup(id, name.trim())),
+    updateGroup: (id: string, name: string, color: string | null) =>
+      mutateAndRefresh(`group:update:${id}`, () =>
+        api.updateGroup(id, name.trim(), color),
+      ),
     updateGroupOrder: (id: string, order: number) =>
       mutateAndRefresh(`group:order:${id}`, () => api.updateGroupOrder(id, order)),
     deleteGroup: (id: string) =>

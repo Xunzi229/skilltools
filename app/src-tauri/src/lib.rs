@@ -102,6 +102,7 @@ pub fn run() {
             commands::list_groups,
             commands::create_group,
             commands::rename_group,
+            commands::update_group,
             commands::update_group_order,
             commands::delete_group,
             commands::set_skill_group,

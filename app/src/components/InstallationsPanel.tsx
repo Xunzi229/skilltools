@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { useInstallations } from "../hooks/useInstallations";
 import type { LibrarySkillSummary, Provider } from "../model/skill";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type InstallationsState = ReturnType<typeof useInstallations>;
 
@@ -49,6 +50,11 @@ export function InstallationsPanel({
   } = installations;
   const [presetName, setPresetName] = useState("");
   const [presetProviders, setPresetProviders] = useState<Provider[]>(["cursor"]);
+  const [confirm, setConfirm] = useState<
+    | { kind: "apply"; id: string; name: string; providerCount: number }
+    | { kind: "replace"; skillId: string }
+    | null
+  >(null);
 
   const nameOf = (librarySkillId: string) =>
     librarySkills.find((skill) => skill.id === librarySkillId)?.name ?? librarySkillId;
@@ -65,21 +71,20 @@ export function InstallationsPanel({
   };
 
   return (
+    <>
     <section
       className="col-span-2 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel"
       aria-label="安装总览"
     >
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
-        <h2 className="m-0 text-[28px] font-bold text-ink">安装</h2>
-        <p className="mt-2 text-[14px] text-ink-2">
+        <h2 className="macos-page-title">安装</h2>
+        <p className="macos-page-sub">
           受管链接、未托管 Skill、同名冲突与健康检查；支持安装预设。
         </p>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {error && (
-          <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
-            {error.message}
-          </p>
+          <p className="macos-alert-error mb-4">{error.message}</p>
         )}
 
         <section className="mb-8">
@@ -87,7 +92,7 @@ export function InstallationsPanel({
             <h3 className="m-0 text-[15px] font-semibold text-ink">健康</h3>
             <button
               type="button"
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+              className="macos-btn-ghost"
               disabled={healthBusy}
               onClick={() => void scanHealth()}
             >
@@ -95,7 +100,7 @@ export function InstallationsPanel({
             </button>
             <button
               type="button"
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+              className="macos-btn-ghost"
               disabled={healthBusy || repairableCount === 0}
               onClick={() =>
                 void repair().then(() => {
@@ -107,7 +112,7 @@ export function InstallationsPanel({
             </button>
           </div>
           {overview && (
-            <div className="rounded-lg border border-line px-3 py-3 text-[12px] text-ink-2">
+            <div className="macos-card px-3 py-3 text-[12px] text-ink-2">
               共 {overview.health.issues.length} 项问题
               {overview.health.repaired > 0
                 ? `，本次已修复 ${overview.health.repaired}`
@@ -134,7 +139,7 @@ export function InstallationsPanel({
             <label className="text-[12px] text-ink-3">
               名称
               <input
-                className="mt-1 block rounded border border-line px-2 py-1.5 text-[13px]"
+                className="macos-input mt-1 block w-full"
                 value={presetName}
                 onChange={(event) => setPresetName(event.target.value)}
                 placeholder="例如：日常三端"
@@ -153,7 +158,7 @@ export function InstallationsPanel({
             ))}
             <button
               type="button"
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+              className="macos-btn-primary"
               disabled={
                 !presetName.trim() ||
                 selectedSkillIds.length === 0 ||
@@ -186,7 +191,7 @@ export function InstallationsPanel({
               {presets.map((preset) => (
                 <li
                   key={preset.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2"
+                  className="macos-row flex flex-wrap items-center justify-between gap-2"
                 >
                   <div className="text-[13px] text-ink">
                     <strong>{preset.name}</strong>
@@ -198,24 +203,22 @@ export function InstallationsPanel({
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      className="rounded border border-line px-2 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
+                      className="macos-btn-ghost macos-btn-sm"
                       disabled={busyKey === `preset:apply:${preset.id}`}
-                      onClick={() => {
-                        if (
-                          !window.confirm(
-                            `应用预设「${preset.name}」到 ${preset.providers.length} 个 Provider？`,
-                          )
-                        ) {
-                          return;
-                        }
-                        void applyPreset(preset.id).then(() => onChanged());
-                      }}
+                      onClick={() =>
+                        setConfirm({
+                          kind: "apply",
+                          id: preset.id,
+                          name: preset.name,
+                          providerCount: preset.providers.length,
+                        })
+                      }
                     >
                       应用
                     </button>
                     <button
                       type="button"
-                      className="rounded border border-line px-2 py-1 text-[12px] text-red-600 hover:bg-hover disabled:opacity-55"
+                      className="macos-btn-danger-soft macos-btn-sm"
                       disabled={busyKey === `preset:delete:${preset.id}`}
                       onClick={() => void deletePreset(preset.id)}
                     >
@@ -245,7 +248,7 @@ export function InstallationsPanel({
                     return (
                       <li
                         key={key}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2"
+                        className="macos-row flex flex-wrap items-center justify-between gap-2"
                       >
                         <div className="min-w-0">
                           <div className="text-[13px] font-medium text-ink">
@@ -257,7 +260,7 @@ export function InstallationsPanel({
                         </div>
                         <button
                           type="button"
-                          className="rounded border border-line px-2 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
+                          className="macos-btn-ghost macos-btn-sm"
                           disabled={busyKey === key}
                           onClick={() =>
                             void uninstall(item.librarySkillId, item.provider).then(() =>
@@ -285,7 +288,7 @@ export function InstallationsPanel({
                   {overview.unmanaged.map((item) => (
                     <li
                       key={item.skillId}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2"
+                      className="macos-row flex flex-wrap items-center justify-between gap-2"
                     >
                       <div className="min-w-0">
                         <div className="text-[13px] font-medium text-ink">
@@ -298,7 +301,7 @@ export function InstallationsPanel({
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          className="rounded border border-line px-2 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
+                          className="macos-btn-ghost macos-btn-sm"
                           disabled={busyKey === `migrate:${item.skillId}`}
                           onClick={() =>
                             void migrateUnmanaged(item.skillId, false).then(() => onChanged())
@@ -308,18 +311,11 @@ export function InstallationsPanel({
                         </button>
                         <button
                           type="button"
-                          className="rounded border border-line px-2 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
+                          className="macos-btn-ghost macos-btn-sm"
                           disabled={busyKey === `migrate:${item.skillId}`}
-                          onClick={() => {
-                            if (
-                              !window.confirm(
-                                "将删除本机真实目录并替换为库链接？冲突真实目录不会被覆盖。",
-                              )
-                            ) {
-                              return;
-                            }
-                            void migrateUnmanaged(item.skillId, true).then(() => onChanged());
-                          }}
+                          onClick={() =>
+                            setConfirm({ kind: "replace", skillId: item.skillId })
+                          }
                         >
                           替换为库链接
                         </button>
@@ -341,7 +337,7 @@ export function InstallationsPanel({
                   {overview.duplicates.map((group) => (
                     <li
                       key={group.name}
-                      className="rounded-lg border border-line px-3 py-2 text-[12px] text-ink-2"
+                      className="macos-row text-[12px] text-ink-2"
                     >
                       <strong className="text-ink">{group.name}</strong>
                       <div className="mt-1">
@@ -359,5 +355,45 @@ export function InstallationsPanel({
         )}
       </div>
     </section>
+    <ConfirmDialog
+      open={confirm?.kind === "apply"}
+      title={confirm?.kind === "apply" ? `应用预设「${confirm.name}」？` : ""}
+      message={
+        confirm?.kind === "apply"
+          ? `将安装到 ${confirm.providerCount} 个 Provider。已有冲突不会覆盖。`
+          : ""
+      }
+      confirmLabel="应用"
+      busy={confirm?.kind === "apply" && busyKey === `preset:apply:${confirm.id}`}
+      onCancel={() => setConfirm(null)}
+      onConfirm={() => {
+        if (confirm?.kind !== "apply") return;
+        const id = confirm.id;
+        void applyPreset(id).then(() => {
+          setConfirm(null);
+          onChanged();
+        });
+      }}
+    />
+    <ConfirmDialog
+      open={confirm?.kind === "replace"}
+      title="替换为库链接？"
+      message="将删除本机真实目录并替换为库链接。冲突的真实目录不会被覆盖。"
+      confirmLabel="替换"
+      tone="danger"
+      busy={
+        confirm?.kind === "replace" && busyKey === `migrate:${confirm.skillId}`
+      }
+      onCancel={() => setConfirm(null)}
+      onConfirm={() => {
+        if (confirm?.kind !== "replace") return;
+        const skillId = confirm.skillId;
+        void migrateUnmanaged(skillId, true).then(() => {
+          setConfirm(null);
+          onChanged();
+        });
+      }}
+    />
+    </>
   );
 }

@@ -112,6 +112,7 @@ export interface SkillGroup {
   id: string;
   name: string;
   order: number;
+  color: string | null;
 }
 
 export interface CommandError {

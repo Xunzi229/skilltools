@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useLocalStorageBool } from "../hooks/useLocalStorageBool";
 import type { ExternalEditor, FileNode } from "../model/skill";
+import { PanelToggle } from "./PanelToggle";
 
 interface FileTreeProps {
   nodes: FileNode[];
@@ -120,32 +121,28 @@ function TreeNodes({
             {isDirectory ? (
               <button
                 type="button"
-                className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px] text-ink-2 hover:bg-hover"
+                className="macos-tree-item"
                 style={{ paddingLeft: `${8 + depth * 12}px` }}
                 aria-expanded={hasChildren ? !isCollapsed : undefined}
                 aria-label={`${isCollapsed ? "展开" : "收起"} ${node.name}`}
                 onClick={() => onToggleDirectory(node.relativePath)}
               >
-                <span className="w-3 shrink-0 text-ink-3" aria-hidden="true">
+                <span className="macos-tree-glyph w-3 shrink-0" aria-hidden="true">
                   {hasChildren ? (isCollapsed ? "▸" : "▾") : "·"}
                 </span>
-                <span className="truncate font-medium text-ink">{node.name}</span>
+                <span className="truncate font-medium">{node.name}</span>
               </button>
             ) : (
               <button
                 type="button"
-                className={[
-                  "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[12px]",
-                  selectedPath === node.relativePath
-                    ? "bg-brand/10 text-brand"
-                    : "text-ink-2 hover:bg-hover",
-                ].join(" ")}
+                className="macos-tree-item"
                 style={{ paddingLeft: `${8 + depth * 12}px` }}
                 aria-pressed={selectedPath === node.relativePath}
+                data-selected={selectedPath === node.relativePath ? "true" : undefined}
                 onClick={() => onSelect(node.relativePath)}
                 onContextMenu={(event) => onContextMenu(event, node.relativePath)}
               >
-                <span className="w-3 shrink-0 text-ink-3" aria-hidden="true">
+                <span className="macos-tree-glyph w-3 shrink-0" aria-hidden="true">
                   ◇
                 </span>
                 <span className="truncate">{node.name}</span>
@@ -301,16 +298,12 @@ export function FileTree({
         className="relative flex min-h-0 w-10 shrink-0 flex-col items-center gap-2 overflow-hidden border-r border-line-strong bg-panel py-2"
         aria-label="目录结构（已折叠）"
       >
-        <button
-          type="button"
-          className="rounded-md border border-line px-1.5 py-1 text-[11px] text-ink-2 hover:bg-hover"
-          aria-expanded={false}
-          aria-label="展开目录结构"
-          title="展开目录结构"
-          onClick={() => setPanelCollapsed(false)}
-        >
-          »»
-        </button>
+        <PanelToggle
+          expanded={false}
+          labelExpand="展开目录结构"
+          labelCollapse="折叠目录结构"
+          onToggle={() => setPanelCollapsed(false)}
+        />
         <span
           className="text-[11px] font-medium text-ink-3"
           style={{ writingMode: "vertical-rl" }}
@@ -334,21 +327,19 @@ export function FileTree({
         >
           目录结构
         </button>
-        <button
-          type="button"
-          className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[11px] text-ink-3 hover:bg-hover"
-          aria-label="折叠目录结构"
-          title="折叠目录结构"
-          onClick={() => setPanelCollapsed(true)}
-        >
-          ««
-        </button>
+        <PanelToggle
+          expanded
+          labelExpand="展开目录结构"
+          labelCollapse="折叠目录结构"
+          onToggle={() => setPanelCollapsed(true)}
+          className="size-6 text-[12px]"
+        />
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-1 py-1">
         {loading ? (
           <p className="px-2 py-2 text-[12px] text-ink-3">正在加载目录…</p>
         ) : errorMessage ? (
-          <p className="px-2 py-2 text-[12px] text-red-600">{errorMessage}</p>
+          <p className="macos-alert-error m-2">{errorMessage}</p>
         ) : nodes.length === 0 ? (
           <p className="px-2 py-2 text-[12px] text-ink-3">目录为空</p>
         ) : (
@@ -369,7 +360,7 @@ export function FileTree({
           ref={menuRef}
           role="menu"
           aria-label="文件菜单"
-          className="fixed z-50 min-w-[168px] rounded-lg border border-line-strong bg-panel py-1 shadow-lg"
+          className="macos-menu fixed z-50"
           style={{ left: menu.x, top: menu.y }}
           onMouseLeave={() => {
             scheduleHideSubmenu();
@@ -385,10 +376,7 @@ export function FileTree({
               role="menuitem"
               aria-haspopup="menu"
               aria-expanded={openSubmenu}
-              className={[
-                "flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left text-[12px] text-ink",
-                openSubmenu ? "bg-hover" : "hover:bg-hover",
-              ].join(" ")}
+              className="macos-menu-item justify-between"
               onMouseEnter={showSubmenu}
               onFocus={showSubmenu}
             >
@@ -396,15 +384,13 @@ export function FileTree({
                 <EditorIcon id="default" />
                 打开
               </span>
-              <span className="text-ink-3" aria-hidden="true">
-                ▸
-              </span>
+              <span aria-hidden="true">▸</span>
             </button>
             {openSubmenu && (
               <div
                 role="menu"
                 aria-label="选择应用"
-                className="absolute top-0 left-full z-50 min-w-[168px] rounded-lg border border-line-strong bg-panel py-1 shadow-lg"
+                className="macos-menu absolute top-0 left-full z-50"
                 style={{ marginLeft: "-1px" }}
                 onMouseEnter={showSubmenu}
                 onMouseLeave={scheduleHideSubmenu}
@@ -414,7 +400,7 @@ export function FileTree({
                     key={editor.id}
                     type="button"
                     role="menuitem"
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink hover:bg-hover"
+                    className="macos-menu-item"
                     onClick={() => chooseEditor(editor.id)}
                   >
                     <EditorIcon id={editor.id} />
@@ -428,7 +414,7 @@ export function FileTree({
             <button
               type="button"
               role="menuitem"
-              className="flex w-full items-center gap-2 border-t border-line px-3 py-1.5 text-left text-[12px] text-ink hover:bg-hover"
+              className="macos-menu-item border-t border-line"
               onMouseEnter={scheduleHideSubmenu}
               onClick={() => chooseEditor(revealEditor.id)}
             >

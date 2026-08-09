@@ -178,8 +178,8 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
       aria-label="设置"
     >
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
-        <h2 className="m-0 text-[28px] font-bold text-ink">设置</h2>
-        <p className="mt-2 text-[14px] text-ink-2">
+        <h2 className="macos-page-title">设置</h2>
+        <p className="macos-page-sub">
           主题、预览字体、路径、备份策略与更新（v{APP_VERSION}）。安装健康见「安装」页。
         </p>
       </header>
@@ -188,30 +188,19 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
           <p className="text-[13px] text-ink-3">正在加载设置…</p>
         ) : (
           <>
-            {error && (
-              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
-                {error.message}
-              </div>
-            )}
-            {message && (
-              <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-700">
-                {message}
-              </div>
-            )}
-            <section className="mb-8">
-              <h3 className="m-0 text-[15px] font-semibold text-ink">主题</h3>
-              <div className="mt-3 flex gap-2">
+            {error && <div className="macos-alert-error mb-4">{error.message}</div>}
+            {message && <div className="macos-alert-ok mb-4">{message}</div>}
+            <section className="macos-card mb-6 p-4">
+              <h3 className="macos-section-title">主题</h3>
+              <div className="macos-seg mt-3">
                 {(["light", "dark"] as const).map((theme) => (
                   <button
                     key={theme}
                     type="button"
                     disabled={saving}
-                    className={[
-                      "rounded-lg border px-3 py-1.5 text-[13px]",
-                      settings?.theme === theme
-                        ? "border-brand bg-brand text-white"
-                        : "border-line text-ink hover:bg-hover",
-                    ].join(" ")}
+                    className="macos-seg-item px-3.5 text-[13px]"
+                    data-active={settings?.theme === theme ? "true" : undefined}
+                    aria-pressed={settings?.theme === theme}
                     onClick={() => setTheme(theme)}
                   >
                     {theme === "light" ? "浅色" : "深色"}
@@ -219,8 +208,8 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 ))}
               </div>
             </section>
-            <section className="mb-8">
-              <h3 className="m-0 text-[15px] font-semibold text-ink">预览字体</h3>
+            <section className="macos-card mb-6 p-4">
+              <h3 className="macos-section-title">预览字体</h3>
               <p className="mt-2 text-[12px] text-ink-3">
                 用于文件预览与编辑区的字体类型和字号。
               </p>
@@ -228,7 +217,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
                   字体类型
                   <select
-                    className="min-w-[200px] rounded-lg border border-line bg-panel px-3 py-1.5 text-[13px] text-ink"
+                    className="macos-select min-w-[200px]"
                     value={settings?.previewFontFamily || DEFAULT_PREVIEW_FONT_FAMILY}
                     disabled={saving || !settings}
                     onChange={(event) => {
@@ -264,7 +253,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
                   字号
                   <select
-                    className="rounded-lg border border-line bg-panel px-3 py-1.5 text-[13px] text-ink"
+                    className="macos-select"
                     value={settings?.previewFontSize || DEFAULT_PREVIEW_FONT_SIZE}
                     disabled={saving || !settings}
                     onChange={(event) => {
@@ -284,7 +273,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 </label>
               </div>
               <p
-                className="mt-3 rounded-lg border border-line px-3 py-2 text-ink-2"
+                className="macos-row mt-3 text-ink-2"
                 style={{
                   fontFamily: `"${settings?.previewFontFamily || DEFAULT_PREVIEW_FONT_FAMILY}"`,
                   fontSize: `${settings?.previewFontSize || DEFAULT_PREVIEW_FONT_SIZE}px`,
@@ -293,19 +282,19 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 预览效果：The quick brown fox 中文预览 0123456789
               </p>
             </section>
-            <section className="mb-8">
+            <section className="macos-card mb-6 p-4">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="m-0 text-[15px] font-semibold text-ink">Skill 根目录</h3>
+                <h3 className="macos-section-title">Skill 根目录</h3>
                 <button
                   type="button"
-                  className="rounded-lg border border-line px-2.5 py-1 text-[12px] text-ink-2 hover:bg-hover disabled:opacity-55"
+                  className="macos-btn-ghost"
                   disabled={saving}
                   onClick={resetAllRoots}
                 >
                   全部重置为默认
                 </button>
               </div>
-              <ul className="mt-3 flex list-none flex-col gap-3 p-0">
+              <ul className="mt-3 flex list-none flex-col gap-2 p-0">
                 {(["cursor", "claude", "codex"] as const).map((provider) => {
                   const current =
                     provider === "cursor"
@@ -321,10 +310,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                         : paths?.defaultCodexSkills;
                   const overridden = Boolean(settings?.skillRootOverrides[provider]);
                   return (
-                    <li
-                      key={provider}
-                      className="rounded-lg border border-line px-3 py-3"
-                    >
+                    <li key={provider} className="macos-row">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <strong className="text-[13px] text-ink">
                           {providerLabels[provider]}
@@ -334,10 +320,10 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                             </span>
                           ) : null}
                         </strong>
-                        <div className="flex gap-2">
+                        <div className="flex gap-1.5">
                           <button
                             type="button"
-                            className="rounded border border-line px-2 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
+                            className="macos-btn-ghost"
                             disabled={saving}
                             onClick={() => void setRoot(provider)}
                           >
@@ -345,7 +331,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                           </button>
                           <button
                             type="button"
-                            className="rounded border border-line px-2 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
+                            className="macos-btn-ghost"
                             disabled={saving || !overridden}
                             onClick={() => resetRoot(provider)}
                           >
@@ -353,7 +339,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                           </button>
                           <button
                             type="button"
-                            className="rounded border border-line px-2 py-1 text-[12px] hover:bg-hover"
+                            className="macos-btn-ghost"
                             disabled={!current}
                             onClick={() => current && void api.revealPath(current)}
                           >
@@ -372,8 +358,8 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 })}
               </ul>
             </section>
-            <section className="mb-8">
-              <h3 className="m-0 text-[15px] font-semibold text-ink">备份保留</h3>
+            <section className="macos-card mb-6 p-4">
+              <h3 className="macos-section-title">备份保留</h3>
               <p className="mt-2 text-[12px] text-ink-3">
                 留空表示不按该维度清理。启动时会静默执行一次。
               </p>
@@ -383,7 +369,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                   <input
                     type="number"
                     min={1}
-                    className="w-28 rounded border border-line bg-panel px-2 py-1.5 text-[13px] text-ink"
+                    className="macos-input w-28 px-2.5 py-1.5"
                     value={settings?.backupRetentionDays ?? ""}
                     placeholder="永不"
                     disabled={saving}
@@ -402,7 +388,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                   <input
                     type="number"
                     min={1}
-                    className="w-28 rounded border border-line bg-panel px-2 py-1.5 text-[13px] text-ink"
+                    className="macos-input w-28 px-2.5 py-1.5"
                     value={settings?.backupMaxCount ?? ""}
                     placeholder="不限"
                     disabled={saving}
@@ -420,7 +406,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
-                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+                  className="macos-btn-ghost"
                   disabled={saving || !settings}
                   onClick={() => {
                     if (!settings) return;
@@ -443,7 +429,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+                  className="macos-btn-ghost"
                   disabled={cleanupBusy}
                   onClick={() => void runCleanup()}
                 >
@@ -451,15 +437,15 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 </button>
               </div>
             </section>
-            <section className="mb-8">
-              <h3 className="m-0 text-[15px] font-semibold text-ink">应用更新</h3>
+            <section className="macos-card mb-6 p-4">
+              <h3 className="macos-section-title">应用更新</h3>
               <p className="mt-2 text-[12px] text-ink-3">
                 从 GitHub Releases 检查更新。Windows 优先可用；macOS 无签名时下载后可能受
                 Gatekeeper 限制。
               </p>
               <button
                 type="button"
-                className="mt-3 rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+                className="macos-btn-ghost mt-3"
                 disabled={updateBusy}
                 onClick={() => void checkForUpdates()}
               >
@@ -469,8 +455,8 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 <p className="mt-2 text-[12px] text-ink-2">{updateMessage}</p>
               )}
             </section>
-            <section>
-              <h3 className="m-0 text-[15px] font-semibold text-ink">应用数据</h3>
+            <section className="macos-card p-4">
+              <h3 className="macos-section-title">应用数据</h3>
               <p className="mt-2 text-[12px] text-ink-3">
                 标识符 com.skilltools.manager；数据目录由系统 appDataDir 决定。
               </p>
@@ -479,7 +465,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
               </p>
               <button
                 type="button"
-                className="mt-3 rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover"
+                className="macos-btn-ghost mt-3"
                 disabled={!paths}
                 onClick={() => paths && void api.revealPath(paths.appDataDir)}
               >

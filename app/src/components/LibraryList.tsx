@@ -9,6 +9,7 @@ import type {
 import { formatBatchSummary } from "../hooks/useBatchActions";
 import { displayDescription } from "../utils/skillDisplay";
 import { NameDialog } from "./NameDialog";
+import { PanelToggle } from "./PanelToggle";
 import { SkillCard } from "./SkillCard";
 
 type StatusTab = "all" | "uninstalled" | "installed" | "custom";
@@ -189,16 +190,12 @@ export function LibraryList({
         className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-3 overflow-hidden border-r border-line-strong bg-panel px-1.5 py-4"
         aria-label="库 Skill 列表（已折叠）"
       >
-        <button
-          type="button"
-          className="rounded-md border border-line px-2 py-1.5 text-[11px] text-ink-2 hover:bg-hover"
-          aria-expanded={false}
-          aria-label="展开列表"
-          title="展开列表"
-          onClick={onToggleCollapse}
-        >
-          »»
-        </button>
+        <PanelToggle
+          expanded={false}
+          labelExpand="展开列表"
+          labelCollapse="折叠列表"
+          onToggle={onToggleCollapse}
+        />
         <span
           className="mt-2 text-[11px] font-medium text-ink-3"
           style={{ writingMode: "vertical-rl" }}
@@ -217,46 +214,45 @@ export function LibraryList({
       <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="m-0 text-[18px] font-semibold text-ink">{title}</h2>
+            <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">{title}</h2>
             <p className="mt-1 text-[12px] text-ink-2">浏览和管理可用的 Skills</p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
-              className="rounded-lg border border-line px-2.5 py-1 text-[12px] hover:bg-hover disabled:opacity-55"
+              className="macos-btn-primary"
               disabled={batchBusy || createBusy}
               onClick={() => setCreateOpen(true)}
             >
               新建
             </button>
             {onToggleCollapse && (
-              <button
-                type="button"
-                className="rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover"
-                aria-expanded={true}
-                aria-label="折叠列表"
-                title="折叠列表"
-                onClick={onToggleCollapse}
-              >
-                ««
-              </button>
+              <PanelToggle
+                expanded
+                labelExpand="展开列表"
+                labelCollapse="折叠列表"
+                onToggle={onToggleCollapse}
+              />
             )}
           </div>
         </div>
-        <label className="mt-3 flex h-[38px] items-center gap-2 rounded-lg border border-line bg-panel px-3">
-          <span className="text-ink-3" aria-hidden="true">
+        <label className="macos-search mt-3">
+          <span className="text-[13px] text-ink-3" aria-hidden="true">
             ⌕
           </span>
           <input
             type="search"
-            className="w-full border-0 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
             aria-label="搜索库 Skill"
             placeholder="搜索名称或描述"
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </label>
-        <div className="mt-3 flex flex-wrap gap-1.5" role="tablist" aria-label="安装状态过滤">
+        <div
+          className="macos-seg mt-3 w-full"
+          role="tablist"
+          aria-label="安装状态过滤"
+        >
           {tabs.map((tab) => {
             const active = statusTab === tab.id;
             return (
@@ -265,23 +261,11 @@ export function LibraryList({
                 type="button"
                 role="tab"
                 aria-selected={active}
-                className={[
-                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px]",
-                  active
-                    ? "bg-brand/10 font-medium text-brand"
-                    : "text-ink-2 hover:bg-hover",
-                ].join(" ")}
+                className="macos-seg-item"
                 onClick={() => setStatusTab(tab.id)}
               >
                 {tab.label}
-                <span
-                  className={[
-                    "rounded-full px-1.5 py-px text-[10px] font-semibold",
-                    active ? "bg-brand text-white" : "bg-slate-100 text-ink-3",
-                  ].join(" ")}
-                >
-                  {counts[tab.id]}
-                </span>
+                <span className="macos-badge">{counts[tab.id]}</span>
               </button>
             );
           })}
@@ -294,7 +278,7 @@ export function LibraryList({
                 <button
                   key={`install-${provider}`}
                   type="button"
-                  className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55"
+                  className="macos-btn-ghost macos-btn-sm"
                   disabled={batchBusy}
                   onClick={() => onBatchInstall(provider)}
                 >
@@ -305,7 +289,7 @@ export function LibraryList({
                 <button
                   key={`uninstall-${provider}`}
                   type="button"
-                  className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55"
+                  className="macos-btn-ghost macos-btn-sm"
                   disabled={batchBusy}
                   onClick={() => onBatchUninstall(provider)}
                 >
@@ -315,7 +299,7 @@ export function LibraryList({
             </div>
             <div className="flex flex-wrap gap-1.5">
               <select
-                className="h-7 rounded border border-line px-1 text-[11px]"
+                className="macos-select macos-select-sm"
                 aria-label="批量设置分组"
                 disabled={batchBusy}
                 defaultValue=""
@@ -336,7 +320,7 @@ export function LibraryList({
                   ))}
               </select>
               <select
-                className="h-7 rounded border border-line px-1 text-[11px]"
+                className="macos-select macos-select-sm"
                 aria-label="批量追加标签"
                 disabled={batchBusy || tags.length === 0}
                 defaultValue=""
@@ -354,7 +338,7 @@ export function LibraryList({
               </select>
               <button
                 type="button"
-                className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover"
+                className="macos-btn-ghost macos-btn-sm"
                 disabled={batchBusy}
                 onClick={onClearSelection}
               >
@@ -364,9 +348,9 @@ export function LibraryList({
           </div>
         )}
         {batchResult && (
-          <div className="mt-2 flex items-start justify-between gap-2 rounded border border-line bg-hover px-2 py-1.5 text-[11px] text-ink-2">
+          <div className="macos-alert-ok mt-2 flex items-start justify-between gap-2 py-1.5 text-[11px]">
             <span>{formatBatchSummary(batchResult)}</span>
-            <button type="button" className="shrink-0" onClick={onClearBatchResult}>
+            <button type="button" className="macos-link shrink-0" onClick={onClearBatchResult}>
               关闭
             </button>
           </div>
@@ -378,10 +362,10 @@ export function LibraryList({
           <div className="px-3 py-8 text-center text-[13px] text-ink-3">正在加载 Skill 库…</div>
         ) : errorMessage ? (
           <div className="px-3 py-8 text-center text-[13px]" role="alert">
-            <strong className="block text-red-600">{errorMessage}</strong>
+            <strong className="macos-alert-error block">{errorMessage}</strong>
             <button
               type="button"
-              className="mt-3 rounded-md bg-brand px-3 py-1.5 text-white"
+              className="macos-btn-primary mt-3"
               onClick={onRetry}
             >
               重试
@@ -398,7 +382,7 @@ export function LibraryList({
             {skills.length === 0 && onGoToProjects && (
               <button
                 type="button"
-                className="mt-3 rounded-md bg-brand px-3 py-1.5 text-white"
+                className="macos-btn-primary mt-3"
                 onClick={onGoToProjects}
               >
                 去项目管理
@@ -412,10 +396,10 @@ export function LibraryList({
               const expandable = childCount > 0;
               const expanded = expandable && !collapsed.has(skill.id);
               return (
-                <li key={skill.id} className="flex items-start gap-1">
+                <li key={skill.id} className="flex items-center gap-1.5">
                   <input
                     type="checkbox"
-                    className="mt-4 ml-1"
+                    className="ml-1.5 size-3.5 shrink-0 accent-[var(--color-brand)]"
                     checked={selectedIds.has(skill.id)}
                     aria-label={`选择 ${skill.name}`}
                     onChange={() => onToggleSelect(skill.id)}
@@ -428,12 +412,10 @@ export function LibraryList({
                         skill.installedProviders.length > 0 ? "已安装" : "未安装"
                       }
                       selected={selectedId === skill.id}
-                      onSelect={() => {
-                        onSelect(skill.id);
-                        if (expandable) {
-                          toggleParent(skill.id);
-                        }
-                      }}
+                      onSelect={() => onSelect(skill.id)}
+                      onToggleExpand={
+                        expandable ? () => toggleParent(skill.id) : undefined
+                      }
                       subSkill={skill.parentSkillId !== null}
                       indent={skill.parentSkillId !== null}
                       expandable={expandable}

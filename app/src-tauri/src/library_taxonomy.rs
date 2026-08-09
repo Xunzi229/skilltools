@@ -113,7 +113,12 @@ impl LibraryRepository {
         Ok(groups)
     }
 
-    pub fn create_group(&self, name: String, order: i32) -> Result<SkillGroup, AppError> {
+    pub fn create_group(
+        &self,
+        name: String,
+        order: i32,
+        color: Option<String>,
+    ) -> Result<SkillGroup, AppError> {
         self.mutate_index(|index| {
             ensure_unique_name(&index.groups, &name, None, "分组", |group| {
                 (&group.id, &group.name)
@@ -122,6 +127,7 @@ impl LibraryRepository {
                 id: Uuid::new_v4().to_string(),
                 name,
                 order,
+                color,
             };
             index.groups.push(group.clone());
             Ok(group)
@@ -139,6 +145,27 @@ impl LibraryRepository {
                 .find(|group| group.id == id)
                 .ok_or_else(|| AppError::GroupNotFound { id: id.to_owned() })?;
             group.name = name;
+            Ok(group.clone())
+        })
+    }
+
+    pub fn update_group(
+        &self,
+        id: &str,
+        name: String,
+        color: Option<String>,
+    ) -> Result<SkillGroup, AppError> {
+        self.mutate_index(|index| {
+            ensure_unique_name(&index.groups, &name, Some(id), "分组", |group| {
+                (&group.id, &group.name)
+            })?;
+            let group = index
+                .groups
+                .iter_mut()
+                .find(|group| group.id == id)
+                .ok_or_else(|| AppError::GroupNotFound { id: id.to_owned() })?;
+            group.name = name;
+            group.color = color;
             Ok(group.clone())
         })
     }

@@ -87,12 +87,12 @@ export function BackupList({
         aria-label="备份列表"
       >
         <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
-          <h2 className="m-0 text-[18px] font-semibold text-ink">备份记录</h2>
+          <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">备份记录</h2>
           <p className="mt-1 text-[12px] text-ink-2">{orderedBackups.length} 条记录</p>
           {checked.size > 0 && (
             <button
               type="button"
-              className="mt-2 rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55"
+              className="macos-btn-danger-soft macos-btn-sm mt-2"
               disabled={pendingAction !== null || batchDeleting}
               onClick={() => setBatchDeleteOpen(true)}
             >
@@ -105,11 +105,11 @@ export function BackupList({
             <div className="px-3 py-8 text-center text-[13px] text-ink-3">正在加载备份记录…</div>
           ) : error ? (
             <div className="px-3 py-8 text-center text-[13px]" role="alert">
-              <strong className="block text-red-600">备份加载失败</strong>
+              <strong className="macos-alert-error block">备份加载失败</strong>
               <span className="text-ink-3">{error.message}</span>
               <button
                 type="button"
-                className="mt-3 rounded-md bg-brand px-3 py-1.5 text-white"
+                className="macos-btn-primary mt-3"
                 onClick={onRetry}
               >
                 重试
@@ -123,10 +123,10 @@ export function BackupList({
           ) : (
             <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
               {orderedBackups.map((backup) => (
-                <li key={backup.id} className="flex items-start gap-1">
+                <li key={backup.id} className="flex items-center gap-1.5">
                   <input
                     type="checkbox"
-                    className="mt-4 ml-1"
+                    className="ml-1.5 size-3.5 shrink-0 accent-[var(--color-brand)]"
                     checked={checked.has(backup.id)}
                     aria-label={`选择备份 ${backup.skillName}`}
                     onChange={(event) => {
@@ -170,7 +170,7 @@ export function BackupList({
                   <span className="text-[12px] text-ink-3">
                     {providerNames[selected.provider]}
                   </span>
-                  <h2 className="m-0 mt-1 text-[28px] font-bold text-ink">
+                  <h2 className="macos-page-title mt-1">
                     {selected.skillName}
                   </h2>
                   <p className="mt-2 text-[14px] text-ink-2">
@@ -180,7 +180,7 @@ export function BackupList({
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    className="rounded-lg border border-red-200 px-3 py-1.5 text-[12px] text-red-700 hover:bg-red-50 disabled:opacity-55"
+                    className="macos-btn-danger-soft"
                     disabled={pendingAction !== null}
                     onClick={() => setDeleteOpen(true)}
                   >
@@ -188,7 +188,7 @@ export function BackupList({
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg bg-brand px-3 py-1.5 text-[12px] text-white disabled:opacity-55"
+                    className="macos-btn-primary"
                     disabled={pendingAction !== null}
                     onClick={() => setRestoreOpen(true)}
                   >
@@ -200,13 +200,13 @@ export function BackupList({
             <div className="min-h-0 flex-1 overflow-auto px-6 py-4">
               {actionError && (
                 <div
-                  className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
+                  className="macos-alert-error mb-4 flex items-center justify-between gap-3"
                   role="alert"
                 >
                   <span>{actionError.message}</span>
                   <button
                     type="button"
-                    className="rounded bg-red-100 px-2 py-1"
+                    className="macos-btn-ghost macos-btn-sm"
                     onClick={onClearActionError}
                   >
                     关闭

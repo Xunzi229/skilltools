@@ -65,14 +65,14 @@ export function ProjectPanel({
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="m-0 text-[28px] font-bold text-ink">项目</h2>
-            <p className="mt-2 text-[14px] text-ink-2">
+            <h2 className="macos-page-title">项目</h2>
+            <p className="macos-page-sub">
               添加本地 Skill 目录，或克隆并维护 Git Skill 仓库。
             </p>
           </div>
           <button
             type="button"
-            className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-hover disabled:opacity-55"
+            className="macos-btn-ghost"
             disabled={busy}
             onClick={() => {
               void pickZipFile("导入 Skill ZIP").then((path) => {
@@ -87,21 +87,21 @@ export function ProjectPanel({
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {error && (
           <div
-            className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
+            className="macos-alert-error mb-4 flex items-center justify-between gap-3"
             role="alert"
           >
             <span>{error.message}</span>
-            <button type="button" className="rounded bg-red-100 px-2 py-1" onClick={onClearError}>
+            <button type="button" className="macos-btn-ghost" onClick={onClearError}>
               关闭
             </button>
           </div>
         )}
         {pullSummary && (
-          <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-line bg-hover px-3 py-2 text-[12px] text-ink-2">
+          <div className="macos-alert-ok mb-4 flex items-center justify-between gap-3">
             <span>{pullSummary}</span>
             <button
               type="button"
-              className="rounded border border-line px-2 py-1"
+              className="macos-btn-ghost"
               onClick={() => setPullSummary(null)}
             >
               关闭
@@ -122,7 +122,7 @@ export function ProjectPanel({
             <div className="flex gap-2">
               <input
                 id="local-project-path"
-                className="h-9 min-w-0 flex-1 rounded-lg border border-line px-3 text-[13px]"
+                className="macos-input min-w-0 flex-1"
                 aria-label="本地项目路径"
                 value={localPath}
                 onChange={(event) => setLocalPath(event.target.value)}
@@ -130,7 +130,7 @@ export function ProjectPanel({
               />
               <button
                 type="button"
-                className="shrink-0 rounded-lg border border-line px-3 text-[12px] hover:bg-hover disabled:opacity-55"
+                className="macos-btn-ghost shrink-0"
                 disabled={busy}
                 onClick={() => {
                   void pickDirectory("选择本地项目目录").then((path) => {
@@ -142,7 +142,7 @@ export function ProjectPanel({
               </button>
               <button
                 type="submit"
-                className="shrink-0 rounded-lg bg-brand px-3 text-[12px] text-white disabled:opacity-55"
+                className="macos-btn-primary shrink-0"
                 disabled={busy || !localPath.trim()}
               >
                 添加本地项目
@@ -162,7 +162,7 @@ export function ProjectPanel({
             <div className="flex gap-2">
               <input
                 id="git-project-url"
-                className="h-9 min-w-0 flex-1 rounded-lg border border-line px-3 text-[13px]"
+                className="macos-input min-w-0 flex-1"
                 aria-label="Git 仓库 URL"
                 value={gitUrl}
                 onChange={(event) => setGitUrl(event.target.value)}
@@ -170,7 +170,7 @@ export function ProjectPanel({
               />
               <button
                 type="submit"
-                className="shrink-0 rounded-lg bg-brand px-3 text-[12px] text-white disabled:opacity-55"
+                className="macos-btn-primary shrink-0"
                 disabled={busy || !gitUrl.trim()}
               >
                 添加 Git 项目
@@ -189,7 +189,7 @@ export function ProjectPanel({
             {projects.map((project) => (
               <li
                 key={project.id}
-                className="flex items-center justify-between gap-4 rounded-lg border border-line px-4 py-3"
+                className="macos-card flex items-center justify-between gap-4 px-4 py-3"
               >
                 <div className="min-w-0">
                   <strong className="block text-[14px] text-ink">{project.name}</strong>
@@ -206,7 +206,7 @@ export function ProjectPanel({
                   {project.sourceType === "git" && (
                     <button
                       type="button"
-                      className="rounded-md bg-brand px-2.5 py-2 text-[11px] text-white disabled:opacity-55"
+                      className="macos-btn-primary macos-btn-sm"
                       aria-label={`拉取 ${project.name}`}
                       disabled={busy}
                       onClick={() => {
@@ -228,7 +228,7 @@ export function ProjectPanel({
                   )}
                   <button
                     type="button"
-                    className="rounded-md border border-line px-2.5 py-2 text-[11px] disabled:opacity-55"
+                    className="macos-btn-ghost macos-btn-sm"
                     disabled={busy}
                     onClick={() => {
                       void pickSaveZip(`${project.name}.zip`).then((path) => {
@@ -240,7 +240,7 @@ export function ProjectPanel({
                   </button>
                   <button
                     type="button"
-                    className="rounded-md border border-red-200 px-2.5 py-2 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55"
+                    className="macos-btn-danger-soft macos-btn-sm"
                     aria-label={`移除 ${project.name}`}
                     disabled={busy}
                     onClick={() => setRemoveTarget(project)}

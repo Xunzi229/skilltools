@@ -50,21 +50,21 @@ export function TargetSelector({
             <label
               key={id}
               className={[
-                "flex h-14 w-[200px] cursor-pointer items-center gap-2.5 rounded-lg border px-3",
-                installed ? "border-brand/40 bg-brand/5" : "border-line bg-panel",
-                busy ? "opacity-60" : "hover:bg-hover",
+                "macos-selectable h-14 w-[200px] cursor-pointer",
+                busy ? "opacity-60" : "",
               ].join(" ")}
+              data-selected={installed ? "true" : undefined}
             >
               <input
                 type="checkbox"
-                className="size-4 accent-brand"
+                className="size-3.5 accent-[var(--color-brand)]"
                 aria-label={`安装到 ${label}`}
                 checked={installed}
                 disabled={busy}
                 onChange={() => onToggle(id, installed)}
               />
               <span
-                className={`grid size-8 shrink-0 place-items-center rounded-md text-[13px] font-bold ${markClass}`}
+                className={`grid size-8 shrink-0 place-items-center rounded-[9px] text-[13px] font-bold ${markClass}`}
                 aria-hidden="true"
               >
                 {mark}

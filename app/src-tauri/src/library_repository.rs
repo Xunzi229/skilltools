@@ -946,7 +946,9 @@ mod tests {
         let tag_b = repository
             .create_tag("常用".into(), Some("#fff".into()))
             .unwrap();
-        let group = repository.create_group("开发".into(), 10).unwrap();
+        let group = repository
+            .create_group("开发".into(), 10, Some("#007AFF".into()))
+            .unwrap();
 
         repository
             .set_skill_tags(&skill_id, vec![tag_a.id.clone(), tag_b.id.clone()])

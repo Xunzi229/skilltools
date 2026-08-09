@@ -46,23 +46,26 @@ export function ConfirmDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-[2px]">
       <div
-        className="w-full max-w-md rounded-xl border border-line bg-panel p-5 shadow-xl"
+        className="macos-sheet w-full max-w-md p-5"
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
       >
-        <h2 id="confirm-dialog-title" className="m-0 text-[16px] font-semibold text-ink">
+        <h2
+          id="confirm-dialog-title"
+          className="m-0 text-center text-[15px] font-semibold tracking-tight text-ink"
+        >
           {title}
         </h2>
-        <p className="mt-2 text-[13px] leading-6 text-ink-2">{message}</p>
+        <p className="mt-2 text-center text-[13px] leading-6 text-ink-2">{message}</p>
         {children ? <div className="mt-3">{children}</div> : null}
         <div className="mt-5 flex justify-end gap-2">
           <button
             ref={cancelRef}
             type="button"
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px] text-ink hover:bg-hover disabled:opacity-55"
+            className="macos-btn-ghost h-8 px-3.5 text-[13px]"
             disabled={busy}
             onClick={onCancel}
           >
@@ -72,8 +75,8 @@ export function ConfirmDialog({
             ref={confirmRef}
             className={
               tone === "danger"
-                ? "rounded-lg bg-red-600 px-3 py-1.5 text-[13px] text-white hover:bg-red-700 disabled:opacity-55"
-                : "rounded-lg bg-brand px-3 py-1.5 text-[13px] text-white hover:bg-blue-700 disabled:opacity-55"
+                ? "macos-btn-danger h-8 px-3.5 text-[13px]"
+                : "macos-btn-primary h-8 px-3.5 text-[13px]"
             }
             type="button"
             disabled={busy}

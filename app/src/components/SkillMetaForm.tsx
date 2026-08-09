@@ -118,7 +118,7 @@ function FieldEditor({
         {onRemove && (
           <button
             type="button"
-            className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[11px] text-ink-2 hover:bg-hover disabled:opacity-55"
+            className="macos-btn-ghost macos-btn-sm"
             disabled={busy}
             aria-label={`移除字段 ${label}`}
             onClick={onRemove}
@@ -130,7 +130,7 @@ function FieldEditor({
       {multiline ? (
         <textarea
           id={`meta-${fieldKey}`}
-          className="mt-1 w-full rounded border border-line px-2 py-1.5 font-mono text-[12px] text-ink"
+          className="macos-input mt-1 h-auto w-full py-1.5 font-mono text-[12px]"
           rows={fieldKey === "description" ? 3 : 2}
           value={value}
           disabled={busy}
@@ -139,7 +139,7 @@ function FieldEditor({
       ) : (
         <input
           id={`meta-${fieldKey}`}
-          className="mt-1 w-full rounded border border-line px-2 py-1.5 font-mono text-[12px] text-ink"
+          className="macos-input mt-1 w-full font-mono text-[12px]"
           value={value}
           disabled={busy}
           onChange={(event) => onChange(event.target.value)}
@@ -199,7 +199,7 @@ export function SkillMetaForm({
 
   return (
     <form
-      className="mb-4 shrink-0 rounded-lg border border-line px-3 py-3"
+      className="macos-card mb-4 shrink-0 px-3 py-3"
       onSubmit={(event) => {
         event.preventDefault();
         setMessage(null);
@@ -292,7 +292,7 @@ export function SkillMetaForm({
           {custom.map((row) => (
             <li key={row.id} className="flex items-start gap-2">
               <input
-                className="w-[28%] rounded border border-line px-2 py-1.5 font-mono text-[12px] text-ink"
+                className="macos-input w-[28%] font-mono text-[12px]"
                 placeholder="键"
                 aria-label="自定义字段键"
                 value={row.key}
@@ -306,7 +306,7 @@ export function SkillMetaForm({
                 }
               />
               <input
-                className="min-w-0 flex-1 rounded border border-line px-2 py-1.5 font-mono text-[12px] text-ink"
+                className="macos-input min-w-0 flex-1 font-mono text-[12px]"
                 placeholder="值"
                 aria-label="自定义字段值"
                 value={row.value}
@@ -321,7 +321,7 @@ export function SkillMetaForm({
               />
               <button
                 type="button"
-                className="shrink-0 rounded border border-line px-2 py-1.5 text-[11px] text-ink-2 hover:bg-hover disabled:opacity-55"
+                className="macos-btn-ghost macos-btn-sm shrink-0"
                 disabled={busy}
                 aria-label={`删除字段 ${row.key || "未命名"}`}
                 onClick={() =>
@@ -339,7 +339,7 @@ export function SkillMetaForm({
         <label className="flex min-w-0 flex-1 items-center gap-2 text-[12px] text-ink-3">
           <span className="shrink-0">添加</span>
           <select
-            className="min-w-0 flex-1 rounded border border-line bg-panel px-2 py-1.5 text-[12px] text-ink"
+            className="macos-select macos-select-sm min-w-0 flex-1"
             aria-label="添加元数据字段"
             value={addChoice}
             disabled={busy}
@@ -360,7 +360,7 @@ export function SkillMetaForm({
         </label>
         <button
           type="submit"
-          className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+          className="macos-btn-primary"
           disabled={busy || !(standard.name ?? "").trim()}
         >
           保存元数据

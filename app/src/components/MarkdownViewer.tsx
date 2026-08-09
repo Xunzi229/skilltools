@@ -127,7 +127,7 @@ export function MarkdownViewer({
           {kind === "markdown" && !editing && file?.content !== null && (
             <button
               type="button"
-              className="rounded border border-line px-2 py-0.5 text-[11px] hover:bg-hover"
+              className="macos-btn-ghost macos-btn-sm"
               onClick={() => setMdSource((value) => !value)}
             >
               {mdSource ? "渲染预览" : "查看源码"}
@@ -138,7 +138,7 @@ export function MarkdownViewer({
               <>
                 <button
                   type="button"
-                  className="rounded border border-line px-2 py-0.5 text-[11px] hover:bg-hover disabled:opacity-55"
+                  className="macos-btn-ghost macos-btn-sm"
                   disabled={saving}
                   onClick={() => {
                     setEditing(false);
@@ -150,7 +150,7 @@ export function MarkdownViewer({
                 </button>
                 <button
                   type="button"
-                  className="rounded bg-brand px-2 py-0.5 text-[11px] text-white disabled:opacity-55"
+                  className="macos-btn-primary macos-btn-sm"
                   disabled={saving}
                   onClick={() => {
                     if (!onSave) return;
@@ -173,7 +173,7 @@ export function MarkdownViewer({
             ) : (
               <button
                 type="button"
-                className="rounded border border-line px-2 py-0.5 text-[11px] hover:bg-hover"
+                className="macos-btn-ghost macos-btn-sm"
                 onClick={() => {
                   setDraft(file?.content ?? "");
                   setEditing(true);
@@ -189,9 +189,9 @@ export function MarkdownViewer({
         {loading ? (
           <p className="px-4 py-3 text-[13px] text-ink-3">正在加载文件…</p>
         ) : errorMessage ? (
-          <p className="px-4 py-3 text-[13px] text-red-600">{errorMessage}</p>
+          <p className="macos-alert-error m-3">{errorMessage}</p>
         ) : saveError ? (
-          <p className="px-4 py-3 text-[13px] text-red-600">{saveError}</p>
+          <p className="macos-alert-error m-3">{saveError}</p>
         ) : !file ? (
           <p className="px-4 py-3 text-[13px] text-ink-3">选择文件以预览</p>
         ) : editing ? (

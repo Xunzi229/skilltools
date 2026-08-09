@@ -576,12 +576,13 @@ pub fn create_group(
     state: State<'_, AppState>,
     name: String,
     order: i32,
+    color: Option<String>,
 ) -> Result<SkillGroup, CommandError> {
     state
         .library
         .lock()
         .map_err(|_| state_lock_error())?
-        .create_group(name, order)
+        .create_group(name, order, color)
         .map_err(map_app_error)
 }
 
@@ -596,6 +597,21 @@ pub fn rename_group(
         .lock()
         .map_err(|_| state_lock_error())?
         .rename_group(&id, name)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn update_group(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    color: Option<String>,
+) -> Result<SkillGroup, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .update_group(&id, name, color)
         .map_err(map_app_error)
 }
 

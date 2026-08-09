@@ -29,7 +29,10 @@ interface LibraryDetailProps {
   onSetTags: (id: string, tagIds: string[]) => Promise<void>;
   onSetGroup: (id: string, groupId: string | null) => Promise<void>;
   onCreateTag: (name: string, color?: string | null) => Promise<Tag | undefined>;
-  onCreateGroup: (name: string) => Promise<SkillGroup | undefined>;
+  onCreateGroup: (
+    name: string,
+    color?: string | null,
+  ) => Promise<SkillGroup | undefined>;
   onInstall: (id: string, provider: Provider) => Promise<void>;
   onUninstall: (id: string, provider: Provider) => Promise<void>;
   onExportZip: (id: string, destPath: string) => Promise<void>;
@@ -110,13 +113,13 @@ export function LibraryDetail({
     >
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         {skill.parentSkillId && (
-          <span className="mb-2 inline-block rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-ink-2">
+          <span className="mb-2 inline-block rounded-full bg-hover px-2 py-0.5 text-[11px] font-medium text-ink-2">
             子 Skill
           </span>
         )}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="m-0 text-[28px] font-bold leading-tight text-ink">{skill.name}</h2>
+            <h2 className="macos-page-title leading-tight">{skill.name}</h2>
             <p className="mt-2 max-w-3xl text-[14px] leading-6 text-ink-2">
               {displayDescription(skill.description) || "暂无描述"}
             </p>
@@ -124,7 +127,7 @@ export function LibraryDetail({
           <div className="flex shrink-0 flex-wrap gap-2">
             <button
               type="button"
-              className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+              className="macos-btn-ghost"
               disabled={busy}
               onClick={() => setNameDialog("rename")}
             >
@@ -132,7 +135,7 @@ export function LibraryDetail({
             </button>
             <button
               type="button"
-              className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[12px] text-red-700 hover:bg-red-100 disabled:opacity-55"
+              className="macos-btn-danger-soft"
               disabled={busy}
               onClick={() => setDeleteOpen(true)}
             >
@@ -146,7 +149,7 @@ export function LibraryDetail({
           </span>
           <button
             type="button"
-            className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover disabled:opacity-55"
+            className="macos-btn-ghost macos-btn-sm"
             disabled={busy}
             onClick={() => {
               void pickSaveZip(`${skill.name}.zip`).then((path) => {
@@ -158,7 +161,7 @@ export function LibraryDetail({
           </button>
           <button
             type="button"
-            className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover"
+            className="macos-btn-ghost macos-btn-sm"
             aria-label="复制来源路径"
             onClick={() => {
               void copyText(skill.absolutePath).then(() => {
@@ -175,13 +178,13 @@ export function LibraryDetail({
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
         {actionError && (
           <div
-            className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
+            className="macos-alert-error flex shrink-0 items-center justify-between gap-3"
             role="alert"
           >
             <span>{actionError.message}</span>
             <button
               type="button"
-              className="rounded bg-red-100 px-2 py-1"
+              className="macos-btn-ghost macos-btn-sm"
               onClick={onClearError}
             >
               关闭
@@ -195,7 +198,7 @@ export function LibraryDetail({
               <span>分组</span>
               <button
                 type="button"
-                className="rounded px-1.5 py-0.5 text-[11px] text-brand hover:bg-brand/10 disabled:opacity-55"
+                className="macos-link"
                 disabled={busy}
                 onClick={() => setNameDialog("group")}
               >
@@ -203,7 +206,7 @@ export function LibraryDetail({
               </button>
             </div>
             <select
-              className="h-9 rounded-lg border border-line bg-panel px-2 text-[13px] text-ink"
+              className="macos-select w-full"
               aria-label="分组"
               value={skill.groupId ?? ""}
               disabled={busy}
@@ -226,7 +229,7 @@ export function LibraryDetail({
               <span>标签</span>
               <button
                 type="button"
-                className="rounded px-1.5 py-0.5 text-[11px] text-brand hover:bg-brand/10 disabled:opacity-55"
+                className="macos-link"
                 disabled={busy}
                 onClick={() => setNameDialog("tag")}
               >
@@ -240,10 +243,11 @@ export function LibraryDetail({
                 {tags.map((tag) => (
                   <label
                     key={tag.id}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-line px-2 py-1 text-[12px] text-ink-2"
+                    className="macos-chip"
                   >
                     <input
                       type="checkbox"
+                      className="size-3.5 accent-[var(--color-brand)]"
                       aria-label={tag.name}
                       checked={skill.tagIds.includes(tag.id)}
                       disabled={busy}
@@ -276,7 +280,7 @@ export function LibraryDetail({
         </div>
 
         {skill.warnings.length > 0 && (
-          <aside className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          <aside className="macos-alert-warn shrink-0">
             <ul className="m-0 list-disc pl-4">
               {skill.warnings.map((item) => (
                 <li key={item}>{item}</li>
@@ -298,7 +302,7 @@ export function LibraryDetail({
           />
         )}
 
-        <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-line-strong">
+        <div className="macos-split flex min-h-0 flex-1">
           <FileTree
             nodes={files.tree}
             selectedPath={files.preview?.relativePath ?? null}
@@ -330,7 +334,8 @@ export function LibraryDetail({
         }
         initialValue={nameDialog === "rename" ? skill.name : ""}
         confirmLabel={nameDialog === "rename" ? "重命名" : "创建并应用"}
-        showColorPicker={nameDialog === "tag"}
+        showColorPicker={nameDialog === "tag" || nameDialog === "group"}
+        initialColor={nameDialog === "tag" || nameDialog === "group" ? "#007AFF" : null}
         busy={busy}
         onCancel={() => setNameDialog(null)}
         onConfirm={(name, color) => {
@@ -339,7 +344,7 @@ export function LibraryDetail({
           const currentTagIds = skill.tagIds;
           setNameDialog(null);
           if (kind === "group") {
-            void onCreateGroup(name).then((group) => {
+            void onCreateGroup(name, color ?? null).then((group) => {
               if (group) void onSetGroup(skillId, group.id);
             });
           } else if (kind === "tag") {
