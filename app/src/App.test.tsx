@@ -233,6 +233,7 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     createBackup: unavailable,
     listBackups: async () => [],
     restoreBackup: unavailable,
+    deleteBackup: unavailable,
     deleteSkill: unavailable,
     listProjects: async () => projects,
     addLocalProject: unavailable,
@@ -244,12 +245,15 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     listLibrarySkillTree: async () => fileTrees["cursor:brainstorming"],
     readLibrarySkillFile: async (_skillId, relativePath) =>
       fileContent("cursor:brainstorming", relativePath),
+    writeSkillFile: unavailable,
+    writeLibrarySkillFile: unavailable,
     installSkill: unavailable,
     uninstallSkill: unavailable,
     listInstallations: async () => [],
     listTags: async () => tags,
-    createTag: async (name) => ({ id: `tag-${name}`, name, color: null }),
+    createTag: async (name, color = null) => ({ id: `tag-${name}`, name, color }),
     renameTag: async (id, name) => ({ id, name, color: null }),
+    updateTag: async (id, name, color) => ({ id, name, color }),
     deleteTag: async () => undefined,
     setSkillTags: unavailable,
     listGroups: async () => groups,
@@ -258,6 +262,27 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     updateGroupOrder: async (id, order) => ({ id, name: "开发", order }),
     deleteGroup: async () => undefined,
     setSkillGroup: unavailable,
+    getSettings: async () => ({
+      theme: "light",
+      skillRootOverrides: { cursor: null, claude: null, codex: null },
+    }),
+    saveSettings: async (settings) => settings,
+    getAppPaths: async () => ({
+      appDataDir: "/tmp/app-data",
+      disabledDir: "/tmp/app-data/disabled",
+      backupsDir: "/tmp/app-data/backups",
+      libraryDir: "/tmp/app-data/library",
+      cursorSkills: "/tmp/.cursor/skills",
+      claudeSkills: "/tmp/.claude/skills",
+      codexSkills: "/tmp/.codex/skills",
+      defaultCursorSkills: "/tmp/.cursor/skills",
+      defaultClaudeSkills: "/tmp/.claude/skills",
+      defaultCodexSkills: "/tmp/.codex/skills",
+    }),
+    revealPath: async () => undefined,
+    exportLibrarySkillZip: unavailable,
+    exportProjectZip: unavailable,
+    importSkillZip: unavailable,
     ...overrides,
   };
 }
@@ -384,8 +409,13 @@ describe("Skill Manager", () => {
   });
 
   it("侧栏底部展示设置入口", async () => {
+    const user = userEvent.setup();
     await renderLibrary();
-    expect(screen.getByRole("button", { name: "设置" })).toBeDisabled();
+    const settingsButton = screen.getByRole("button", { name: "设置" });
+    expect(settingsButton).toBeEnabled();
+    await user.click(settingsButton);
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    expect(screen.getByText("主题与本机 Skill 根目录。")).toBeInTheDocument();
   });
 
   it("快速切换时忽略过期的详情响应", async () => {

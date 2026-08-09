@@ -23,6 +23,14 @@ impl SkillRepository {
         Self { paths }
     }
 
+    pub fn set_paths(&mut self, paths: AppPaths) {
+        self.paths = paths;
+    }
+
+    pub fn paths(&self) -> &AppPaths {
+        &self.paths
+    }
+
     pub fn scan(&self) -> Result<Vec<SkillSummary>, AppError> {
         Ok(self.scan_with_warnings()?.skills)
     }
@@ -201,7 +209,7 @@ impl SkillRepository {
                 continue;
             }
             match entry.path().strip_prefix(&summary.current_path) {
-                Ok(path) => files.push(path.to_string_lossy().into_owned()),
+                Ok(path) => files.push(path.to_string_lossy().replace('\\', "/")),
                 Err(error) => {
                     append_incomplete_file_list_warning(&mut warnings, error.to_string());
                 }

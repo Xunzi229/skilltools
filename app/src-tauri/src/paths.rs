@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
 use crate::model::Provider;
+use crate::settings::SkillRootOverrides;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillRoot {
@@ -15,6 +16,7 @@ pub struct SkillRoot {
 pub struct AppPaths {
     pub skill_roots: Vec<SkillRoot>,
     pub app_data_dir: PathBuf,
+    pub home_dir: PathBuf,
     pub disabled_dir: PathBuf,
     pub backups_dir: PathBuf,
     pub paused_index: PathBuf,
@@ -25,20 +27,45 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
+    pub fn default_provider_root(home_dir: &Path, provider: Provider) -> PathBuf {
+        match provider {
+            Provider::Cursor => home_dir.join(".cursor/skills"),
+            Provider::Claude => home_dir.join(".claude/skills"),
+            Provider::Codex => home_dir.join(".codex/skills"),
+        }
+    }
+
     pub fn discover(app_data_dir: PathBuf, home_dir: PathBuf) -> Self {
+        let overrides = crate::settings::load_settings(&app_data_dir)
+            .unwrap_or_default()
+            .skill_root_overrides;
+        Self::discover_with_overrides(app_data_dir, home_dir, &overrides)
+    }
+
+    pub fn discover_with_overrides(
+        app_data_dir: PathBuf,
+        home_dir: PathBuf,
+        overrides: &SkillRootOverrides,
+    ) -> Self {
+        let root_for = |provider: Provider| {
+            overrides
+                .for_provider(provider)
+                .cloned()
+                .unwrap_or_else(|| Self::default_provider_root(&home_dir, provider))
+        };
         Self {
             skill_roots: vec![
                 SkillRoot {
                     provider: Provider::Cursor,
-                    path: home_dir.join(".cursor/skills"),
+                    path: root_for(Provider::Cursor),
                 },
                 SkillRoot {
                     provider: Provider::Claude,
-                    path: home_dir.join(".claude/skills"),
+                    path: root_for(Provider::Claude),
                 },
                 SkillRoot {
                     provider: Provider::Codex,
-                    path: home_dir.join(".codex/skills"),
+                    path: root_for(Provider::Codex),
                 },
             ],
             disabled_dir: app_data_dir.join("disabled"),
@@ -48,6 +75,7 @@ impl AppPaths {
             library_dir: app_data_dir.join("library"),
             library_projects_dir: app_data_dir.join("library/projects"),
             library_index: app_data_dir.join("library-index.json"),
+            home_dir,
             app_data_dir,
         }
     }

@@ -11,9 +11,11 @@ import type {
   Tag,
 } from "../model/skill";
 import { displayDescription } from "../utils/skillDisplay";
+import { pickSaveZip } from "../utils/dialogs";
 import { FileTree } from "./FileTree";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { NameDialog } from "./NameDialog";
+import { TagColorDot } from "./TagColorPicker";
 import { TargetSelector } from "./TargetSelector";
 
 interface LibraryDetailProps {
@@ -26,10 +28,11 @@ interface LibraryDetailProps {
   pendingAction: string | null;
   onSetTags: (id: string, tagIds: string[]) => Promise<void>;
   onSetGroup: (id: string, groupId: string | null) => Promise<void>;
-  onCreateTag: (name: string) => Promise<Tag | undefined>;
+  onCreateTag: (name: string, color?: string | null) => Promise<Tag | undefined>;
   onCreateGroup: (name: string) => Promise<SkillGroup | undefined>;
   onInstall: (id: string, provider: Provider) => Promise<void>;
   onUninstall: (id: string, provider: Provider) => Promise<void>;
+  onExportZip: (id: string, destPath: string) => Promise<void>;
   onClearError: () => void;
 }
 
@@ -67,6 +70,7 @@ export function LibraryDetail({
   onCreateGroup,
   onInstall,
   onUninstall,
+  onExportZip,
   onClearError,
 }: LibraryDetailProps) {
   const [tree, setTree] = useState<FileNode[]>([]);
@@ -77,6 +81,7 @@ export function LibraryDetail({
   const [copied, setCopied] = useState(false);
   const [nameDialog, setNameDialog] = useState<"group" | "tag" | null>(null);
   const [editors, setEditors] = useState<ExternalEditor[]>([]);
+  const [savingFile, setSavingFile] = useState(false);
   const request = useRef(0);
 
   useEffect(() => {
@@ -159,6 +164,18 @@ export function LibraryDetail({
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-3">
             {skill.absolutePath}
           </span>
+          <button
+            type="button"
+            className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover disabled:opacity-55"
+            disabled={busy}
+            onClick={() => {
+              void pickSaveZip(`${skill.name}.zip`).then((path) => {
+                if (path) void onExportZip(skill.id, path);
+              });
+            }}
+          >
+            导出 ZIP
+          </button>
           <button
             type="button"
             className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] text-ink-2 hover:bg-hover"
@@ -257,6 +274,7 @@ export function LibraryDetail({
                         void onSetTags(skill.id, next);
                       }}
                     />
+                    <TagColorDot color={tag.color} />
                     {tag.name}
                   </label>
                 ))}
@@ -312,6 +330,18 @@ export function LibraryDetail({
             file={preview}
             loading={previewLoading}
             errorMessage={fileError}
+            editable
+            saving={savingFile}
+            onSave={async (content) => {
+              if (!preview) return;
+              setSavingFile(true);
+              try {
+                await api.writeLibrarySkillFile(skill.id, preview.relativePath, content);
+                loadPreview(skill.id, preview.relativePath);
+              } finally {
+                setSavingFile(false);
+              }
+            }}
           />
         </div>
       </div>
@@ -320,9 +350,10 @@ export function LibraryDetail({
         open={nameDialog !== null}
         title={nameDialog === "group" ? "新建分组" : "新建标签"}
         confirmLabel="创建并应用"
+        showColorPicker={nameDialog === "tag"}
         busy={busy}
         onCancel={() => setNameDialog(null)}
-        onConfirm={(name) => {
+        onConfirm={(name, color) => {
           const kind = nameDialog;
           const skillId = skill.id;
           const currentTagIds = skill.tagIds;
@@ -332,7 +363,7 @@ export function LibraryDetail({
               if (group) void onSetGroup(skillId, group.id);
             });
           } else if (kind === "tag") {
-            void onCreateTag(name).then((tag) => {
+            void onCreateTag(name, color ?? null).then((tag) => {
               if (tag) void onSetTags(skillId, [...currentTagIds, tag.id]);
             });
           }

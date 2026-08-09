@@ -24,6 +24,10 @@ impl BackupRepository {
         Self { paths }
     }
 
+    pub fn set_paths(&mut self, paths: AppPaths) {
+        self.paths = paths;
+    }
+
     pub fn create_backup(
         &self,
         skill_id: &str,
@@ -152,6 +156,29 @@ impl BackupRepository {
                 .then_with(|| left.id.cmp(&right.id))
         });
         Ok(records)
+    }
+
+    pub fn delete_backup(&self, backup_id: &str) -> Result<(), AppError> {
+        let _guard = self.lock_transaction()?;
+        let mut records = self.load_records()?;
+        let position = records
+            .iter()
+            .position(|record| record.id == backup_id)
+            .ok_or_else(|| AppError::BackupNotFound {
+                id: backup_id.to_owned(),
+            })?;
+        let record = records.remove(position);
+        self.paths
+            .assert_within(&record.archive_path, &self.paths.backups_dir)?;
+        if record.archive_path.exists() {
+            if record.archive_path.is_dir() {
+                fs::remove_dir_all(&record.archive_path)?;
+            } else {
+                fs::remove_file(&record.archive_path)?;
+            }
+        }
+        self.write_records(&records)?;
+        Ok(())
     }
 
     pub fn restore_backup(&self, backup_id: &str) -> Result<SkillDetail, AppError> {

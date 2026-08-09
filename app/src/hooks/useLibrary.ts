@@ -160,10 +160,22 @@ export function useLibrary(api: SkillApi) {
         await refresh();
         return tag;
       }),
-    renameTag: (id: string, name: string) =>
-      mutateAndRefresh(`tag:rename:${id}`, () => api.renameTag(id, name.trim())),
+    renameTag: (id: string, name: string, color: string | null = null) =>
+      mutateAndRefresh(`tag:rename:${id}`, () =>
+        api.updateTag(id, name.trim(), color),
+      ),
     deleteTag: (id: string) =>
       mutateAndRefresh(`tag:delete:${id}`, () => api.deleteTag(id)),
+    importSkillZip: (zipPath: string) =>
+      mutateAndRefresh("project:import-zip", () => api.importSkillZip(zipPath)),
+    exportProjectZip: (projectId: string, destPath: string) =>
+      mutateAndRefresh(`project:export:${projectId}`, () =>
+        api.exportProjectZip(projectId, destPath),
+      ),
+    exportLibrarySkillZip: (id: string, destPath: string) =>
+      mutateAndRefresh(`library:export:${id}`, () =>
+        api.exportLibrarySkillZip(id, destPath),
+      ),
     createGroup: async (
       name: string,
       order?: number,

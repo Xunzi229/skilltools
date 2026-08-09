@@ -36,6 +36,57 @@ pub(crate) fn resolve_skill_file_path(
     resolve_file_path(root, relative_path)
 }
 
+pub fn write_skill_file(
+    repository: &SkillRepository,
+    skill_id: &str,
+    relative_path: &str,
+    content: &str,
+) -> Result<(), AppError> {
+    let detail = repository.detail(skill_id)?;
+    let root = detail
+        .resolved_path
+        .as_ref()
+        .unwrap_or(&detail.current_path);
+    write_skill_file_at(root, relative_path, content)
+}
+
+pub(crate) fn write_skill_file_at(
+    root: &Path,
+    relative_path: &str,
+    content: &str,
+) -> Result<(), AppError> {
+    if content.len() as u64 > MAX_PREVIEW_BYTES {
+        return Err(AppError::Io {
+            message: format!("文件超过 512 KiB，不支持写入：{relative_path}"),
+        });
+    }
+    if looks_binary(content.as_bytes()) {
+        return Err(AppError::Io {
+            message: format!("内容包含二进制字符，拒绝写入：{relative_path}"),
+        });
+    }
+    let path = resolve_writable_file_path(root, relative_path)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temp_path = path.with_extension(format!(
+        "{}.tmp-{}",
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("tmp"),
+        uuid::Uuid::new_v4()
+    ));
+    let write_result = (|| {
+        fs::write(&temp_path, content.as_bytes())?;
+        fs::rename(&temp_path, &path)?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
 pub(crate) fn read_skill_file_at(
     root: &Path,
     relative_path: &str,
@@ -155,6 +206,57 @@ fn resolve_file_path(root: &Path, relative_path: &str) -> Result<PathBuf, AppErr
         return Err(outside_error(&canonical_candidate));
     }
     Ok(canonical_candidate)
+}
+
+/// Like resolve_file_path, but allows creating a new leaf file that does not exist yet.
+fn resolve_writable_file_path(root: &Path, relative_path: &str) -> Result<PathBuf, AppError> {
+    let relative = Path::new(relative_path);
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(outside_error(relative));
+    }
+
+    let canonical_root = root.canonicalize()?;
+    let mut candidate = canonical_root.clone();
+    let components: Vec<_> = relative.components().collect();
+    for (index, component) in components.iter().enumerate() {
+        let Component::Normal(name) = component else {
+            return Err(outside_error(relative));
+        };
+        candidate.push(name);
+        let is_leaf = index + 1 == components.len();
+        match fs::symlink_metadata(&candidate) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(outside_error(&candidate));
+            }
+            Ok(metadata) if !is_leaf && !metadata.is_dir() => {
+                return Err(AppError::Io {
+                    message: format!("路径不是目录：{}", candidate.display()),
+                });
+            }
+            Ok(metadata) if is_leaf && metadata.is_dir() => {
+                return Err(AppError::Io {
+                    message: format!("目标是目录，无法写入文件：{relative_path}"),
+                });
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if !is_leaf {
+                    return Err(AppError::Io {
+                        message: format!("父目录不存在：{}", candidate.display()),
+                    });
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    if !candidate.starts_with(&canonical_root) {
+        return Err(outside_error(&candidate));
+    }
+    Ok(candidate)
 }
 
 fn outside_error(path: &Path) -> AppError {

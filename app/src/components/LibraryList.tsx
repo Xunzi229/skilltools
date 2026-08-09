@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import type { LibrarySkillSummary, SkillGroup, Tag } from "../model/skill";
+import type {
+  BatchResult,
+  LibrarySkillSummary,
+  Provider,
+  SkillGroup,
+  Tag,
+} from "../model/skill";
 import { displayDescription } from "../utils/skillDisplay";
 import { SkillCard } from "./SkillCard";
 
@@ -11,12 +17,22 @@ interface LibraryListProps {
   groups: SkillGroup[];
   tags: Tag[];
   selectedId: string | null;
+  selectedIds: Set<string>;
   search: string;
   loading: boolean;
   errorMessage: string | null;
+  batchBusy: boolean;
+  batchResult: BatchResult | null;
   onSearchChange: (value: string) => void;
   onSelect: (id: string) => void;
+  onToggleSelect: (id: string) => void;
+  onClearSelection: () => void;
+  onBatchInstall: (provider: Provider) => void;
+  onBatchUninstall: (provider: Provider) => void;
+  onBatchSetGroup: (groupId: string | null) => void;
+  onBatchAddTag: (tagId: string) => void;
   onRetry: () => void;
+  onClearBatchResult: () => void;
 }
 
 export function LibraryList({
@@ -25,12 +41,22 @@ export function LibraryList({
   groups,
   tags,
   selectedId,
+  selectedIds,
   search,
   loading,
   errorMessage,
+  batchBusy,
+  batchResult,
   onSearchChange,
   onSelect,
+  onToggleSelect,
+  onClearSelection,
+  onBatchInstall,
+  onBatchUninstall,
+  onBatchSetGroup,
+  onBatchAddTag,
   onRetry,
+  onClearBatchResult,
 }: LibraryListProps) {
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
@@ -196,6 +222,94 @@ export function LibraryList({
             );
           })}
         </div>
+        {selectedIds.size > 0 && (
+          <div className="mt-3 flex flex-col gap-1.5">
+            <span className="text-[11px] text-ink-2">已选 {selectedIds.size} 项</span>
+            <div className="flex flex-wrap gap-1.5">
+              {(["cursor", "claude", "codex"] as const).map((provider) => (
+                <button
+                  key={`install-${provider}`}
+                  type="button"
+                  className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55"
+                  disabled={batchBusy}
+                  onClick={() => onBatchInstall(provider)}
+                >
+                  安装 {provider}
+                </button>
+              ))}
+              {(["cursor", "claude", "codex"] as const).map((provider) => (
+                <button
+                  key={`uninstall-${provider}`}
+                  type="button"
+                  className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55"
+                  disabled={batchBusy}
+                  onClick={() => onBatchUninstall(provider)}
+                >
+                  卸载 {provider}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <select
+                className="h-7 rounded border border-line px-1 text-[11px]"
+                aria-label="批量设置分组"
+                disabled={batchBusy}
+                defaultValue=""
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onBatchSetGroup(value === "" ? null : value === "__none__" ? null : value);
+                  event.target.value = "";
+                }}
+              >
+                <option value="">设置分组…</option>
+                <option value="__none__">未分组</option>
+                {[...groups]
+                  .sort((a, b) => a.order - b.order)
+                  .map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+              </select>
+              <select
+                className="h-7 rounded border border-line px-1 text-[11px]"
+                aria-label="批量追加标签"
+                disabled={batchBusy || tags.length === 0}
+                defaultValue=""
+                onChange={(event) => {
+                  if (event.target.value) onBatchAddTag(event.target.value);
+                  event.target.value = "";
+                }}
+              >
+                <option value="">追加标签…</option>
+                {tags.map((tag) => (
+                  <option key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover"
+                disabled={batchBusy}
+                onClick={onClearSelection}
+              >
+                清除
+              </button>
+            </div>
+          </div>
+        )}
+        {batchResult && (
+          <div className="mt-2 flex items-start justify-between gap-2 rounded border border-line bg-hover px-2 py-1.5 text-[11px] text-ink-2">
+            <span>
+              批量完成：成功 {batchResult.success}，失败 {batchResult.failed}
+              {batchResult.errors[0] ? `；${batchResult.errors[0]}` : ""}
+            </span>
+            <button type="button" className="shrink-0" onClick={onClearBatchResult}>
+              关闭
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2">
@@ -224,32 +338,41 @@ export function LibraryList({
               const expandable = childCount > 0;
               const expanded = expandable && !collapsed.has(skill.id);
               return (
-                <li key={skill.id}>
-                  <SkillCard
-                    name={skill.name}
-                    description={displayDescription(skill.description, 96)}
-                    statusLabel={
-                      skill.installedProviders.length > 0 ? "已安装" : "未安装"
-                    }
-                    selected={selectedId === skill.id}
-                    onSelect={() => {
-                      onSelect(skill.id);
-                      if (expandable) {
-                        toggleParent(skill.id);
-                      }
-                    }}
-                    subSkill={skill.parentSkillId !== null}
-                    indent={skill.parentSkillId !== null}
-                    expandable={expandable}
-                    expanded={expanded}
-                    childCount={childCount}
-                    groupLabel={
-                      groups.find((group) => group.id === skill.groupId)?.name ?? null
-                    }
-                    tagLabels={skill.tagIds
-                      .map((id) => tags.find((tag) => tag.id === id)?.name)
-                      .filter((name): name is string => Boolean(name))}
+                <li key={skill.id} className="flex items-start gap-1">
+                  <input
+                    type="checkbox"
+                    className="mt-4 ml-1"
+                    checked={selectedIds.has(skill.id)}
+                    aria-label={`选择 ${skill.name}`}
+                    onChange={() => onToggleSelect(skill.id)}
                   />
+                  <div className="min-w-0 flex-1">
+                    <SkillCard
+                      name={skill.name}
+                      description={displayDescription(skill.description, 96)}
+                      statusLabel={
+                        skill.installedProviders.length > 0 ? "已安装" : "未安装"
+                      }
+                      selected={selectedId === skill.id}
+                      onSelect={() => {
+                        onSelect(skill.id);
+                        if (expandable) {
+                          toggleParent(skill.id);
+                        }
+                      }}
+                      subSkill={skill.parentSkillId !== null}
+                      indent={skill.parentSkillId !== null}
+                      expandable={expandable}
+                      expanded={expanded}
+                      childCount={childCount}
+                      groupLabel={
+                        groups.find((group) => group.id === skill.groupId)?.name ?? null
+                      }
+                      tagLabels={skill.tagIds
+                        .map((id) => tags.find((tag) => tag.id === id)?.name)
+                        .filter((name): name is string => Boolean(name))}
+                    />
+                  </div>
                 </li>
               );
             })}

@@ -1,4 +1,4 @@
-import type { SkillSummary } from "../model/skill";
+import type { BatchResult, SkillSummary } from "../model/skill";
 import { displayDescription } from "../utils/skillDisplay";
 import { SkillCard } from "./SkillCard";
 
@@ -6,14 +6,24 @@ interface SkillListProps {
   title: string;
   skills: SkillSummary[];
   selectedSkillId: string | null;
+  selectedIds: Set<string>;
   search: string;
   loading: boolean;
   errorMessage: string | null;
   warnings: string[];
   hasScannedSkills: boolean;
+  batchBusy: boolean;
+  batchResult: BatchResult | null;
   onSearchChange: (value: string) => void;
   onSelect: (skillId: string) => void;
+  onToggleSelect: (skillId: string) => void;
+  onClearSelection: () => void;
+  onBatchPause: () => void;
+  onBatchResume: () => void;
+  onBatchBackup: () => void;
+  onBatchDelete: () => void;
   onRetry: () => void;
+  onClearBatchResult: () => void;
 }
 
 const providerNames = {
@@ -26,14 +36,24 @@ export function SkillList({
   title,
   skills,
   selectedSkillId,
+  selectedIds,
   search,
   loading,
   errorMessage,
   warnings,
   hasScannedSkills,
+  batchBusy,
+  batchResult,
   onSearchChange,
   onSelect,
+  onToggleSelect,
+  onClearSelection,
+  onBatchPause,
+  onBatchResume,
+  onBatchBackup,
+  onBatchDelete,
   onRetry,
+  onClearBatchResult,
 }: SkillListProps) {
   let content;
 
@@ -72,18 +92,27 @@ export function SkillList({
     content = (
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {skills.map((skill) => (
-          <li key={skill.id}>
-            <SkillCard
-              name={skill.name}
-              description={displayDescription(skill.description, 96)}
-              statusLabel={
-                skill.status === "paused"
-                  ? "已暂停"
-                  : providerNames[skill.provider]
-              }
-              selected={selectedSkillId === skill.id}
-              onSelect={() => onSelect(skill.id)}
+          <li key={skill.id} className="flex items-start gap-1">
+            <input
+              type="checkbox"
+              className="mt-4 ml-1"
+              checked={selectedIds.has(skill.id)}
+              aria-label={`选择 ${skill.name}`}
+              onChange={() => onToggleSelect(skill.id)}
             />
+            <div className="min-w-0 flex-1">
+              <SkillCard
+                name={skill.name}
+                description={displayDescription(skill.description, 96)}
+                statusLabel={
+                  skill.status === "paused"
+                    ? "已暂停"
+                    : providerNames[skill.provider]
+                }
+                selected={selectedSkillId === skill.id}
+                onSelect={() => onSelect(skill.id)}
+              />
+            </div>
           </li>
         ))}
       </ul>
@@ -111,6 +140,27 @@ export function SkillList({
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </label>
+        {selectedIds.size > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <span className="w-full text-[11px] text-ink-2">已选 {selectedIds.size} 项</span>
+            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchPause}>暂停</button>
+            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchResume}>恢复</button>
+            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchBackup}>备份</button>
+            <button type="button" className="rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55" disabled={batchBusy} onClick={onBatchDelete}>删除</button>
+            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover" disabled={batchBusy} onClick={onClearSelection}>清除</button>
+          </div>
+        )}
+        {batchResult && (
+          <div className="mt-2 flex items-start justify-between gap-2 rounded border border-line bg-hover px-2 py-1.5 text-[11px] text-ink-2">
+            <span>
+              批量完成：成功 {batchResult.success}，失败 {batchResult.failed}
+              {batchResult.errors[0] ? `；${batchResult.errors[0]}` : ""}
+            </span>
+            <button type="button" className="shrink-0" onClick={onClearBatchResult}>
+              关闭
+            </button>
+          </div>
+        )}
       </header>
       {warnings.length > 0 && (
         <aside

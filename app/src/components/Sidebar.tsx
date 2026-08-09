@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   LibrarySkillSummary,
   Provider,
@@ -8,6 +8,7 @@ import type {
 } from "../model/skill";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NameDialog } from "./NameDialog";
+import { TagColorDot } from "./TagColorPicker";
 
 export type SkillFilter =
   | "library"
@@ -16,6 +17,7 @@ export type SkillFilter =
   | "paused"
   | "projects"
   | "backups"
+  | "settings"
   | `group:${string}`
   | `tag:${string}`;
 
@@ -35,8 +37,8 @@ interface SidebarProps {
   onRenameGroup: (id: string, name: string) => Promise<void>;
   onDeleteGroup: (id: string) => Promise<void>;
   onMoveGroup: (id: string, order: number) => Promise<void>;
-  onCreateTag: (name: string) => Promise<void>;
-  onRenameTag: (id: string, name: string) => Promise<void>;
+  onCreateTag: (name: string, color: string | null) => Promise<void>;
+  onRenameTag: (id: string, name: string, color: string | null) => Promise<void>;
   onDeleteTag: (id: string) => Promise<void>;
 }
 
@@ -50,7 +52,7 @@ type DialogState =
   | { kind: "create-group" }
   | { kind: "rename-group"; id: string; name: string }
   | { kind: "create-tag" }
-  | { kind: "rename-tag"; id: string; name: string }
+  | { kind: "rename-tag"; id: string; name: string; color: string | null }
   | null;
 
 type ConfirmState =
@@ -132,6 +134,7 @@ export function Sidebar({
       onMoveUp?: () => void;
       onMoveDown?: () => void;
     },
+    leading?: ReactNode,
   ) => {
     const active = activeFilter === filter;
     const open = menuKey === key;
@@ -155,7 +158,10 @@ export function Sidebar({
             onFilterChange(filter);
           }}
         >
-          <span className="truncate">{label}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            {leading}
+            <span className="truncate">{label}</span>
+          </span>
           <span className="shrink-0 text-[11px] text-slate-400">{count}</span>
         </button>
         <button
@@ -295,9 +301,15 @@ export function Sidebar({
               librarySkills.filter((skill) => skill.tagIds.includes(tag.id)).length,
               {
                 onRename: () =>
-                  setDialog({ kind: "rename-tag", id: tag.id, name: tag.name }),
+                  setDialog({
+                    kind: "rename-tag",
+                    id: tag.id,
+                    name: tag.name,
+                    color: tag.color,
+                  }),
                 onDelete: () => setConfirm({ kind: "tag", id: tag.id, name: tag.name }),
               },
+              <TagColorDot color={tag.color} />,
             ),
           )
         )}
@@ -329,10 +341,14 @@ export function Sidebar({
           {loading ? "正在扫描…" : "刷新扫描"}
         </button>
         <button
-          className="rounded-lg px-3 py-2 text-left text-[13px] text-slate-400 hover:bg-white/6 hover:text-white"
+          className={[
+            "rounded-lg px-3 py-2 text-left text-[13px]",
+            activeFilter === "settings"
+              ? "bg-white/12 text-white"
+              : "text-slate-400 hover:bg-white/6 hover:text-white",
+          ].join(" ")}
           type="button"
-          disabled
-          title="即将支持"
+          onClick={() => onFilterChange("settings")}
         >
           设置
         </button>
@@ -348,13 +364,17 @@ export function Sidebar({
               : dialog?.kind === "create-tag"
                 ? "新建标签"
                 : dialog?.kind === "rename-tag"
-                  ? "重命名标签"
+                  ? "编辑标签"
                   : ""
         }
         initialValue={
           dialog?.kind === "rename-group" || dialog?.kind === "rename-tag"
             ? dialog.name
             : ""
+        }
+        initialColor={dialog?.kind === "rename-tag" ? dialog.color : null}
+        showColorPicker={
+          dialog?.kind === "create-tag" || dialog?.kind === "rename-tag"
         }
         confirmLabel={
           dialog?.kind === "create-group" || dialog?.kind === "create-tag"
@@ -363,14 +383,15 @@ export function Sidebar({
         }
         busy={busy}
         onCancel={() => setDialog(null)}
-        onConfirm={(name) => {
+        onConfirm={(name, color) => {
           const current = dialog;
           setDialog(null);
           if (!current) return;
           if (current.kind === "create-group") void onCreateGroup(name);
           if (current.kind === "rename-group") void onRenameGroup(current.id, name);
-          if (current.kind === "create-tag") void onCreateTag(name);
-          if (current.kind === "rename-tag") void onRenameTag(current.id, name);
+          if (current.kind === "create-tag") void onCreateTag(name, color ?? null);
+          if (current.kind === "rename-tag")
+            void onRenameTag(current.id, name, color ?? null);
         }}
       />
 

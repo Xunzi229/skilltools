@@ -266,6 +266,10 @@ fn open_with_notepad(_path: &Path) -> Result<(), AppError> {
     })
 }
 
+pub fn reveal_path(path: &Path) -> Result<(), AppError> {
+    reveal_in_file_manager(path)
+}
+
 #[cfg(windows)]
 fn reveal_in_file_manager(path: &Path) -> Result<(), AppError> {
     Command::new("explorer")

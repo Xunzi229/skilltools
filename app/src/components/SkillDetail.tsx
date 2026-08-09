@@ -332,6 +332,13 @@ export function SkillDetail({
             file={preview}
             loading={previewLoading}
             errorMessage={previewError}
+            editable
+            saving={pendingAction === `write:${skill.id}:${preview?.relativePath ?? ""}`}
+            onSave={async (content) => {
+              if (!preview) return;
+              await api.writeSkillFile(skill.id, preview.relativePath, content);
+              loadPreview(skill.id, preview.relativePath);
+            }}
           />
         </div>
       </div>

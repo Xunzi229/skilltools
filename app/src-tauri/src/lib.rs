@@ -8,9 +8,11 @@ mod json_store;
 pub mod library_repository;
 pub mod model;
 pub mod paths;
+pub mod settings;
 pub mod skill_files;
 pub mod skill_repository;
 mod transaction_lock;
+mod zip_ops;
 
 use backup_repository::BackupRepository;
 use commands::AppState;
@@ -22,14 +24,16 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             let home_dir = app.path().home_dir()?;
-            let paths = AppPaths::discover(app_data_dir, home_dir);
+            let paths = AppPaths::discover(app_data_dir, home_dir.clone());
             let managed = app.manage(AppState {
                 skills: SkillRepository::new(paths.clone()).into(),
                 backups: BackupRepository::new(paths.clone()).into(),
                 library: LibraryRepository::new(paths).into(),
+                home_dir,
             });
             if !managed {
                 return Err(std::io::Error::other("应用状态初始化失败").into());
@@ -41,6 +45,7 @@ pub fn run() {
             commands::get_skill_detail,
             commands::list_skill_tree,
             commands::read_skill_file,
+            commands::write_skill_file,
             commands::list_external_editors,
             commands::open_skill_file_external,
             commands::open_library_skill_file_external,
@@ -49,6 +54,7 @@ pub fn run() {
             commands::create_backup,
             commands::list_backups,
             commands::restore_backup,
+            commands::delete_backup,
             commands::delete_skill,
             commands::add_local_project,
             commands::add_git_project,
@@ -59,12 +65,14 @@ pub fn run() {
             commands::get_library_skill_detail,
             commands::list_library_skill_tree,
             commands::read_library_skill_file,
+            commands::write_library_skill_file,
             commands::install_skill,
             commands::uninstall_skill,
             commands::list_installations,
             commands::list_tags,
             commands::create_tag,
             commands::rename_tag,
+            commands::update_tag,
             commands::delete_tag,
             commands::set_skill_tags,
             commands::list_groups,
@@ -73,6 +81,13 @@ pub fn run() {
             commands::update_group_order,
             commands::delete_group,
             commands::set_skill_group,
+            commands::get_settings,
+            commands::save_settings,
+            commands::get_app_paths,
+            commands::reveal_path,
+            commands::export_library_skill_zip,
+            commands::export_project_zip,
+            commands::import_skill_zip,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|error| eprintln!("应用运行失败：{error}"));

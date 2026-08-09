@@ -47,6 +47,10 @@ pub enum AppError {
         original_error: String,
         rollback_error: String,
     },
+    #[error("设置操作失败：{message}")]
+    Settings { message: String },
+    #[error("ZIP 操作失败：{message}")]
+    Zip { message: String },
 }
 
 impl From<std::io::Error> for AppError {

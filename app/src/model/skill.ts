@@ -118,3 +118,35 @@ export interface CommandError {
   code: string;
   message: string;
 }
+
+export type ThemePreference = "light" | "dark";
+
+export interface SkillRootOverrides {
+  cursor: string | null;
+  claude: string | null;
+  codex: string | null;
+}
+
+export interface AppSettings {
+  theme: ThemePreference;
+  skillRootOverrides: SkillRootOverrides;
+}
+
+export interface AppPathsInfo {
+  appDataDir: string;
+  disabledDir: string;
+  backupsDir: string;
+  libraryDir: string;
+  cursorSkills: string;
+  claudeSkills: string;
+  codexSkills: string;
+  defaultCursorSkills: string;
+  defaultClaudeSkills: string;
+  defaultCodexSkills: string;
+}
+
+export interface BatchResult {
+  success: number;
+  failed: number;
+  errors: string[];
+}

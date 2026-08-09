@@ -25,6 +25,18 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  :root[data-theme="dark"] {
+    --color-brand: #3b82f6;
+    --color-ink: #e5e7eb;
+    --color-ink-2: #94a3b8;
+    --color-ink-3: #64748b;
+    --color-line: #334155;
+    --color-line-strong: #1e293b;
+    --color-panel: #0f172a;
+    --color-hover: #1e293b;
+    --color-sidebar: #020617;
+  }
+
   * {
     box-sizing: border-box;
   }

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -11,9 +12,11 @@ use crate::model::{
     BackupReason, BackupRecord, FileContent, FileNode, LibrarySkillDetail, LibrarySkillSummary,
     Project, Provider, ScanResult, SkillDetail, SkillGroup, SkillInstallation, Tag,
 };
+use crate::paths::AppPaths;
+use crate::settings::{self, AppPathsInfo, AppSettings};
 use crate::skill_files::{
     list_skill_tree as build_skill_tree, read_skill_file as load_skill_file,
-    resolve_skill_file_path,
+    write_skill_file as save_skill_file, resolve_skill_file_path,
 };
 use crate::skill_repository::SkillRepository;
 
@@ -21,6 +24,7 @@ pub struct AppState {
     pub skills: Mutex<SkillRepository>,
     pub backups: Mutex<BackupRepository>,
     pub library: Mutex<LibraryRepository>,
+    pub home_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -54,11 +58,41 @@ pub(crate) fn map_app_error(error: AppError) -> CommandError {
         AppError::TagNotFound { .. } => "TAG_NOT_FOUND",
         AppError::GroupNotFound { .. } => "GROUP_NOT_FOUND",
         AppError::RollbackFailed { .. } => "ROLLBACK_FAILED",
+        AppError::Settings { .. } => "SETTINGS",
+        AppError::Zip { .. } => "ZIP",
     };
     CommandError {
         code,
         message: error.to_string(),
     }
+}
+
+fn apply_paths(state: &AppState, paths: AppPaths) -> Result<(), CommandError> {
+    state
+        .skills
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .set_paths(paths.clone());
+    state
+        .backups
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .set_paths(paths.clone());
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .set_paths(paths);
+    Ok(())
+}
+
+fn current_paths(state: &AppState) -> Result<AppPaths, CommandError> {
+    Ok(state
+        .skills
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .paths()
+        .clone())
 }
 
 fn state_lock_error() -> CommandError {
@@ -577,6 +611,142 @@ pub fn set_skill_group(
         .map_err(map_app_error)
 }
 
+#[tauri::command]
+pub fn update_tag(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    color: Option<String>,
+) -> Result<Tag, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .update_tag(&id, name, color)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn delete_backup(state: State<'_, AppState>, backup_id: String) -> Result<(), CommandError> {
+    state
+        .backups
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .delete_backup(&backup_id)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn write_skill_file(
+    state: State<'_, AppState>,
+    skill_id: String,
+    relative_path: String,
+    content: String,
+) -> Result<(), CommandError> {
+    let repository = state.skills.lock().map_err(|_| state_lock_error())?;
+    save_skill_file(&repository, &skill_id, &relative_path, &content).map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn write_library_skill_file(
+    state: State<'_, AppState>,
+    id: String,
+    relative_path: String,
+    content: String,
+) -> Result<(), CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .write_library_skill_file(&id, &relative_path, &content)
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, CommandError> {
+    let paths = current_paths(state.inner())?;
+    settings::load_settings(&paths.app_data_dir).map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn save_settings(
+    state: State<'_, AppState>,
+    next: AppSettings,
+) -> Result<AppSettings, CommandError> {
+    let paths = current_paths(state.inner())?;
+    settings::save_settings(&paths.app_data_dir, &next).map_err(map_app_error)?;
+    let rebuilt = AppPaths::discover_with_overrides(
+        paths.app_data_dir.clone(),
+        state.home_dir.clone(),
+        &next.skill_root_overrides,
+    );
+    apply_paths(state.inner(), rebuilt)?;
+    Ok(next)
+}
+
+#[tauri::command]
+pub fn get_app_paths(state: State<'_, AppState>) -> Result<AppPathsInfo, CommandError> {
+    let paths = current_paths(state.inner())?;
+    Ok(AppPathsInfo {
+        app_data_dir: paths.app_data_dir.clone(),
+        disabled_dir: paths.disabled_dir.clone(),
+        backups_dir: paths.backups_dir.clone(),
+        library_dir: paths.library_dir.clone(),
+        cursor_skills: paths.provider_root(Provider::Cursor).map_err(map_app_error)?.to_path_buf(),
+        claude_skills: paths.provider_root(Provider::Claude).map_err(map_app_error)?.to_path_buf(),
+        codex_skills: paths.provider_root(Provider::Codex).map_err(map_app_error)?.to_path_buf(),
+        default_cursor_skills: AppPaths::default_provider_root(&state.home_dir, Provider::Cursor),
+        default_claude_skills: AppPaths::default_provider_root(&state.home_dir, Provider::Claude),
+        default_codex_skills: AppPaths::default_provider_root(&state.home_dir, Provider::Codex),
+    })
+}
+
+#[tauri::command]
+pub fn reveal_path(path: String) -> Result<(), CommandError> {
+    external_open::reveal_path(std::path::Path::new(&path)).map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn export_library_skill_zip(
+    state: State<'_, AppState>,
+    id: String,
+    dest_path: String,
+) -> Result<(), CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .export_library_skill_zip(&id, std::path::Path::new(&dest_path))
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn export_project_zip(
+    state: State<'_, AppState>,
+    project_id: String,
+    dest_path: String,
+) -> Result<(), CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .export_project_zip(&project_id, std::path::Path::new(&dest_path))
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
+pub fn import_skill_zip(
+    state: State<'_, AppState>,
+    zip_path: String,
+) -> Result<Project, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .import_skill_zip(std::path::Path::new(&zip_path))
+        .map_err(map_app_error)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -606,10 +776,12 @@ mod tests {
             format!("---\nname: {name}\ndescription: 测试 Skill\n---\n正文"),
         )
         .unwrap();
+        let home_dir = base.path().to_path_buf();
         let state = AppState {
             skills: SkillRepository::new(paths.clone()).into(),
             backups: BackupRepository::new(paths.clone()).into(),
             library: LibraryRepository::new(paths).into(),
+            home_dir,
         };
         (base, state)
     }
@@ -777,6 +949,7 @@ mod tests {
             skills: SkillRepository::new(paths.clone()).into(),
             backups: BackupRepository::new(paths.clone()).into(),
             library: LibraryRepository::new(paths).into(),
+            home_dir: base.path().to_path_buf(),
         };
 
         let error = get_skill_detail_with_state(&state, "missing".into()).unwrap_err();

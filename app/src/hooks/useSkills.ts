@@ -201,6 +201,15 @@ export function useSkills(api: SkillApi) {
     [api, loadBackups, runAction],
   );
 
+  const deleteBackup = useCallback(
+    (backupId: string) =>
+      runAction(`delete-backup:${backupId}`, async () => {
+        await api.deleteBackup(backupId);
+        await loadBackups();
+      }),
+    [api, loadBackups, runAction],
+  );
+
   const clearActionError = useCallback(() => {
     setActionError(null);
   }, []);
@@ -227,6 +236,7 @@ export function useSkills(api: SkillApi) {
     deleteSkill,
     loadBackups,
     restoreBackup,
+    deleteBackup,
     clearActionError,
   };
 }

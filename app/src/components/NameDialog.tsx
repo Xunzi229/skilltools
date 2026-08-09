@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import { TagColorPicker } from "./TagColorPicker";
 
 interface NameDialogProps {
   open: boolean;
   title: string;
   initialValue?: string;
+  initialColor?: string | null;
+  showColorPicker?: boolean;
   confirmLabel: string;
   busy?: boolean;
-  onConfirm: (name: string) => void;
+  onConfirm: (name: string, color?: string | null) => void;
   onCancel: () => void;
 }
 
@@ -14,26 +17,31 @@ export function NameDialog({
   open,
   title,
   initialValue = "",
+  initialColor = null,
+  showColorPicker = false,
   confirmLabel,
   busy = false,
   onConfirm,
   onCancel,
 }: NameDialogProps) {
   const [value, setValue] = useState(initialValue);
+  const [color, setColor] = useState<string | null>(initialColor);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setValue(initialValue);
+    setColor(initialColor);
     window.setTimeout(() => inputRef.current?.select(), 0);
-  }, [initialValue, open]);
+  }, [initialColor, initialValue, open]);
 
   if (!open) return null;
 
   const trimmed = value.trim();
   const submit = () => {
     if (!trimmed || busy) return;
-    onConfirm(trimmed);
+    if (showColorPicker) onConfirm(trimmed, color);
+    else onConfirm(trimmed);
   };
 
   return (
@@ -65,6 +73,9 @@ export function NameDialog({
             }}
           />
         </label>
+        {showColorPicker ? (
+          <TagColorPicker value={color} onChange={setColor} disabled={busy} />
+        ) : null}
         <div className="mt-5 flex justify-end gap-2">
           <button
             type="button"

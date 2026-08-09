@@ -42,6 +42,10 @@ impl LibraryRepository {
         Self { paths }
     }
 
+    pub fn set_paths(&mut self, paths: AppPaths) {
+        self.paths = paths;
+    }
+
     pub fn add_local_project(&self, path: impl AsRef<Path>) -> Result<Project, AppError> {
         let path = canonical_project_path(path.as_ref())?;
         let _guard = lock_app_transaction(&self.paths)?;
@@ -230,6 +234,50 @@ impl LibraryRepository {
     ) -> Result<FileContent, AppError> {
         let skill = self.library_skill(skill_id)?;
         read_skill_file_at(&skill.absolute_path, relative_path)
+    }
+
+    pub fn write_library_skill_file(
+        &self,
+        skill_id: &str,
+        relative_path: &str,
+        content: &str,
+    ) -> Result<(), AppError> {
+        let skill = self.library_skill(skill_id)?;
+        crate::skill_files::write_skill_file_at(&skill.absolute_path, relative_path, content)
+    }
+
+    pub fn export_library_skill_zip(
+        &self,
+        skill_id: &str,
+        dest_path: &Path,
+    ) -> Result<(), AppError> {
+        let skill = self.library_skill(skill_id)?;
+        crate::zip_ops::export_directory_to_zip(&skill.absolute_path, dest_path)
+    }
+
+    pub fn export_project_zip(&self, project_id: &str, dest_path: &Path) -> Result<(), AppError> {
+        let project = self
+            .list_projects()?
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .ok_or_else(|| AppError::ProjectNotFound {
+                id: project_id.to_owned(),
+            })?;
+        crate::zip_ops::export_directory_to_zip(&project.local_path, dest_path)
+    }
+
+    pub fn import_skill_zip(&self, zip_path: &Path) -> Result<Project, AppError> {
+        let id = Uuid::new_v4().to_string();
+        let dest = self.paths.library_projects_dir.join(&id);
+        self.paths.assert_allowed(&dest)?;
+        crate::zip_ops::import_zip_to_directory(zip_path, &dest)?;
+        match self.add_local_project(&dest) {
+            Ok(project) => Ok(project),
+            Err(error) => {
+                let _ = fs::remove_dir_all(&dest);
+                Err(error)
+            }
+        }
     }
 
     pub fn install_skill(
@@ -424,6 +472,27 @@ impl LibraryRepository {
                 .find(|tag| tag.id == id)
                 .ok_or_else(|| AppError::TagNotFound { id: id.to_owned() })?;
             tag.name = name;
+            Ok(tag.clone())
+        })
+    }
+
+    pub fn update_tag(
+        &self,
+        id: &str,
+        name: String,
+        color: Option<String>,
+    ) -> Result<Tag, AppError> {
+        self.mutate_index(|index| {
+            ensure_unique_name(&index.tags, &name, Some(id), "标签", |tag| {
+                (&tag.id, &tag.name)
+            })?;
+            let tag = index
+                .tags
+                .iter_mut()
+                .find(|tag| tag.id == id)
+                .ok_or_else(|| AppError::TagNotFound { id: id.to_owned() })?;
+            tag.name = name;
+            tag.color = color;
             Ok(tag.clone())
         })
     }

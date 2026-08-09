@@ -11,6 +11,7 @@ interface BackupListProps {
   pendingAction: string | null;
   onRetry: () => void;
   onRestore: (backupId: string) => Promise<void>;
+  onDelete: (backupId: string) => Promise<void>;
   onClearActionError: () => void;
 }
 
@@ -40,6 +41,7 @@ export function BackupList({
   pendingAction,
   onRetry,
   onRestore,
+  onDelete,
   onClearActionError,
 }: BackupListProps) {
   const orderedBackups = useMemo(
@@ -52,6 +54,8 @@ export function BackupList({
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [restoreOpen, setRestoreOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setSelectedId((current) =>
@@ -59,12 +63,20 @@ export function BackupList({
         ? current
         : orderedBackups[0]?.id ?? null,
     );
+    setChecked((current) => {
+      const next = new Set(
+        [...current].filter((id) => orderedBackups.some((backup) => backup.id === id)),
+      );
+      return next;
+    });
   }, [orderedBackups]);
 
   const selected =
     orderedBackups.find((backup) => backup.id === selectedId) ?? null;
   const restoreBusy =
     selected !== null && pendingAction === `restore:${selected.id}`;
+  const deleteBusy =
+    selected !== null && pendingAction === `delete-backup:${selected.id}`;
 
   return (
     <>
@@ -75,6 +87,23 @@ export function BackupList({
         <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
           <h2 className="m-0 text-[18px] font-semibold text-ink">备份记录</h2>
           <p className="mt-1 text-[12px] text-ink-2">{orderedBackups.length} 条记录</p>
+          {checked.size > 0 && (
+            <button
+              type="button"
+              className="mt-2 rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55"
+              disabled={pendingAction !== null}
+              onClick={() => {
+                void (async () => {
+                  for (const id of checked) {
+                    await onDelete(id);
+                  }
+                  setChecked(new Set());
+                })();
+              }}
+            >
+              删除选中（{checked.size}）
+            </button>
+          )}
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2">
           {loading ? (
@@ -99,17 +128,33 @@ export function BackupList({
           ) : (
             <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
               {orderedBackups.map((backup) => (
-                <li key={backup.id}>
-                  <SkillCard
-                    name={backup.skillName}
-                    description={`原因：${reasonNames[backup.reason]} · ${formatTime(backup.createdAt)}`}
-                    statusLabel={providerNames[backup.provider]}
-                    selected={backup.id === selected?.id}
-                    onSelect={() => {
-                      setSelectedId(backup.id);
-                      onClearActionError();
+                <li key={backup.id} className="flex items-start gap-1">
+                  <input
+                    type="checkbox"
+                    className="mt-4 ml-1"
+                    checked={checked.has(backup.id)}
+                    aria-label={`选择备份 ${backup.skillName}`}
+                    onChange={(event) => {
+                      setChecked((current) => {
+                        const next = new Set(current);
+                        if (event.target.checked) next.add(backup.id);
+                        else next.delete(backup.id);
+                        return next;
+                      });
                     }}
                   />
+                  <div className="min-w-0 flex-1">
+                    <SkillCard
+                      name={backup.skillName}
+                      description={`原因：${reasonNames[backup.reason]} · ${formatTime(backup.createdAt)}`}
+                      statusLabel={providerNames[backup.provider]}
+                      selected={backup.id === selected?.id}
+                      onSelect={() => {
+                        setSelectedId(backup.id);
+                        onClearActionError();
+                      }}
+                    />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -137,14 +182,24 @@ export function BackupList({
                     创建于 {formatTime(selected.createdAt)}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="rounded-lg bg-brand px-3 py-1.5 text-[12px] text-white disabled:opacity-55"
-                  disabled={pendingAction !== null}
-                  onClick={() => setRestoreOpen(true)}
-                >
-                  {restoreBusy ? "处理中…" : "恢复备份"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-red-200 px-3 py-1.5 text-[12px] text-red-700 hover:bg-red-50 disabled:opacity-55"
+                    disabled={pendingAction !== null}
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    {deleteBusy ? "删除中…" : "删除备份"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-brand px-3 py-1.5 text-[12px] text-white disabled:opacity-55"
+                    disabled={pendingAction !== null}
+                    onClick={() => setRestoreOpen(true)}
+                  >
+                    {restoreBusy ? "处理中…" : "恢复备份"}
+                  </button>
+                </div>
               </div>
             </header>
             <div className="min-h-0 flex-1 overflow-auto px-6 py-4">
@@ -208,6 +263,20 @@ export function BackupList({
         onConfirm={() => {
           if (selected) {
             void onRestore(selected.id).then(() => setRestoreOpen(false));
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={deleteOpen && selected !== null}
+        title={`删除备份 ${selected?.skillName ?? ""}？`}
+        message="将删除归档文件与索引记录，此操作不可撤销。"
+        confirmLabel="确认删除"
+        tone="danger"
+        busy={deleteBusy}
+        onCancel={() => setDeleteOpen(false)}
+        onConfirm={() => {
+          if (selected) {
+            void onDelete(selected.id).then(() => setDeleteOpen(false));
           }
         }}
       />
