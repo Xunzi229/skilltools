@@ -193,6 +193,94 @@ pub struct SkillGroup {
     pub order: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InstallHealthKind {
+    MissingTarget,
+    NotSymlink,
+    BrokenLink,
+    SourceMismatch,
+    IndexOrphan,
+    DiskOrphan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallHealthIssue {
+    pub kind: InstallHealthKind,
+    pub provider: Provider,
+    pub library_skill_id: Option<String>,
+    pub target_path: PathBuf,
+    pub message: String,
+    pub repairable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallHealthReport {
+    pub issues: Vec<InstallHealthIssue>,
+    pub repaired: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BatchItemStatus {
+    Success,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchItemResult {
+    pub id: String,
+    pub status: BatchItemStatus,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchResult {
+    pub total: usize,
+    pub success: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    pub items: Vec<BatchItemResult>,
+}
+
+impl BatchResult {
+    pub fn from_items(items: Vec<BatchItemResult>) -> Self {
+        let total = items.len();
+        let success = items
+            .iter()
+            .filter(|item| item.status == BatchItemStatus::Success)
+            .count();
+        let failed = items
+            .iter()
+            .filter(|item| item.status == BatchItemStatus::Failed)
+            .count();
+        let skipped = items
+            .iter()
+            .filter(|item| item.status == BatchItemStatus::Skipped)
+            .count();
+        Self {
+            total,
+            success,
+            failed,
+            skipped,
+            items,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrateResult {
+    pub project: Project,
+    pub library_skill_id: String,
+    pub replaced_with_link: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

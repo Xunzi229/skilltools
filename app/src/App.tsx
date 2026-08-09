@@ -9,9 +9,10 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar, type SkillFilter } from "./components/Sidebar";
 import { SkillDetail } from "./components/SkillDetail";
 import { SkillList } from "./components/SkillList";
+import { useBatchActions } from "./hooks/useBatchActions";
 import { useSkills } from "./hooks/useSkills";
 import { useLibrary } from "./hooks/useLibrary";
-import type { BatchResult, Provider } from "./model/skill";
+import type { Provider } from "./model/skill";
 import "./styles.css";
 
 interface AppProps {
@@ -30,32 +31,6 @@ const filterTitles: Record<string, string> = {
   settings: "设置",
 };
 
-async function runBatch(
-  ids: string[],
-  action: (id: string) => Promise<unknown>,
-): Promise<BatchResult> {
-  let success = 0;
-  let failed = 0;
-  const errors: string[] = [];
-  for (const id of ids) {
-    try {
-      await action(id);
-      success += 1;
-    } catch (error: unknown) {
-      failed += 1;
-      const message =
-        typeof error === "object" &&
-        error &&
-        "message" in error &&
-        typeof (error as { message: unknown }).message === "string"
-          ? (error as { message: string }).message
-          : "操作失败";
-      if (errors.length < 3) errors.push(message);
-    }
-  }
-  return { success, failed, errors };
-}
-
 function App({ api = tauriSkillApi }: AppProps) {
   const [filter, setFilter] = useState<SkillFilter>("library");
   const [search, setSearch] = useState("");
@@ -63,8 +38,20 @@ function App({ api = tauriSkillApi }: AppProps) {
   const [librarySelectedIds, setLibrarySelectedIds] = useState<Set<string>>(
     new Set(),
   );
-  const [batchBusy, setBatchBusy] = useState(false);
-  const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
+  const {
+    batchBusy,
+    batchResult,
+    clearBatchResult,
+    batchPauseSkills,
+    batchResumeSkills,
+    batchBackupSkills,
+    batchDeleteSkills,
+    batchInstallSkills,
+    batchUninstallSkills,
+    batchSetSkillGroup,
+    batchAddSkillTags,
+    batchMigrateProviderSkills,
+  } = useBatchActions(api);
   const {
     skills,
     selectedSkillId,
@@ -175,17 +162,6 @@ function App({ api = tauriSkillApi }: AppProps) {
     });
   };
 
-  const withBatch = async (ids: string[], action: (id: string) => Promise<unknown>) => {
-    if (batchBusy || ids.length === 0) return;
-    setBatchBusy(true);
-    setBatchResult(null);
-    try {
-      setBatchResult(await runBatch(ids, action));
-    } finally {
-      setBatchBusy(false);
-    }
-  };
-
   return (
     <main className="grid h-screen min-h-[600px] w-screen grid-cols-[240px_340px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden bg-panel">
       <Sidebar
@@ -203,7 +179,7 @@ function App({ api = tauriSkillApi }: AppProps) {
           setSearch("");
           setSkillSelectedIds(new Set());
           setLibrarySelectedIds(new Set());
-          setBatchResult(null);
+          clearBatchResult();
         }}
         onRefresh={() => {
           void refresh();
@@ -287,30 +263,27 @@ function App({ api = tauriSkillApi }: AppProps) {
             onToggleSelect={(id) => toggleSet(setLibrarySelectedIds, id)}
             onClearSelection={() => setLibrarySelectedIds(new Set())}
             onBatchInstall={(provider: Provider) => {
-              void withBatch([...librarySelectedIds], (id) =>
-                api.installSkill(id, provider),
-              ).then(() => void library.refresh());
+              const ids = [...librarySelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchInstallSkills(ids, provider).then(() => void library.refresh());
             }}
             onBatchUninstall={(provider: Provider) => {
-              void withBatch([...librarySelectedIds], (id) =>
-                api.uninstallSkill(id, provider),
-              ).then(() => void library.refresh());
+              const ids = [...librarySelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchUninstallSkills(ids, provider).then(() => void library.refresh());
             }}
             onBatchSetGroup={(groupId) => {
-              void withBatch([...librarySelectedIds], (id) =>
-                api.setSkillGroup(id, groupId),
-              ).then(() => void library.refresh());
+              const ids = [...librarySelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchSetSkillGroup(ids, groupId).then(() => void library.refresh());
             }}
             onBatchAddTag={(tagId) => {
-              void withBatch([...librarySelectedIds], async (id) => {
-                const skill = library.librarySkills.find((item) => item.id === id);
-                const next = new Set(skill?.tagIds ?? []);
-                next.add(tagId);
-                await api.setSkillTags(id, [...next]);
-              }).then(() => void library.refresh());
+              const ids = [...librarySelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchAddSkillTags(ids, tagId).then(() => void library.refresh());
             }}
             onRetry={() => void library.refresh()}
-            onClearBatchResult={() => setBatchResult(null)}
+            onClearBatchResult={clearBatchResult}
           />
           <LibraryDetail
             api={api}
@@ -349,34 +322,42 @@ function App({ api = tauriSkillApi }: AppProps) {
             onToggleSelect={(id) => toggleSet(setSkillSelectedIds, id)}
             onClearSelection={() => setSkillSelectedIds(new Set())}
             onBatchPause={() => {
-              void withBatch([...skillSelectedIds], (id) => api.pauseSkill(id)).then(
-                () => void refresh(),
-              );
+              const ids = [...skillSelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchPauseSkills(ids).then(() => void refresh());
             }}
             onBatchResume={() => {
-              void withBatch([...skillSelectedIds], (id) => api.resumeSkill(id)).then(
-                () => void refresh(),
-              );
+              const ids = [...skillSelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchResumeSkills(ids).then(() => void refresh());
             }}
             onBatchBackup={() => {
-              void withBatch([...skillSelectedIds], (id) => api.createBackup(id)).then(
-                () => {
-                  void refresh();
-                  void loadBackups();
-                },
-              );
+              const ids = [...skillSelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchBackupSkills(ids).then(() => {
+                void refresh();
+                void loadBackups();
+              });
             }}
             onBatchDelete={() => {
-              void withBatch([...skillSelectedIds], (id) => api.deleteSkill(id)).then(
-                () => {
-                  setSkillSelectedIds(new Set());
-                  void refresh();
-                  void loadBackups();
-                },
-              );
+              const ids = [...skillSelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchDeleteSkills(ids).then(() => {
+                setSkillSelectedIds(new Set());
+                void refresh();
+                void loadBackups();
+              });
+            }}
+            onBatchMigrate={(replaceWithLink) => {
+              const ids = [...skillSelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchMigrateProviderSkills(ids, replaceWithLink).then(() => {
+                void refresh();
+                void library.refresh();
+              });
             }}
             onRetry={() => void refresh()}
-            onClearBatchResult={() => setBatchResult(null)}
+            onClearBatchResult={clearBatchResult}
           />
           <SkillDetail
             api={api}
@@ -389,6 +370,10 @@ function App({ api = tauriSkillApi }: AppProps) {
             onResume={resumeSkill}
             onBackup={createBackup}
             onDelete={deleteSkill}
+            onMigrated={() => {
+              void refresh();
+              void library.refresh();
+            }}
             onClearActionError={clearActionError}
           />
         </>

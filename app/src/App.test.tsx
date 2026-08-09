@@ -234,6 +234,7 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     listBackups: async () => [],
     restoreBackup: unavailable,
     deleteBackup: unavailable,
+    cleanupBackups: async () => 0,
     deleteSkill: unavailable,
     listProjects: async () => projects,
     addLocalProject: unavailable,
@@ -250,6 +251,9 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     installSkill: unavailable,
     uninstallSkill: unavailable,
     listInstallations: async () => [],
+    scanInstallHealth: async () => ({ issues: [], repaired: 0 }),
+    repairInstallations: async () => ({ issues: [], repaired: 0 }),
+    migrateProviderSkill: unavailable,
     listTags: async () => tags,
     createTag: async (name, color = null) => ({ id: `tag-${name}`, name, color }),
     renameTag: async (id, name) => ({ id, name, color: null }),
@@ -265,6 +269,8 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     getSettings: async () => ({
       theme: "light",
       skillRootOverrides: { cursor: null, claude: null, codex: null },
+      backupRetentionDays: 30,
+      backupMaxCount: 200,
     }),
     saveSettings: async (settings) => settings,
     getAppPaths: async () => ({
@@ -283,6 +289,69 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     exportLibrarySkillZip: unavailable,
     exportProjectZip: unavailable,
     importSkillZip: unavailable,
+    batchPauseSkills: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
+    batchResumeSkills: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
+    batchBackupSkills: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
+    batchDeleteSkills: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
+    batchInstallSkills: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
+    batchUninstallSkills: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
+    batchSetSkillGroup: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
+    batchAddSkillTags: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
+    batchMigrateProviderSkills: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
     ...overrides,
   };
 }
@@ -415,7 +484,7 @@ describe("Skill Manager", () => {
     expect(settingsButton).toBeEnabled();
     await user.click(settingsButton);
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
-    expect(screen.getByText("主题与本机 Skill 根目录。")).toBeInTheDocument();
+    expect(screen.getByText(/主题、路径、安装健康/)).toBeInTheDocument();
   });
 
   it("快速切换时忽略过期的详情响应", async () => {

@@ -130,6 +130,10 @@ export interface SkillRootOverrides {
 export interface AppSettings {
   theme: ThemePreference;
   skillRootOverrides: SkillRootOverrides;
+  /** null = 永不按天清理 */
+  backupRetentionDays: number | null;
+  /** null = 不限制条数 */
+  backupMaxCount: number | null;
 }
 
 export interface AppPathsInfo {
@@ -145,8 +149,46 @@ export interface AppPathsInfo {
   defaultCodexSkills: string;
 }
 
+export type InstallHealthKind =
+  | "missingTarget"
+  | "notSymlink"
+  | "brokenLink"
+  | "sourceMismatch"
+  | "indexOrphan"
+  | "diskOrphan";
+
+export interface InstallHealthIssue {
+  kind: InstallHealthKind;
+  provider: Provider;
+  librarySkillId: string | null;
+  targetPath: string;
+  message: string;
+  repairable: boolean;
+}
+
+export interface InstallHealthReport {
+  issues: InstallHealthIssue[];
+  repaired: number;
+}
+
+export type BatchItemStatus = "success" | "failed" | "skipped";
+
+export interface BatchItemResult {
+  id: string;
+  status: BatchItemStatus;
+  message?: string | null;
+}
+
 export interface BatchResult {
+  total: number;
   success: number;
   failed: number;
-  errors: string[];
+  skipped: number;
+  items: BatchItemResult[];
+}
+
+export interface MigrateResult {
+  project: Project;
+  librarySkillId: string;
+  replacedWithLink: boolean;
 }

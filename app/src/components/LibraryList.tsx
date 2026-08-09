@@ -6,6 +6,7 @@ import type {
   SkillGroup,
   Tag,
 } from "../model/skill";
+import { formatBatchSummary } from "../hooks/useBatchActions";
 import { displayDescription } from "../utils/skillDisplay";
 import { SkillCard } from "./SkillCard";
 
@@ -301,10 +302,7 @@ export function LibraryList({
         )}
         {batchResult && (
           <div className="mt-2 flex items-start justify-between gap-2 rounded border border-line bg-hover px-2 py-1.5 text-[11px] text-ink-2">
-            <span>
-              批量完成：成功 {batchResult.success}，失败 {batchResult.failed}
-              {batchResult.errors[0] ? `；${batchResult.errors[0]}` : ""}
-            </span>
+            <span>{formatBatchSummary(batchResult)}</span>
             <button type="button" className="shrink-0" onClick={onClearBatchResult}>
               关闭
             </button>

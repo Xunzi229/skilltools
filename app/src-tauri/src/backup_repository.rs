@@ -161,6 +161,16 @@ impl BackupRepository {
     pub fn delete_backup(&self, backup_id: &str) -> Result<(), AppError> {
         let _guard = self.lock_transaction()?;
         let mut records = self.load_records()?;
+        self.delete_backup_unlocked(&mut records, backup_id)?;
+        self.write_records(&records)?;
+        Ok(())
+    }
+
+    fn delete_backup_unlocked(
+        &self,
+        records: &mut Vec<BackupRecord>,
+        backup_id: &str,
+    ) -> Result<(), AppError> {
         let position = records
             .iter()
             .position(|record| record.id == backup_id)
@@ -177,8 +187,54 @@ impl BackupRepository {
                 fs::remove_file(&record.archive_path)?;
             }
         }
-        self.write_records(&records)?;
         Ok(())
+    }
+
+    /// Delete backups past retention days and/or exceeding max count (oldest first).
+    pub fn cleanup_backups(
+        &self,
+        retention_days: Option<u32>,
+        max_count: Option<u32>,
+    ) -> Result<usize, AppError> {
+        let _guard = self.lock_transaction()?;
+        let mut records = self.load_records()?;
+        records.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        let mut deleted = 0usize;
+        if let Some(days) = retention_days {
+            let cutoff = Utc::now() - chrono::Duration::days(i64::from(days));
+            let expired: Vec<String> = records
+                .iter()
+                .filter(|record| record.created_at < cutoff)
+                .map(|record| record.id.clone())
+                .collect();
+            for id in expired {
+                if self.delete_backup_unlocked(&mut records, &id).is_ok() {
+                    deleted += 1;
+                }
+            }
+        }
+        if let Some(max) = max_count {
+            let keep = usize::try_from(max).unwrap_or(usize::MAX);
+            if records.len() > keep {
+                let excess = records.len() - keep;
+                let oldest: Vec<String> = records
+                    .iter()
+                    .take(excess)
+                    .map(|record| record.id.clone())
+                    .collect();
+                for id in oldest {
+                    if self.delete_backup_unlocked(&mut records, &id).is_ok() {
+                        deleted += 1;
+                    }
+                }
+            }
+        }
+        self.write_records(&records)?;
+        Ok(deleted)
     }
 
     pub fn restore_backup(&self, backup_id: &str) -> Result<SkillDetail, AppError> {
@@ -1252,5 +1308,42 @@ mod tests {
             fs::read_link(archived_link).unwrap(),
             outside.path().join("secret")
         );
+    }
+
+    #[test]
+    fn cleanup_backups_respects_max_count_and_retention_days() {
+        use chrono::{Duration, Utc};
+
+        let base = tempdir().unwrap();
+        let (_, repository, id) = repository_with_skill(&base, "cleanup");
+        let first = repository.create_backup(&id, BackupReason::Manual).unwrap();
+        let second = repository.create_backup(&id, BackupReason::Manual).unwrap();
+        let third = repository.create_backup(&id, BackupReason::Manual).unwrap();
+
+        let mut records = repository.list_backups().unwrap();
+        // list is newest-first; rewrite oldest two with old timestamps
+        for record in &mut records {
+            if record.id == first.id || record.id == second.id {
+                record.created_at = Utc::now() - Duration::days(40);
+            }
+        }
+        repository.write_records(&records).unwrap();
+
+        let deleted_by_age = repository.cleanup_backups(Some(30), None).unwrap();
+        assert_eq!(deleted_by_age, 2);
+        assert!(!first.archive_path.exists());
+        assert!(!second.archive_path.exists());
+        assert!(third.archive_path.exists());
+
+        let fourth = repository.create_backup(&id, BackupReason::Manual).unwrap();
+        let fifth = repository.create_backup(&id, BackupReason::Manual).unwrap();
+        assert_eq!(repository.list_backups().unwrap().len(), 3);
+
+        let deleted_by_count = repository.cleanup_backups(None, Some(2)).unwrap();
+        assert_eq!(deleted_by_count, 1);
+        let remaining = repository.list_backups().unwrap();
+        assert_eq!(remaining.len(), 2);
+        assert!(remaining.iter().any(|record| record.id == fourth.id));
+        assert!(remaining.iter().any(|record| record.id == fifth.id));
     }
 }

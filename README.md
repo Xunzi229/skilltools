@@ -1,137 +1,87 @@
 # Skilltools
 
-本地 Skill 管理桌面应用 + 技能库工具集。
+本地 Skill 管理桌面应用（Skill Manager）。
 
 ## 项目概述
 
-Skilltools 是一个用于管理和应用 AI 开发工具技能（Skills）的工具集，包含：
+Skill Manager 用于管理 Cursor / Claude / Codex 本机 Skill，以及中央 Skill 库的安装、分组与备份。
 
-- **Skill Manager** — Tauri 桌面应用，管理 Cursor/Claude/Codex 的本地 Skill 文件
-- **Skill Library** — 技能库应用框架（规划中）
+- **应用标识**：`com.skilltools.manager`
+- **应用数据目录**：由 Tauri `app_data_dir()` 决定（Windows 通常为 `%APPDATA%\com.skilltools.manager`）
+- **默认 Skill 根目录**：`~/.cursor/skills`、`~/.claude/skills`、`~/.codex/skills`（可在设置中覆盖）
 
 ## 功能特性
 
-### Skill Manager
-
-- 三栏界面管理 `~/.cursor/skills`、`~/.claude/skills`、`~/.codex/skills`
-- 暂停/恢复 Skill（移动到停用目录）
-- 手动备份与一键恢复
-- 删除前自动创建 `before_delete` 备份
-- 恢复冲突时不覆盖、不合并
-- 符号链接安全扫描（不递归跟随到白名单外）
+- 三栏界面管理本机已安装 Skill 与中央库
+- 库安装使用受管符号链接；冲突不覆盖
+- 暂停/恢复、手动备份、删除前自动备份
+- 安装健康扫描与安全修复
+- 本机 Skill 复制迁入中央库（可选替换为库链接）
+- 后端批量操作（部分成功汇总）
+- ZIP 导入导出、应用内文件编辑
+- 备份保留策略（按天 / 按数量）与应用内检查更新
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
 | 桌面框架 | Tauri 2 |
-| 前端 | React 18 + TypeScript + Vite |
-| 后端 | Rust（serde、walkdir、sha2、tempfile） |
-| 测试 | Vitest + Testing Library |
-| 文档 | Markdown + SDD（Software Design Document） |
-
-## 项目结构
-
-```
-skilltools/
-├── app/                          # Tauri 桌面应用
-│   ├── src/                      # React 前端
-│   │   ├── components/           # UI 组件（三栏布局）
-│   │   ├── api/skillApi.ts       # Tauri Command 适配器
-│   │   └── hooks/useSkills.ts    # 状态管理
-│   └── src-tauri/                # Rust 后端
-│       ├── src/
-│       │   ├── commands.rs       # Tauri Command 入口
-│       │   ├── skill_repository.rs
-│       │   ├── backup_repository.rs
-│       │   └── paths.rs          # 路径白名单
-│       └── Cargo.toml
-├── docs/                         # 设计文档
-│   └── superpowers/
-│       ├── plans/                # 实施计划
-│       └── specs/                # 技术方案
-├── .superpowers/                 # SDD 任务报告与 brainstorm
-│   ├── sdd/                      # 任务 1-9 报告
-│   └── brainstorm/               # 架构讨论记录
-└── README.md
-```
+| 前端 | React + TypeScript + Vite |
+| 后端 | Rust |
+| 测试 | Vitest + Testing Library + Cargo tests |
 
 ## 快速开始
 
-### 环境要求
-
-- Node.js 18+
-- Rust 1.70+（`rustup` 安装）
-- Tauri 依赖（macOS: Xcode Command Line Tools）
-
-### 安装与运行
-
 ```bash
 cd app
-
-# 安装前端依赖
 npm install
-
-# 启动开发环境（热重载）
 npm run tauri dev
-```
-
-### 构建
-
-```bash
-# macOS 应用构建
-npm run tauri build
-
-# 输出位于 app/src-tauri/target/release/bundle/
 ```
 
 ### 测试
 
 ```bash
-# 前端单元测试
 npm run test
-
-# TypeScript 类型检查
 npm run typecheck
+cd src-tauri && cargo test
 ```
 
-## 开发指南
+## 安全不变量
 
-### 目录白名单
+- 路径白名单（含设置中的根目录覆盖）
+- 冲突不覆盖
+- 库安装 = 受管符号链接
+- 破坏性操作走事务锁 + 索引原子写
 
-Rust 后端仅允许操作以下目录（硬编码于 `paths.rs`）：
+## 自动更新（发布）
 
-- `~/.cursor/skills`
-- `~/.claude/skills`
-- `~/.codex/skills`
-- `~/.claude/skills.disabled`（停用目录）
-- `~/.claude/skills.backups`（备份目录）
+更新源为 GitHub Releases 的 `latest.json`。CI 需配置 Secrets：
 
-### 破坏性操作安全
+- `TAURI_SIGNING_PRIVATE_KEY`：与 `tauri.conf.json` 中 `plugins.updater.pubkey` 对应的私钥全文
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：可选
 
-- **删除**：先创建 `before_delete` 备份，失败则中止
-- **恢复/暂停**：目标冲突时停止，不覆盖现有内容
-- **备份**：使用临时目录 + 校验和 + 原子重命名
+本地生成密钥：
 
-### 错误处理
+```bash
+cd app
+npx tauri signer generate -w src-tauri/updater-keys
+```
 
-所有面向用户的错误使用简洁中文，由 Rust `AppError` 统一映射。
+私钥勿提交仓库（已在 `.gitignore`）。
 
 ## 路线图
 
-- [ ] 技能编辑器（在线编辑 YAML/JSON）
-- [ ] 在线技能市场集成
+- [x] 应用内文件编辑
+- [x] ZIP 导入导出
+- [x] 批量操作（后端协议）
+- [x] 安装健康检查 / 迁入库
+- [x] 备份保留策略
+- [x] 自动更新（依赖 Releases 签名配置）
+- [ ] 在线技能市场
 - [ ] 云同步（可选）
-- [ ] 自动更新
-- [ ] ZIP 导入导出
-- [ ] 批量操作
-
-## 许可证
-
-内部工具，暂无开源计划。
+- [ ] Git 多分支 / 冲突合并 UI
 
 ## 相关文档
 
 - [Skill Manager 实施计划](docs/superpowers/plans/2026-08-06-skill-manager.md)
 - [Skill Manager 技术方案](docs/superpowers/specs/2026-08-06-skill-manager-design.md)
-- [Skill Library 应用计划](docs/superpowers/plans/2026-08-07-skill-library-apply.md)

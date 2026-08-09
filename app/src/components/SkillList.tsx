@@ -1,5 +1,8 @@
+import { useState } from "react";
 import type { BatchResult, SkillSummary } from "../model/skill";
+import { formatBatchSummary } from "../hooks/useBatchActions";
 import { displayDescription } from "../utils/skillDisplay";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { SkillCard } from "./SkillCard";
 
 interface SkillListProps {
@@ -22,6 +25,7 @@ interface SkillListProps {
   onBatchResume: () => void;
   onBatchBackup: () => void;
   onBatchDelete: () => void;
+  onBatchMigrate: (replaceWithLink: boolean) => void;
   onRetry: () => void;
   onClearBatchResult: () => void;
 }
@@ -52,9 +56,12 @@ export function SkillList({
   onBatchResume,
   onBatchBackup,
   onBatchDelete,
+  onBatchMigrate,
   onRetry,
   onClearBatchResult,
 }: SkillListProps) {
+  const [migrateOpen, setMigrateOpen] = useState(false);
+  const [replaceWithLink, setReplaceWithLink] = useState(true);
   let content;
 
   if (loading) {
@@ -146,22 +153,41 @@ export function SkillList({
             <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchPause}>暂停</button>
             <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchResume}>恢复</button>
             <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={onBatchBackup}>备份</button>
+            <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover disabled:opacity-55" disabled={batchBusy} onClick={() => setMigrateOpen(true)}>迁入库</button>
             <button type="button" className="rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55" disabled={batchBusy} onClick={onBatchDelete}>删除</button>
             <button type="button" className="rounded border border-line px-2 py-1 text-[11px] hover:bg-hover" disabled={batchBusy} onClick={onClearSelection}>清除</button>
           </div>
         )}
         {batchResult && (
           <div className="mt-2 flex items-start justify-between gap-2 rounded border border-line bg-hover px-2 py-1.5 text-[11px] text-ink-2">
-            <span>
-              批量完成：成功 {batchResult.success}，失败 {batchResult.failed}
-              {batchResult.errors[0] ? `；${batchResult.errors[0]}` : ""}
-            </span>
+            <span>{formatBatchSummary(batchResult)}</span>
             <button type="button" className="shrink-0" onClick={onClearBatchResult}>
               关闭
             </button>
           </div>
         )}
       </header>
+      <ConfirmDialog
+        open={migrateOpen}
+        title={`迁入 ${selectedIds.size} 个 Skill 到中央库？`}
+        message="将复制真实目录到库中登记为本地项目。冲突时不会覆盖现有内容。"
+        confirmLabel="开始迁入"
+        busy={batchBusy}
+        onCancel={() => setMigrateOpen(false)}
+        onConfirm={() => {
+          onBatchMigrate(replaceWithLink);
+          setMigrateOpen(false);
+        }}
+      >
+        <label className="flex items-center gap-2 text-[12px] text-ink-2">
+          <input
+            type="checkbox"
+            checked={replaceWithLink}
+            onChange={(event) => setReplaceWithLink(event.target.checked)}
+          />
+          迁移后替换为库链接安装
+        </label>
+      </ConfirmDialog>
       {warnings.length > 0 && (
         <aside
           className="mx-3 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"

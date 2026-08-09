@@ -31,5 +31,11 @@ lerna-debug.log*
 server.pid
 server-stopped
 
+# Tauri updater private key (never commit)
+app/src-tauri/updater-keys
+*.key
+*.key.pub
+!app/src-tauri/updater-keys.pub
+
 # OS
 Thumbs.db

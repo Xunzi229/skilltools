@@ -40,12 +40,37 @@ impl SkillRootOverrides {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+fn default_backup_retention_days() -> Option<u32> {
+    Some(30)
+}
+
+fn default_backup_max_count() -> Option<u32> {
+    Some(200)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub theme: ThemePreference,
     #[serde(default)]
     pub skill_root_overrides: SkillRootOverrides,
+    /// None = never expire by age
+    #[serde(default = "default_backup_retention_days")]
+    pub backup_retention_days: Option<u32>,
+    /// None = no count cap
+    #[serde(default = "default_backup_max_count")]
+    pub backup_max_count: Option<u32>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            theme: ThemePreference::default(),
+            skill_root_overrides: SkillRootOverrides::default(),
+            backup_retention_days: default_backup_retention_days(),
+            backup_max_count: default_backup_max_count(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -97,6 +122,8 @@ mod tests {
                 claude: None,
                 codex: None,
             },
+            backup_retention_days: Some(30),
+            backup_max_count: Some(200),
         };
         save_settings(base.path(), &settings).unwrap();
         let loaded = load_settings(base.path()).unwrap();

@@ -15,8 +15,9 @@ use crate::git_ops::{
 };
 use crate::json_store::{read_json_value, write_json_value};
 use crate::model::{
-    FileContent, FileNode, LibrarySkillDetail, LibrarySkillSummary, Project, ProjectSourceType,
-    Provider, SkillGroup, SkillInstallation, Tag,
+    FileContent, FileNode, InstallHealthIssue, InstallHealthKind, InstallHealthReport,
+    LibrarySkillDetail, LibrarySkillSummary, MigrateResult, Project, ProjectSourceType, Provider,
+    SkillGroup, SkillInstallation, Tag,
 };
 use crate::paths::AppPaths;
 use crate::skill_files::{list_skill_tree_at, read_skill_file_at};
@@ -438,6 +439,177 @@ impl LibraryRepository {
                 .then(provider_order(left.provider).cmp(&provider_order(right.provider)))
         });
         Ok(installations)
+    }
+
+    pub fn scan_install_health(&self) -> Result<InstallHealthReport, AppError> {
+        let index = self.load_index()?;
+        Ok(InstallHealthReport {
+            issues: collect_health_issues(&index, &self.paths),
+            repaired: 0,
+        })
+    }
+
+    pub fn repair_installations(&self) -> Result<InstallHealthReport, AppError> {
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        let issues = collect_health_issues(&index, &self.paths);
+        let mut repaired = 0usize;
+        for issue in &issues {
+            if !issue.repairable {
+                continue;
+            }
+            match issue.kind {
+                InstallHealthKind::MissingTarget
+                | InstallHealthKind::BrokenLink
+                | InstallHealthKind::SourceMismatch
+                | InstallHealthKind::IndexOrphan => {
+                    if matches!(
+                        issue.kind,
+                        InstallHealthKind::BrokenLink | InstallHealthKind::SourceMismatch
+                    ) {
+                        if let Ok(metadata) = fs::symlink_metadata(&issue.target_path) {
+                            if metadata.file_type().is_symlink() {
+                                let _ = fs::remove_file(&issue.target_path);
+                            }
+                        }
+                    }
+                    let before = index.installations.len();
+                    index.installations.retain(|installation| {
+                        installation.target_path != issue.target_path
+                            && !(issue.library_skill_id.as_ref().is_some_and(|id| {
+                                &installation.library_skill_id == id
+                                    && installation.provider == issue.provider
+                            }))
+                    });
+                    if index.installations.len() != before {
+                        repaired += 1;
+                    }
+                }
+                InstallHealthKind::DiskOrphan => {
+                    if let Ok(metadata) = fs::symlink_metadata(&issue.target_path) {
+                        if metadata.file_type().is_symlink() {
+                            fs::remove_file(&issue.target_path)?;
+                            repaired += 1;
+                        }
+                    }
+                }
+                InstallHealthKind::NotSymlink => {}
+            }
+        }
+        sync_installation_statuses(&mut index);
+        self.write_index(&index)?;
+        let remaining = collect_health_issues(&index, &self.paths);
+        Ok(InstallHealthReport {
+            issues: remaining,
+            repaired,
+        })
+    }
+
+    /// Copy a provider skill directory into the library and optionally replace it with a managed link.
+    pub fn migrate_provider_skill(
+        &self,
+        skill_name: &str,
+        provider: Provider,
+        source_path: &Path,
+        replace_with_link: bool,
+    ) -> Result<MigrateResult, AppError> {
+        let _guard = lock_app_transaction(&self.paths)?;
+        self.paths.assert_skill_access(source_path)?;
+        let meta = fs::symlink_metadata(source_path)?;
+        if meta.file_type().is_symlink() {
+            let resolved = fs::canonicalize(source_path)?;
+            if resolved.starts_with(&self.paths.library_dir) {
+                return Err(AppError::Io {
+                    message: "该 Skill 已是库安装链接，无需迁移".into(),
+                });
+            }
+            return Err(AppError::Io {
+                message: "不支持迁移符号链接 Skill，请迁移真实目录".into(),
+            });
+        }
+        if !source_path.is_dir() {
+            return Err(AppError::InvalidProjectPath {
+                path: source_path.display().to_string(),
+            });
+        }
+
+        let replace_target = if replace_with_link {
+            let root = self.paths.provider_root(provider)?;
+            let target = safe_skill_target(root, skill_name)?;
+            if target != source_path && fs::symlink_metadata(&target).is_ok() {
+                return Err(AppError::TargetConflict {
+                    path: target.display().to_string(),
+                });
+            }
+            Some(target)
+        } else {
+            None
+        };
+
+        let project_id = Uuid::new_v4().to_string();
+        let dest_root = self.paths.library_projects_dir.join(&project_id);
+        let dest_skill = dest_root.join(skill_name);
+        self.paths.assert_allowed(&dest_root)?;
+        self.paths.assert_allowed(&dest_skill)?;
+        fs::create_dir_all(&dest_root)?;
+        if let Err(error) = crate::fs_ops::copy_directory(source_path, &dest_skill) {
+            let _ = fs::remove_dir_all(&dest_root);
+            return Err(error);
+        }
+        if !dest_skill.join("SKILL.md").is_file() {
+            let _ = fs::remove_dir_all(&dest_root);
+            return Err(AppError::Io {
+                message: "迁移结果缺少 SKILL.md".into(),
+            });
+        }
+
+        let mut index = self.load_index()?;
+        ensure_project_path_is_new(&index, &dest_root)?;
+        let project = project_for_source(ProjectSourceType::Local, dest_root.clone(), None);
+        let skills = scan_project(&project, &[])?;
+        let library_skill_id = skills
+            .iter()
+            .find(|skill| skill.name == skill_name || skill.relative_path.as_os_str().is_empty())
+            .or_else(|| skills.first())
+            .map(|skill| skill.id.clone())
+            .ok_or_else(|| AppError::Io {
+                message: "迁移后未扫描到 Skill".into(),
+            })?;
+        index.projects.push(project.clone());
+        index.library_skills.extend(skills);
+        self.write_index(&index)?;
+
+        let mut replaced_with_link = false;
+        if let Some(target) = replace_target {
+            // Remove original real directory then link.
+            fs::remove_dir_all(source_path)?;
+            let source_canon = dest_skill.canonicalize().map_err(AppError::from)?;
+            if let Err(error) = create_directory_symlink(&source_canon, &target) {
+                // Best-effort: leave library copy; surface error.
+                return Err(error);
+            }
+            let mut index = self.load_index()?;
+            index.installations.retain(|installation| {
+                !(installation.library_skill_id == library_skill_id
+                    && installation.provider == provider)
+            });
+            index.installations.push(SkillInstallation {
+                library_skill_id: library_skill_id.clone(),
+                provider,
+                source_path: source_canon,
+                target_path: target,
+                installed_at: Utc::now(),
+            });
+            sync_installation_statuses(&mut index);
+            self.write_index(&index)?;
+            replaced_with_link = true;
+        }
+
+        Ok(MigrateResult {
+            project,
+            library_skill_id,
+            replaced_with_link,
+        })
     }
 
     pub fn list_tags(&self) -> Result<Vec<Tag>, AppError> {
@@ -970,6 +1142,110 @@ fn prune_missing_installations(index: &mut LibraryIndex) {
     });
 }
 
+fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<InstallHealthIssue> {
+    let mut issues = Vec::new();
+    let mut indexed_targets = HashSet::new();
+
+    for installation in &index.installations {
+        indexed_targets.insert(installation.target_path.clone());
+        let skill = index
+            .library_skills
+            .iter()
+            .find(|skill| skill.id == installation.library_skill_id);
+        let expected_source = skill.and_then(|skill| skill.absolute_path.canonicalize().ok());
+
+        match fs::symlink_metadata(&installation.target_path) {
+            Err(_) => issues.push(InstallHealthIssue {
+                kind: InstallHealthKind::MissingTarget,
+                provider: installation.provider,
+                library_skill_id: Some(installation.library_skill_id.clone()),
+                target_path: installation.target_path.clone(),
+                message: "索引中的安装目标不存在".into(),
+                repairable: true,
+            }),
+            Ok(metadata) if !metadata.file_type().is_symlink() => issues.push(InstallHealthIssue {
+                kind: InstallHealthKind::NotSymlink,
+                provider: installation.provider,
+                library_skill_id: Some(installation.library_skill_id.clone()),
+                target_path: installation.target_path.clone(),
+                message: "目标存在但不是符号链接，需手动处理".into(),
+                repairable: false,
+            }),
+            Ok(_) => match fs::canonicalize(&installation.target_path) {
+                Err(_) => issues.push(InstallHealthIssue {
+                    kind: InstallHealthKind::BrokenLink,
+                    provider: installation.provider,
+                    library_skill_id: Some(installation.library_skill_id.clone()),
+                    target_path: installation.target_path.clone(),
+                    message: "符号链接已损坏".into(),
+                    repairable: true,
+                }),
+                Ok(resolved) => {
+                    if expected_source
+                        .as_ref()
+                        .is_some_and(|expected| expected != &resolved)
+                    {
+                        issues.push(InstallHealthIssue {
+                            kind: InstallHealthKind::SourceMismatch,
+                            provider: installation.provider,
+                            library_skill_id: Some(installation.library_skill_id.clone()),
+                            target_path: installation.target_path.clone(),
+                            message: "链接指向与库源不一致".into(),
+                            repairable: true,
+                        });
+                    } else if skill.is_none() {
+                        issues.push(InstallHealthIssue {
+                            kind: InstallHealthKind::IndexOrphan,
+                            provider: installation.provider,
+                            library_skill_id: Some(installation.library_skill_id.clone()),
+                            target_path: installation.target_path.clone(),
+                            message: "安装记录对应的库 Skill 已不存在".into(),
+                            repairable: true,
+                        });
+                    }
+                }
+            },
+        }
+    }
+
+    for provider in [Provider::Cursor, Provider::Claude, Provider::Codex] {
+        let Ok(root) = paths.provider_root(provider) else {
+            continue;
+        };
+        let Ok(entries) = fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if !metadata.file_type().is_symlink() {
+                continue;
+            }
+            if indexed_targets.contains(&path) {
+                continue;
+            }
+            let Ok(resolved) = fs::canonicalize(&path) else {
+                continue;
+            };
+            if !resolved.starts_with(&paths.library_dir) {
+                continue;
+            }
+            issues.push(InstallHealthIssue {
+                kind: InstallHealthKind::DiskOrphan,
+                provider,
+                library_skill_id: None,
+                target_path: path,
+                message: "磁盘上存在指向库的链接，但未登记到索引".into(),
+                repairable: true,
+            });
+        }
+    }
+
+    issues
+}
+
 fn sync_installation_statuses(index: &mut LibraryIndex) {
     for skill in &mut index.library_skills {
         skill.installed_providers = index
@@ -1050,7 +1326,7 @@ mod tests {
 
     use super::LibraryRepository;
     use crate::error::AppError;
-    use crate::model::{ProjectSourceType, Provider};
+    use crate::model::{InstallHealthKind, ProjectSourceType, Provider};
     use crate::paths::AppPaths;
 
     fn write_skill(path: &std::path::Path, name: &str) {
@@ -1405,5 +1681,92 @@ mod tests {
             repository.install_skill(&skill_id, Provider::Codex),
             Err(AppError::PathOutsideManagedRoots { .. })
         ));
+    }
+
+    #[test]
+    fn scan_install_health_detects_missing_target_and_repair_trims_index() {
+        use crate::model::SkillInstallation;
+        use chrono::Utc;
+
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let missing_target = paths.provider_root(Provider::Cursor).unwrap().join("Alpha");
+        fs::create_dir_all(missing_target.parent().unwrap()).unwrap();
+
+        let mut index = repository.load_index().unwrap();
+        index.installations.push(SkillInstallation {
+            library_skill_id: skill_id,
+            provider: Provider::Cursor,
+            source_path: source.path().join("alpha"),
+            target_path: missing_target.clone(),
+            installed_at: Utc::now(),
+        });
+        repository.write_index(&index).unwrap();
+
+        let report = repository.scan_install_health().unwrap();
+        assert!(report.issues.iter().any(|issue| {
+            issue.kind == InstallHealthKind::MissingTarget && issue.repairable
+        }));
+
+        let repaired = repository.repair_installations().unwrap();
+        assert!(repaired.repaired >= 1);
+        assert!(repository.list_installations().unwrap().is_empty());
+        assert!(!missing_target.exists());
+    }
+
+    #[test]
+    fn migrate_provider_skill_copies_into_library_without_overwrite() {
+        let base = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        let cursor_root = paths.provider_root(Provider::Cursor).unwrap().to_path_buf();
+        let skill_dir = cursor_root.join("local-skill");
+        write_skill(&skill_dir, "local-skill");
+        let repository = LibraryRepository::new(paths);
+
+        let result = repository
+            .migrate_provider_skill("local-skill", Provider::Cursor, &skill_dir, false)
+            .unwrap();
+
+        assert!(!result.replaced_with_link);
+        assert!(skill_dir.join("SKILL.md").is_file());
+        let skills = repository.list_library_skills().unwrap();
+        assert!(skills.iter().any(|skill| skill.id == result.library_skill_id));
+        assert!(skills
+            .iter()
+            .any(|skill| skill.name == "local-skill" && skill.absolute_path.is_dir()));
+    }
+
+    #[test]
+    fn migrate_provider_skill_replace_aborts_on_real_directory_conflict() {
+        let base = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        let cursor_root = paths.provider_root(Provider::Cursor).unwrap().to_path_buf();
+        let source = cursor_root.join("to-migrate");
+        write_skill(&source, "to-migrate");
+        // Conflict at a different target name path shouldn't apply; force conflict by
+        // creating a sibling that would collide only if names differ. Here we migrate
+        // then try replace when target already exists as real dir under another path —
+        // use replace=true while leaving an extra real dir at the same target after copy
+        // by renaming: first migrate without replace, recreate source, then place a
+        // blocker at target and ask replace from a different source name.
+        let blocker = cursor_root.join("blocked");
+        write_skill(&blocker, "blocked");
+        let repository = LibraryRepository::new(paths);
+
+        // replace_with_link on a path that already exists as real dir (same path) removes it;
+        // for conflict, create a different source and ensure target path already occupied.
+        let other = cursor_root.join("blocked-copy");
+        write_skill(&other, "blocked");
+        let err = repository
+            .migrate_provider_skill("blocked", Provider::Cursor, &other, true)
+            .unwrap_err();
+        assert!(matches!(err, AppError::TargetConflict { .. }));
+        assert!(other.is_dir());
+        assert!(blocker.is_dir());
     }
 }

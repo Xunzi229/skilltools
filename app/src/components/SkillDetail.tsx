@@ -23,6 +23,7 @@ interface SkillDetailProps {
   onResume: (skillId: string) => Promise<void>;
   onBackup: (skillId: string) => Promise<void>;
   onDelete: (skillId: string) => Promise<void>;
+  onMigrated: () => void;
   onClearActionError: () => void;
 }
 
@@ -66,9 +67,14 @@ export function SkillDetail({
   onResume,
   onBackup,
   onDelete,
+  onMigrated,
   onClearActionError,
 }: SkillDetailProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [migrateOpen, setMigrateOpen] = useState(false);
+  const [replaceWithLink, setReplaceWithLink] = useState(true);
+  const [migrateBusy, setMigrateBusy] = useState(false);
+  const [migrateError, setMigrateError] = useState<string | null>(null);
   const [tree, setTree] = useState<FileNode[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
@@ -225,6 +231,19 @@ export function SkillDetail({
             >
               {pendingAction === `backup:${skill.id}` ? "处理中…" : "备份"}
             </button>
+            {skill.status === "active" && !skill.resolvedPath && (
+              <button
+                type="button"
+                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-hover disabled:opacity-55"
+                disabled={busy || migrateBusy}
+                onClick={() => {
+                  setMigrateError(null);
+                  setMigrateOpen(true);
+                }}
+              >
+                迁入库
+              </button>
+            )}
             <button
               type="button"
               className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[12px] text-red-700 hover:bg-red-100 disabled:opacity-55"
@@ -268,16 +287,19 @@ export function SkillDetail({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
-        {actionError && (
+        {(actionError || migrateError) && (
           <div
             className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700"
             role="alert"
           >
-            <span>{actionError.message}</span>
+            <span>{migrateError ?? actionError?.message}</span>
             <button
               type="button"
               className="rounded bg-red-100 px-2 py-1"
-              onClick={onClearActionError}
+              onClick={() => {
+                setMigrateError(null);
+                onClearActionError();
+              }}
             >
               关闭
             </button>
@@ -358,6 +380,37 @@ export function SkillDetail({
           void onDelete(skill.id).then(() => setDeleteOpen(false));
         }}
       />
+      <ConfirmDialog
+        open={migrateOpen}
+        title={`迁入 ${skill.name} 到中央库？`}
+        message="将复制该 Skill 目录到库中并登记为本地项目。冲突时不会覆盖。"
+        confirmLabel="开始迁入"
+        busy={migrateBusy}
+        onCancel={() => setMigrateOpen(false)}
+        onConfirm={() => {
+          setMigrateBusy(true);
+          setMigrateError(null);
+          void api
+            .migrateProviderSkill(skill.id, replaceWithLink)
+            .then(() => {
+              setMigrateOpen(false);
+              onMigrated();
+            })
+            .catch((failure: unknown) => {
+              setMigrateError(errorMessage(failure));
+            })
+            .finally(() => setMigrateBusy(false));
+        }}
+      >
+        <label className="flex items-center gap-2 text-[12px] text-ink-2">
+          <input
+            type="checkbox"
+            checked={replaceWithLink}
+            onChange={(event) => setReplaceWithLink(event.target.checked)}
+          />
+          迁移后替换为库链接安装
+        </label>
+      </ConfirmDialog>
     </section>
   );
 }

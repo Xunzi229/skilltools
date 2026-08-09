@@ -3,12 +3,15 @@ import type {
   AppPathsInfo,
   AppSettings,
   BackupRecord,
+  BatchResult,
   CommandError,
   ExternalEditor,
   FileContent,
   FileNode,
+  InstallHealthReport,
   LibrarySkillDetail,
   LibrarySkillSummary,
+  MigrateResult,
   Project,
   Provider,
   ScanResult,
@@ -45,6 +48,7 @@ export interface SkillApi {
   listBackups(): Promise<BackupRecord[]>;
   restoreBackup(backupId: string): Promise<SkillDetail>;
   deleteBackup(backupId: string): Promise<void>;
+  cleanupBackups(): Promise<number>;
   deleteSkill(skillId: string): Promise<BackupRecord>;
   listProjects(): Promise<Project[]>;
   addLocalProject(path: string): Promise<Project>;
@@ -63,6 +67,12 @@ export interface SkillApi {
   installSkill(librarySkillId: string, provider: Provider): Promise<SkillInstallation>;
   uninstallSkill(librarySkillId: string, provider: Provider): Promise<void>;
   listInstallations(): Promise<SkillInstallation[]>;
+  scanInstallHealth(): Promise<InstallHealthReport>;
+  repairInstallations(): Promise<InstallHealthReport>;
+  migrateProviderSkill(
+    skillId: string,
+    replaceWithLink: boolean,
+  ): Promise<MigrateResult>;
   listTags(): Promise<Tag[]>;
   createTag(name: string, color: string | null): Promise<Tag>;
   renameTag(id: string, name: string): Promise<Tag>;
@@ -82,6 +92,24 @@ export interface SkillApi {
   exportLibrarySkillZip(id: string, destPath: string): Promise<void>;
   exportProjectZip(projectId: string, destPath: string): Promise<void>;
   importSkillZip(zipPath: string): Promise<Project>;
+  batchPauseSkills(skillIds: string[]): Promise<BatchResult>;
+  batchResumeSkills(skillIds: string[]): Promise<BatchResult>;
+  batchBackupSkills(skillIds: string[]): Promise<BatchResult>;
+  batchDeleteSkills(skillIds: string[]): Promise<BatchResult>;
+  batchInstallSkills(skillIds: string[], provider: Provider): Promise<BatchResult>;
+  batchUninstallSkills(
+    skillIds: string[],
+    provider: Provider,
+  ): Promise<BatchResult>;
+  batchSetSkillGroup(
+    skillIds: string[],
+    groupId: string | null,
+  ): Promise<BatchResult>;
+  batchAddSkillTags(skillIds: string[], tagId: string): Promise<BatchResult>;
+  batchMigrateProviderSkills(
+    skillIds: string[],
+    replaceWithLink: boolean,
+  ): Promise<BatchResult>;
 }
 
 const unknownError: CommandError = {
@@ -128,6 +156,7 @@ export const tauriSkillApi: SkillApi = {
   listBackups: () => call("list_backups"),
   restoreBackup: (backupId) => call("restore_backup", { backupId }),
   deleteBackup: (backupId) => call("delete_backup", { backupId }),
+  cleanupBackups: () => call("cleanup_backups"),
   deleteSkill: (skillId) => call("delete_skill", { skillId }),
   listProjects: () => call("list_projects"),
   addLocalProject: (path) => call("add_local_project", { path }),
@@ -146,6 +175,10 @@ export const tauriSkillApi: SkillApi = {
   uninstallSkill: (librarySkillId, provider) =>
     call("uninstall_skill", { librarySkillId, provider }),
   listInstallations: () => call("list_installations"),
+  scanInstallHealth: () => call("scan_install_health"),
+  repairInstallations: () => call("repair_installations"),
+  migrateProviderSkill: (skillId, replaceWithLink) =>
+    call("migrate_provider_skill", { skillId, replaceWithLink }),
   listTags: () => call("list_tags"),
   createTag: (name, color) => call("create_tag", { name, color }),
   renameTag: (id, name) => call("rename_tag", { id, name }),
@@ -168,4 +201,18 @@ export const tauriSkillApi: SkillApi = {
   exportProjectZip: (projectId, destPath) =>
     call("export_project_zip", { projectId, destPath }),
   importSkillZip: (zipPath) => call("import_skill_zip", { zipPath }),
+  batchPauseSkills: (skillIds) => call("batch_pause_skills", { skillIds }),
+  batchResumeSkills: (skillIds) => call("batch_resume_skills", { skillIds }),
+  batchBackupSkills: (skillIds) => call("batch_backup_skills", { skillIds }),
+  batchDeleteSkills: (skillIds) => call("batch_delete_skills", { skillIds }),
+  batchInstallSkills: (skillIds, provider) =>
+    call("batch_install_skills", { skillIds, provider }),
+  batchUninstallSkills: (skillIds, provider) =>
+    call("batch_uninstall_skills", { skillIds, provider }),
+  batchSetSkillGroup: (skillIds, groupId) =>
+    call("batch_set_skill_group", { skillIds, groupId }),
+  batchAddSkillTags: (skillIds, tagId) =>
+    call("batch_add_skill_tags", { skillIds, tagId }),
+  batchMigrateProviderSkills: (skillIds, replaceWithLink) =>
+    call("batch_migrate_provider_skills", { skillIds, replaceWithLink }),
 };

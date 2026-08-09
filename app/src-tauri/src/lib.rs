@@ -1,3 +1,4 @@
+mod batch;
 pub mod backup_repository;
 pub mod commands;
 pub mod error;
@@ -25,10 +26,19 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             let home_dir = app.path().home_dir()?;
             let paths = AppPaths::discover(app_data_dir, home_dir.clone());
+            let settings = settings::load_settings(&paths.app_data_dir).unwrap_or_default();
+            if let Err(error) = BackupRepository::new(paths.clone()).cleanup_backups(
+                settings.backup_retention_days,
+                settings.backup_max_count,
+            ) {
+                eprintln!("启动时清理备份失败：{error}");
+            }
             let managed = app.manage(AppState {
                 skills: SkillRepository::new(paths.clone()).into(),
                 backups: BackupRepository::new(paths.clone()).into(),
@@ -55,6 +65,7 @@ pub fn run() {
             commands::list_backups,
             commands::restore_backup,
             commands::delete_backup,
+            commands::cleanup_backups,
             commands::delete_skill,
             commands::add_local_project,
             commands::add_git_project,
@@ -69,6 +80,9 @@ pub fn run() {
             commands::install_skill,
             commands::uninstall_skill,
             commands::list_installations,
+            commands::scan_install_health,
+            commands::repair_installations,
+            commands::migrate_provider_skill,
             commands::list_tags,
             commands::create_tag,
             commands::rename_tag,
@@ -88,6 +102,15 @@ pub fn run() {
             commands::export_library_skill_zip,
             commands::export_project_zip,
             commands::import_skill_zip,
+            commands::batch_pause_skills,
+            commands::batch_resume_skills,
+            commands::batch_backup_skills,
+            commands::batch_delete_skills,
+            commands::batch_install_skills,
+            commands::batch_uninstall_skills,
+            commands::batch_set_skill_group,
+            commands::batch_add_skill_tags,
+            commands::batch_migrate_provider_skills,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|error| eprintln!("应用运行失败：{error}"));

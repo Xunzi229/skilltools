@@ -4,9 +4,11 @@ import type {
   AppPathsInfo,
   AppSettings,
   CommandError,
+  InstallHealthReport,
   Provider,
   ThemePreference,
 } from "../model/skill";
+import { APP_VERSION } from "../version";
 import { pickDirectory } from "../utils/dialogs";
 
 interface SettingsPanelProps {
@@ -20,6 +22,21 @@ const providerLabels: Record<Provider, string> = {
   codex: "Codex",
 };
 
+const healthKindLabel: Record<string, string> = {
+  missingTarget: "目标缺失",
+  notSymlink: "非符号链接",
+  brokenLink: "断链",
+  sourceMismatch: "源不匹配",
+  indexOrphan: "索引孤儿",
+  diskOrphan: "磁盘孤儿",
+};
+
+function asCommandError(err: unknown, fallback: string): CommandError {
+  return typeof err === "object" && err && "message" in err
+    ? (err as CommandError)
+    : { code: "UNKNOWN", message: fallback };
+}
+
 export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [paths, setPaths] = useState<AppPathsInfo | null>(null);
@@ -27,6 +44,11 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<CommandError | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [health, setHealth] = useState<InstallHealthReport | null>(null);
+  const [healthBusy, setHealthBusy] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,11 +61,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setError(
-            typeof err === "object" && err && "message" in err
-              ? (err as CommandError)
-              : { code: "UNKNOWN", message: "加载设置失败" },
-          );
+          setError(asCommandError(err, "加载设置失败"));
         }
       })
       .finally(() => {
@@ -66,11 +84,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
       setMessage("设置已保存");
       onSettingsSaved();
     } catch (err: unknown) {
-      setError(
-        typeof err === "object" && err && "message" in err
-          ? (err as CommandError)
-          : { code: "UNKNOWN", message: "保存设置失败" },
-      );
+      setError(asCommandError(err, "保存设置失败"));
     } finally {
       setSaving(false);
     }
@@ -113,6 +127,89 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
     });
   };
 
+  const scanHealth = async () => {
+    setHealthBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      setHealth(await api.scanInstallHealth());
+    } catch (err: unknown) {
+      setError(asCommandError(err, "健康扫描失败"));
+    } finally {
+      setHealthBusy(false);
+    }
+  };
+
+  const repairHealth = async () => {
+    setHealthBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const report = await api.repairInstallations();
+      setHealth(report);
+      setMessage(`已修复 ${report.repaired} 项安全问题`);
+      onSettingsSaved();
+    } catch (err: unknown) {
+      setError(asCommandError(err, "修复失败"));
+    } finally {
+      setHealthBusy(false);
+    }
+  };
+
+  const runCleanup = async () => {
+    setCleanupBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const deleted = await api.cleanupBackups();
+      setMessage(`已清理 ${deleted} 条备份`);
+      onSettingsSaved();
+    } catch (err: unknown) {
+      setError(asCommandError(err, "清理备份失败"));
+    } finally {
+      setCleanupBusy(false);
+    }
+  };
+
+  const checkForUpdates = async () => {
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    setError(null);
+    try {
+      const [{ check }, { relaunch }] = await Promise.all([
+        import("@tauri-apps/plugin-updater"),
+        import("@tauri-apps/plugin-process"),
+      ]);
+      const update = await check();
+      if (!update) {
+        setUpdateMessage(`已是最新版本（${APP_VERSION}）`);
+        return;
+      }
+      const ok = window.confirm(
+        `发现新版本 ${update.version}。\n\n${update.body ?? ""}\n\n立即下载并安装？\n（macOS 未签名时可能受 Gatekeeper 限制）`,
+      );
+      if (!ok) {
+        setUpdateMessage(`已发现 ${update.version}，已取消安装`);
+        return;
+      }
+      await update.downloadAndInstall();
+      setUpdateMessage("更新已安装，即将重启…");
+      await relaunch();
+    } catch (err: unknown) {
+      const text =
+        err instanceof Error
+          ? err.message
+          : typeof err === "object" && err && "message" in err
+            ? String((err as { message: unknown }).message)
+            : "检查更新失败";
+      setUpdateMessage(text);
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const repairableCount = health?.issues.filter((issue) => issue.repairable).length ?? 0;
+
   return (
     <section
       className="col-span-2 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel"
@@ -120,7 +217,9 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
     >
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         <h2 className="m-0 text-[28px] font-bold text-ink">设置</h2>
-        <p className="mt-2 text-[14px] text-ink-2">主题与本机 Skill 根目录。</p>
+        <p className="mt-2 text-[14px] text-ink-2">
+          主题、路径、安装健康、备份策略与更新（v{APP_VERSION}）。
+        </p>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {loading ? (
@@ -237,8 +336,166 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
                 })}
               </ul>
             </section>
+            <section className="mb-8">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="m-0 text-[15px] font-semibold text-ink">安装健康</h3>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+                    disabled={healthBusy}
+                    onClick={() => void scanHealth()}
+                  >
+                    {healthBusy ? "扫描中…" : "扫描"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+                    disabled={healthBusy || repairableCount === 0}
+                    onClick={() => void repairHealth()}
+                  >
+                    一键修复安全项
+                  </button>
+                </div>
+              </div>
+              <p className="mt-2 text-[12px] text-ink-3">
+                仅修复断链、索引漂移与磁盘孤儿链接；真实目录冲突不会自动覆盖。
+              </p>
+              {health && (
+                <div className="mt-3 rounded-lg border border-line px-3 py-3">
+                  <p className="m-0 text-[12px] text-ink-2">
+                    共 {health.issues.length} 项问题
+                    {health.repaired > 0 ? `，本次已修复 ${health.repaired}` : ""}
+                  </p>
+                  {health.issues.length === 0 ? (
+                    <p className="mt-2 text-[12px] text-emerald-700">安装状态正常</p>
+                  ) : (
+                    <ul className="mt-2 max-h-48 list-none overflow-auto p-0">
+                      {health.issues.map((issue) => (
+                        <li
+                          key={`${issue.kind}:${issue.targetPath}`}
+                          className="border-t border-line py-2 text-[12px] first:border-t-0"
+                        >
+                          <strong className="text-ink">
+                            {healthKindLabel[issue.kind] ?? issue.kind}
+                            {issue.repairable ? "" : "（需手动）"}
+                          </strong>
+                          <span className="ml-2 text-ink-3">
+                            {providerLabels[issue.provider]}
+                          </span>
+                          <p className="m-0 mt-1 text-ink-2">{issue.message}</p>
+                          <p className="m-0 mt-1 break-all font-mono text-[11px] text-ink-3">
+                            {issue.targetPath}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </section>
+            <section className="mb-8">
+              <h3 className="m-0 text-[15px] font-semibold text-ink">备份保留</h3>
+              <p className="mt-2 text-[12px] text-ink-3">
+                留空表示不按该维度清理。启动时会静默执行一次。
+              </p>
+              <div className="mt-3 flex flex-wrap gap-4">
+                <label className="flex flex-col gap-1 text-[12px] text-ink-2">
+                  保留天数
+                  <input
+                    type="number"
+                    min={1}
+                    className="w-28 rounded border border-line bg-panel px-2 py-1.5 text-[13px] text-ink"
+                    value={settings?.backupRetentionDays ?? ""}
+                    placeholder="永不"
+                    disabled={saving}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      const raw = event.target.value.trim();
+                      setSettings({
+                        ...settings,
+                        backupRetentionDays: raw === "" ? null : Number(raw),
+                      });
+                    }}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-[12px] text-ink-2">
+                  最大条数
+                  <input
+                    type="number"
+                    min={1}
+                    className="w-28 rounded border border-line bg-panel px-2 py-1.5 text-[13px] text-ink"
+                    value={settings?.backupMaxCount ?? ""}
+                    placeholder="不限"
+                    disabled={saving}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      const raw = event.target.value.trim();
+                      setSettings({
+                        ...settings,
+                        backupMaxCount: raw === "" ? null : Number(raw),
+                      });
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+                  disabled={saving || !settings}
+                  onClick={() => {
+                    if (!settings) return;
+                    const days = settings.backupRetentionDays;
+                    const max = settings.backupMaxCount;
+                    void save({
+                      ...settings,
+                      backupRetentionDays:
+                        days != null && Number.isFinite(days) && days > 0
+                          ? Math.floor(days)
+                          : null,
+                      backupMaxCount:
+                        max != null && Number.isFinite(max) && max > 0
+                          ? Math.floor(max)
+                          : null,
+                    });
+                  }}
+                >
+                  保存保留策略
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+                  disabled={cleanupBusy}
+                  onClick={() => void runCleanup()}
+                >
+                  {cleanupBusy ? "清理中…" : "立即清理"}
+                </button>
+              </div>
+            </section>
+            <section className="mb-8">
+              <h3 className="m-0 text-[15px] font-semibold text-ink">应用更新</h3>
+              <p className="mt-2 text-[12px] text-ink-3">
+                从 GitHub Releases 检查更新。Windows 优先可用；macOS 无签名时下载后可能受
+                Gatekeeper 限制。
+              </p>
+              <button
+                type="button"
+                className="mt-3 rounded-lg border border-line px-3 py-1.5 text-[12px] hover:bg-hover disabled:opacity-55"
+                disabled={updateBusy}
+                onClick={() => void checkForUpdates()}
+              >
+                {updateBusy ? "检查中…" : "检查更新"}
+              </button>
+              {updateMessage && (
+                <p className="mt-2 text-[12px] text-ink-2">{updateMessage}</p>
+              )}
+            </section>
             <section>
               <h3 className="m-0 text-[15px] font-semibold text-ink">应用数据</h3>
+              <p className="mt-2 text-[12px] text-ink-3">
+                标识符 com.skilltools.manager；数据目录由系统 appDataDir 决定。
+              </p>
               <p className="mt-2 break-all font-mono text-[12px] text-ink-2">
                 {paths?.appDataDir ?? "—"}
               </p>
