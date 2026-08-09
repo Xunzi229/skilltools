@@ -60,6 +60,7 @@ jobs:
         run: npm ci
 
       - name: Build and upload release
+        id: tauri
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -85,7 +86,28 @@ jobs:
           # preview/rc 的 Windows 跳过 MSI（WiX 不支持非数字 pre-release）
           args: ${{ matrix.args }}${{ startsWith(matrix.platform, 'windows') && (contains(github.ref_name, 'preview') || contains(github.ref_name, '-rc')) && ' --bundles nsis' || '' }}
           updaterJsonPreferNsis: true
-          # 仅 Windows 额外上传裸主程序 exe（便携/免安装）；与 -setup.exe 安装包区分
-          uploadPlainBinary: ${{ startsWith(matrix.platform, 'windows') }}
-          # 资源名带平台/架构，例如 Skill.Manager_0.8.0-preview.2_windows-x64-setup.exe / ..._windows-x64.exe
+          # 资源名带平台/架构，例如 Skill.Manager_0.8.0-preview.2_windows-x64-setup.exe
           releaseAssetNamePattern: "[name]_[version]_[platform]-[arch][setup][ext]"
+
+      # uploadPlainBinary 会把 [name] 固定为 binary，故改为手动上传以匹配 Skill.Manager_*_windows-x64.exe
+      - name: Upload Windows portable exe
+        if: startsWith(matrix.platform, 'windows')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $version = (Get-Content app/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $tag = if ('${{ github.ref_type }}' -eq 'tag') { '${{ github.ref_name }}' } else { "v$version" }
+          $candidates = @(
+            'app/src-tauri/target/release/app.exe',
+            'app/src-tauri/target/release/Skill Manager.exe'
+          )
+          $src = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $src) {
+            Get-ChildItem 'app/src-tauri/target/release' -Filter '*.exe' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw 'Windows portable exe not found in target/release'
+          }
+          $asset = "Skill.Manager_${version}_windows-x64.exe"
+          Copy-Item -LiteralPath $src -Destination $asset -Force
+          gh release upload $tag $asset --clobber
+          Write-Host "Uploaded $asset from $src"
