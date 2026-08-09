@@ -94,20 +94,47 @@ export function Sidebar({
   const sortedGroups = [...groups].sort((left, right) => left.order - right.order);
 
   if (collapsed) {
+    const railItem = (id: SkillFilter, label: string, title: string) => (
+      <button
+        key={id}
+        type="button"
+        className={[
+          "flex w-full flex-col items-center rounded-lg px-1 py-2 text-[11px] leading-tight transition-colors",
+          activeFilter === id
+            ? "bg-white/12 text-white"
+            : "text-slate-300 hover:bg-white/6 hover:text-white",
+        ].join(" ")}
+        aria-pressed={activeFilter === id}
+        aria-label={title}
+        title={title}
+        onClick={() => onFilterChange(id)}
+      >
+        <span className="font-medium">{label}</span>
+      </button>
+    );
+
     return (
       <aside
-        className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-3 overflow-hidden bg-sidebar px-1.5 py-4 text-slate-300"
+        className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-1 overflow-hidden bg-sidebar px-1 py-3 text-slate-300"
         aria-label="导航栏（已折叠）"
       >
         <div
-          className="grid size-9 place-items-center rounded-[10px] bg-slate-700 text-[15px] font-bold text-white"
+          className="mb-1 grid size-8 place-items-center rounded-[10px] bg-slate-700 text-[13px] font-bold text-white"
           aria-hidden="true"
         >
           S
         </div>
+        <nav className="flex w-full min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+          {railItem("library", "库", "Skill 库")}
+          {railItem("all", "本机", "已安装")}
+          {railItem("installations", "安装", "安装总览")}
+          {railItem("projects", "项目", "项目")}
+          {railItem("backups", "备份", "备份记录")}
+          {railItem("settings", "设置", "设置")}
+        </nav>
         <button
           type="button"
-          className="rounded-md border border-white/15 px-2 py-1.5 text-[11px] text-slate-200 hover:bg-white/10"
+          className="mt-1 rounded-md border border-white/15 px-2 py-1.5 text-[11px] text-slate-200 hover:bg-white/10"
           aria-expanded={false}
           aria-label="展开侧边栏"
           title="展开侧边栏"

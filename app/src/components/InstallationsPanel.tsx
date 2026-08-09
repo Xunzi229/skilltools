@@ -160,6 +160,11 @@ export function InstallationsPanel({
                 presetProviders.length === 0 ||
                 busyKey === "preset:save"
               }
+              title={
+                selectedSkillIds.length === 0
+                  ? "请先在 Skill 库勾选要保存的 Skill"
+                  : `将保存已选 ${selectedSkillIds.length} 个库 Skill`
+              }
               onClick={() =>
                 void savePreset(presetName.trim(), selectedSkillIds, presetProviders).then(
                   () => setPresetName(""),
@@ -168,6 +173,11 @@ export function InstallationsPanel({
             >
               用库勾选保存
             </button>
+            <span className="text-[12px] text-ink-3">
+              {selectedSkillIds.length > 0
+                ? `已选 ${selectedSkillIds.length} 个库 Skill`
+                : "未勾选库 Skill（可先到库列表勾选后再回来）"}
+            </span>
           </div>
           {presets.length === 0 ? (
             <p className="text-[12px] text-ink-3">暂无预设。先在库列表勾选 Skill 再保存。</p>

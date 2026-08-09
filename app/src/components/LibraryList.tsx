@@ -38,6 +38,7 @@ interface LibraryListProps {
   onCreateSkill: (name: string) => Promise<void>;
   onRetry: () => void;
   onClearBatchResult: () => void;
+  onGoToProjects?: () => void;
 }
 
 export function LibraryList({
@@ -65,6 +66,7 @@ export function LibraryList({
   onCreateSkill,
   onRetry,
   onClearBatchResult,
+  onGoToProjects,
 }: LibraryListProps) {
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
@@ -388,7 +390,20 @@ export function LibraryList({
         ) : visible.length === 0 ? (
           <div className="px-3 py-8 text-center text-[13px] text-ink-3">
             <strong className="block text-ink">暂无库 Skill</strong>
-            <span>请添加包含 SKILL.md 的项目，或调整过滤条件。</span>
+            <span className="block">
+              {skills.length === 0
+                ? "请添加包含 SKILL.md 的项目。"
+                : "没有符合当前过滤条件的 Skill。"}
+            </span>
+            {skills.length === 0 && onGoToProjects && (
+              <button
+                type="button"
+                className="mt-3 rounded-md bg-brand px-3 py-1.5 text-white"
+                onClick={onGoToProjects}
+              >
+                去项目管理
+              </button>
+            )}
           </div>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-0.5 p-0">

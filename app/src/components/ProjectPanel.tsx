@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CommandError, Project, ProjectPullResult } from "../model/skill";
 import { pickDirectory, pickSaveZip, pickZipFile } from "../utils/dialogs";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 interface ProjectPanelProps {
   projects: Project[];
@@ -50,9 +51,13 @@ export function ProjectPanel({
   const [localPath, setLocalPath] = useState("");
   const [gitUrl, setGitUrl] = useState("");
   const [pullSummary, setPullSummary] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const busy = pendingAction !== null;
+  const removeBusy =
+    removeTarget !== null && pendingAction === `project:remove:${removeTarget.id}`;
 
   return (
+    <>
     <section
       className="col-span-2 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel"
       aria-label="项目管理"
@@ -235,10 +240,10 @@ export function ProjectPanel({
                   </button>
                   <button
                     type="button"
-                    className="rounded-md bg-brand px-2.5 py-2 text-[11px] text-white disabled:opacity-55"
+                    className="rounded-md border border-red-200 px-2.5 py-2 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55"
                     aria-label={`移除 ${project.name}`}
                     disabled={busy}
-                    onClick={() => void onRemove(project.id)}
+                    onClick={() => setRemoveTarget(project)}
                   >
                     移除
                   </button>
@@ -249,5 +254,19 @@ export function ProjectPanel({
         )}
       </div>
     </section>
+    <ConfirmDialog
+      open={removeTarget !== null}
+      title={`移除项目「${removeTarget?.name ?? ""}」？`}
+      message="仅从 Skill Manager 移除引用，不会删除磁盘上的项目目录。"
+      confirmLabel="确认移除"
+      tone="danger"
+      busy={removeBusy}
+      onCancel={() => setRemoveTarget(null)}
+      onConfirm={() => {
+        if (!removeTarget) return;
+        void onRemove(removeTarget.id).then(() => setRemoveTarget(null));
+      }}
+    />
+    </>
   );
 }

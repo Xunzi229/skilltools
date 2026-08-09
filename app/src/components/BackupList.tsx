@@ -55,6 +55,8 @@ export function BackupList({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -91,15 +93,8 @@ export function BackupList({
             <button
               type="button"
               className="mt-2 rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-55"
-              disabled={pendingAction !== null}
-              onClick={() => {
-                void (async () => {
-                  for (const id of checked) {
-                    await onDelete(id);
-                  }
-                  setChecked(new Set());
-                })();
-              }}
+              disabled={pendingAction !== null || batchDeleting}
+              onClick={() => setBatchDeleteOpen(true)}
             >
               删除选中（{checked.size}）
             </button>
@@ -278,6 +273,32 @@ export function BackupList({
           if (selected) {
             void onDelete(selected.id).then(() => setDeleteOpen(false));
           }
+        }}
+      />
+      <ConfirmDialog
+        open={batchDeleteOpen && checked.size > 0}
+        title={`删除选中的 ${checked.size} 条备份？`}
+        message="将删除归档文件与索引记录，此操作不可撤销。"
+        confirmLabel="确认删除"
+        tone="danger"
+        busy={batchDeleting || pendingAction !== null}
+        onCancel={() => {
+          if (!batchDeleting) setBatchDeleteOpen(false);
+        }}
+        onConfirm={() => {
+          const ids = [...checked];
+          setBatchDeleting(true);
+          void (async () => {
+            try {
+              for (const id of ids) {
+                await onDelete(id);
+              }
+              setChecked(new Set());
+              setBatchDeleteOpen(false);
+            } finally {
+              setBatchDeleting(false);
+            }
+          })();
         }}
       />
     </>

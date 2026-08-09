@@ -190,7 +190,7 @@ function App({ api = tauriSkillApi }: AppProps) {
     });
   };
 
-  const sidebarWidth = sidebarCollapsed ? 44 : 240;
+  const sidebarWidth = sidebarCollapsed ? 52 : 240;
   const listWidth = listCollapsed ? 44 : 340;
 
   return (
@@ -217,7 +217,10 @@ function App({ api = tauriSkillApi }: AppProps) {
           setFilter(nextFilter);
           setSearch("");
           setSkillSelectedIds(new Set());
-          setLibrarySelectedIds(new Set());
+          // 安装预设依赖库勾选：切到「安装」时保留
+          if (nextFilter !== "installations") {
+            setLibrarySelectedIds(new Set());
+          }
           clearBatchResult();
         }}
         onRefresh={() => {
@@ -348,6 +351,13 @@ function App({ api = tauriSkillApi }: AppProps) {
             }}
             onRetry={() => void library.refresh()}
             onClearBatchResult={clearBatchResult}
+            onGoToProjects={() => {
+              setFilter("projects");
+              setSearch("");
+              setSkillSelectedIds(new Set());
+              setLibrarySelectedIds(new Set());
+              clearBatchResult();
+            }}
           />
           <LibraryDetail
             api={api}

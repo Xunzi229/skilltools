@@ -167,6 +167,7 @@ export function SkillMetaForm({
   );
   const [addChoice, setAddChoice] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     const draft = buildDraft(markdown, name, description);
@@ -175,6 +176,7 @@ export function SkillMetaForm({
     setVisibleOptional(draft.visibleOptional);
     setAddChoice("");
     setMessage(null);
+    setExpanded(false);
   }, [markdown, name, description]);
 
   const availableOptional = OPTIONAL_FIELDS.filter(
@@ -204,6 +206,7 @@ export function SkillMetaForm({
         const collected = collectFields(standard, visibleOptional, custom);
         if (typeof collected === "string") {
           setMessage(collected);
+          setExpanded(true);
           return;
         }
         void onSave(collected)
@@ -220,7 +223,25 @@ export function SkillMetaForm({
           });
       }}
     >
-      <h4 className="m-0 text-[13px] font-semibold text-ink">SKILL.md 元数据</h4>
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left hover:bg-hover"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <span className="text-[12px] text-ink-3" aria-hidden="true">
+            {expanded ? "▾" : "▸"}
+          </span>
+          <h4 className="m-0 text-[13px] font-semibold text-ink">SKILL.md 元数据</h4>
+          {!expanded && (
+            <span className="truncate text-[11px] text-ink-3">点击展开编辑</span>
+          )}
+        </button>
+      </div>
+
+      {expanded && (
+        <>
       <p className="mt-1 mb-0 text-[11px] text-ink-3">
         默认仅显示已有字段；可通过下方「添加」扩展可选/自定义字段
       </p>
@@ -346,6 +367,8 @@ export function SkillMetaForm({
         </button>
         {message && <span className="text-[12px] text-ink-2">{message}</span>}
       </div>
+        </>
+      )}
     </form>
   );
 }

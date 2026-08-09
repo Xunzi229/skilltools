@@ -846,6 +846,18 @@ describe("Skill Manager", () => {
     ).toBeInTheDocument();
   });
 
+  it("从库勾选后进入安装页仍保留勾选数量", async () => {
+    await renderLibrary();
+    const user = userEvent.setup();
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+    await user.click(within(list).getByRole("checkbox", { name: "选择 reviewer" }));
+
+    const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
+    await user.click(within(navigation).getByRole("button", { name: /^安装/ }));
+
+    expect(await screen.findByText("已选 1 个库 Skill")).toBeInTheDocument();
+  });
+
   it("点击父 Skill 可收起和展开子 Skill", async () => {
     const user = userEvent.setup();
     await renderLibrary();

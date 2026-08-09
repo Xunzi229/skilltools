@@ -24,12 +24,14 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) {
       return;
     }
-    confirmRef.current?.focus();
+    // 危险操作默认聚焦「取消」，降低误确认风险
+    (tone === "danger" ? cancelRef : confirmRef).current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !busy) {
         onCancel();
@@ -37,7 +39,7 @@ export function ConfirmDialog({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [busy, onCancel, open]);
+  }, [busy, onCancel, open, tone]);
 
   if (!open) {
     return null;
@@ -58,6 +60,7 @@ export function ConfirmDialog({
         {children ? <div className="mt-3">{children}</div> : null}
         <div className="mt-5 flex justify-end gap-2">
           <button
+            ref={cancelRef}
             type="button"
             className="rounded-lg border border-line px-3 py-1.5 text-[13px] text-ink hover:bg-hover disabled:opacity-55"
             disabled={busy}
