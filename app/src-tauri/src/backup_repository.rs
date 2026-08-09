@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::fs_ops::{
-    copy_directory, directory_manifest, manifest_checksum, rename_directory_no_replace,
-    ManifestEntry,
+    copy_directory, directory_manifest, is_symlink_link, manifest_checksum,
+    remove_directory_symlink, rename_directory_no_replace, ManifestEntry,
 };
 use crate::json_store::{read_json, write_json};
 use crate::model::{BackupReason, BackupRecord, SkillDetail, SkillStatus};
@@ -397,7 +397,7 @@ impl BackupRepository {
                 records.retain(|record| record.skill_id != skill_id);
                 skill_repository.write_pause_records(&records)?;
             }
-            fs::remove_file(&detail.current_path)?;
+            remove_directory_symlink(&detail.current_path)?;
             after_freeze();
             return Ok(backup);
         }
@@ -499,7 +499,7 @@ where
 
 fn is_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path)
-        .map(|metadata| metadata.file_type().is_symlink())
+        .map(|metadata| is_symlink_link(&metadata))
         .unwrap_or(false)
 }
 
@@ -750,6 +750,48 @@ mod tests {
         let record = repository.delete_skill(&id).unwrap();
 
         assert!(!link.exists());
+        assert!(outside.path().join("SKILL.md").exists());
+        assert_eq!(
+            fs::read_to_string(outside.path().join("keep.txt")).unwrap(),
+            "keep"
+        );
+        assert_eq!(
+            fs::read_to_string(record.archive_path.join(".skill-manager-symlink-target")).unwrap(),
+            outside.path().to_string_lossy()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn delete_provider_directory_symlink_removes_only_the_link_on_windows() {
+        use std::os::windows::fs::symlink_dir;
+
+        let base = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("SKILL.md"), "# Keep Me").unwrap();
+        fs::write(outside.path().join("keep.txt"), "keep").unwrap();
+        let paths = AppPaths::for_test(base.path());
+        fs::create_dir_all(&paths.skill_roots[0].path).unwrap();
+        let link = paths.skill_roots[0].path.join("linked-skill");
+        if let Err(error) = symlink_dir(outside.path(), &link) {
+            let message = error.to_string();
+            if message.contains("特权")
+                || message.contains("privilege")
+                || message.contains("os error 1314")
+            {
+                eprintln!("skip: creating directory symlink requires privilege: {message}");
+                return;
+            }
+            panic!("symlink_dir failed: {message}");
+        }
+        let id = SkillRepository::new(paths.clone()).scan().unwrap()[0]
+            .id
+            .clone();
+        let repository = BackupRepository::new(paths);
+
+        let record = repository.delete_skill(&id).unwrap();
+
+        assert!(fs::symlink_metadata(&link).is_err());
         assert!(outside.path().join("SKILL.md").exists());
         assert_eq!(
             fs::read_to_string(outside.path().join("keep.txt")).unwrap(),

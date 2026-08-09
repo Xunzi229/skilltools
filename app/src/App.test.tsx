@@ -1052,13 +1052,17 @@ describe("Skill Manager", () => {
         "reviewer",
       ),
     );
-    const toggle = screen.getByRole("checkbox", { name: "安装到 Cursor" });
+    const targets = screen.getByRole("region", { name: "安装目标" });
+    const toggle = within(targets).getByRole("checkbox", { name: "安装到 Cursor" });
     await user.click(toggle);
     expect(toggle).toBeChecked();
-    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(within(targets).getByRole("button", { name: "取消" })).toBeInTheDocument();
+    expect(within(targets).getByRole("button", { name: "应用" })).toBeInTheDocument();
+    await user.click(within(targets).getByRole("button", { name: "取消" }));
 
     expect(toggle).not.toBeChecked();
     expect(installSkill).not.toHaveBeenCalled();
+    expect(within(targets).queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
   });
 
   it("项目面板展示名称与更新/拉取时间，以及添加与拉取错误", async () => {

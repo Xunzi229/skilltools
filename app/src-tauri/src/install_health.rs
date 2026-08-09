@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 
 use crate::error::AppError;
+use crate::fs_ops::{is_symlink_link, remove_directory_symlink};
 use crate::library_repository::LibraryIndex;
 use crate::model::{InstallHealthIssue, InstallHealthKind, InstallHealthReport};
 use crate::paths::AppPaths;
@@ -27,7 +28,7 @@ pub fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<Inst
                 message: "索引中的安装目标不存在".into(),
                 repairable: true,
             }),
-            Ok(metadata) if !metadata.file_type().is_symlink() => issues.push(InstallHealthIssue {
+            Ok(metadata) if !is_symlink_link(&metadata) => issues.push(InstallHealthIssue {
                 kind: InstallHealthKind::NotSymlink,
                 provider: installation.provider,
                 library_skill_id: Some(installation.library_skill_id.clone()),
@@ -88,7 +89,7 @@ pub fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<Inst
             let Ok(metadata) = fs::symlink_metadata(&path) else {
                 continue;
             };
-            if !metadata.file_type().is_symlink() {
+            if !is_symlink_link(&metadata) {
                 continue;
             }
             if indexed_targets.contains(&path) {
@@ -134,8 +135,8 @@ pub fn repair_index(
                     InstallHealthKind::BrokenLink | InstallHealthKind::SourceMismatch
                 ) {
                     if let Ok(metadata) = fs::symlink_metadata(&issue.target_path) {
-                        if metadata.file_type().is_symlink() {
-                            let _ = fs::remove_file(&issue.target_path);
+                        if is_symlink_link(&metadata) {
+                            let _ = remove_directory_symlink(&issue.target_path);
                         }
                     }
                 }
@@ -153,8 +154,8 @@ pub fn repair_index(
             }
             InstallHealthKind::DiskOrphan => {
                 if let Ok(metadata) = fs::symlink_metadata(&issue.target_path) {
-                    if metadata.file_type().is_symlink() {
-                        fs::remove_file(&issue.target_path)?;
+                    if is_symlink_link(&metadata) {
+                        remove_directory_symlink(&issue.target_path)?;
                         repaired += 1;
                     }
                 }

@@ -39,6 +39,10 @@ function sameProviders(left: Provider[], right: Provider[]) {
   return left.every((item) => rightSet.has(item));
 }
 
+function providersKey(providers: Provider[]) {
+  return [...providers].sort().join(",");
+}
+
 export function TargetSelector({
   installedProviders,
   disabled = false,
@@ -46,12 +50,18 @@ export function TargetSelector({
 }: TargetSelectorProps) {
   const [draft, setDraft] = useState<Provider[]>(installedProviders);
   const [applying, setApplying] = useState(false);
+  const installedKey = useMemo(
+    () => providersKey(installedProviders),
+    [installedProviders],
+  );
 
+  // 仅在已安装集合「内容」变化或应用结束时同步草稿；用 installedKey 忽略父组件数组引用抖动。
   useEffect(() => {
     if (!applying) {
       setDraft(installedProviders);
     }
-  }, [installedProviders, applying]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync by installedKey, not array identity
+  }, [installedKey, applying]);
 
   const dirty = useMemo(
     () => !sameProviders(draft, installedProviders),
@@ -59,20 +69,24 @@ export function TargetSelector({
   );
   const busy = disabled || applying;
 
+  const resetDraft = () => {
+    setDraft(installedProviders);
+  };
+
   return (
     <section aria-label="安装目标">
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h3 className="text-[13px] font-semibold text-ink">安装目标</h3>
           <p className="mt-0.5 text-[12px] text-ink-2">选择要安装此 Skill 的工具目录</p>
         </div>
         {dirty && (
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
               className="macos-btn-ghost macos-btn-sm"
-              disabled={busy}
-              onClick={() => setDraft(installedProviders)}
+              disabled={disabled}
+              onClick={resetDraft}
             >
               取消
             </button>

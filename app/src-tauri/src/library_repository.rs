@@ -1187,6 +1187,42 @@ mod tests {
         assert!(installation.target_path.is_dir());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn uninstall_removes_directory_symlink_on_windows() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths);
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let installation = match repository.install_skill(&skill_id, Provider::Claude) {
+            Ok(installation) => installation,
+            Err(error) => {
+                let message = error.to_string();
+                if message.contains("特权")
+                    || message.contains("privilege")
+                    || message.contains("os error 1314")
+                {
+                    eprintln!("skip: creating directory symlink requires privilege: {message}");
+                    return;
+                }
+                panic!("install_skill failed: {message}");
+            }
+        };
+        let source_marker = installation.source_path.join("SKILL.md");
+        assert!(source_marker.is_file());
+
+        repository
+            .uninstall_skill(&skill_id, Provider::Claude)
+            .unwrap();
+
+        assert!(fs::symlink_metadata(&installation.target_path).is_err());
+        assert!(source_marker.is_file(), "卸载不得删除库内目标文件");
+        assert!(repository.list_installations().unwrap().is_empty());
+    }
+
     #[test]
     fn install_rejects_skill_name_that_escapes_provider_root() {
         let base = tempdir().unwrap();

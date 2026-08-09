@@ -5,10 +5,11 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::fs_ops::{is_symlink_link, remove_directory_symlink};
 use crate::library_repository::{
-    adopt_existing_installations, ensure_project_path_is_new, project_for_source,
-    prune_missing_installations, provider_order, safe_skill_target, scan_project,
-    sync_installation_statuses, create_directory_symlink, LibraryRepository,
+    adopt_existing_installations, create_directory_symlink, ensure_project_path_is_new,
+    project_for_source, prune_missing_installations, provider_order, safe_skill_target,
+    scan_project, sync_installation_statuses, LibraryRepository,
 };
 use crate::model::{
     DuplicateSkillGroup, InstallHealthReport, InstallOverview, MigrateResult, ProjectSourceType,
@@ -57,7 +58,7 @@ impl LibraryRepository {
             None => safe_skill_target(root, &skill.name)?,
         };
         let old_link = match fs::symlink_metadata(&target_path) {
-            Ok(metadata) if !metadata.file_type().is_symlink() => {
+            Ok(metadata) if !is_symlink_link(&metadata) => {
                 return Err(AppError::TargetConflict {
                     path: target_path.display().to_string(),
                 });
@@ -73,7 +74,7 @@ impl LibraryRepository {
         };
 
         if old_link.is_some() {
-            fs::remove_file(&target_path)?;
+            remove_directory_symlink(&target_path)?;
         }
         if let Err(error) = create_directory_symlink(&source_path, &target_path) {
             if let Some(old_target) = old_link {
@@ -101,9 +102,11 @@ impl LibraryRepository {
         }
         sync_installation_statuses(&mut index);
         if let Err(error) = self.write_index(&index) {
-            fs::remove_file(&target_path).map_err(|rollback_error| AppError::RollbackFailed {
-                original_error: error.to_string(),
-                rollback_error: rollback_error.to_string(),
+            remove_directory_symlink(&target_path).map_err(|rollback_error| {
+                AppError::RollbackFailed {
+                    original_error: error.to_string(),
+                    rollback_error: rollback_error.to_string(),
+                }
             })?;
             if let Some(old_target) = old_link {
                 create_directory_symlink(&old_target, &target_path).map_err(|rollback_error| {
@@ -145,7 +148,7 @@ impl LibraryRepository {
             None => safe_skill_target(root, &skill_name)?,
         };
         match fs::symlink_metadata(&target_path) {
-            Ok(metadata) if !metadata.file_type().is_symlink() => {
+            Ok(metadata) if !is_symlink_link(&metadata) => {
                 return Err(AppError::TargetConflict {
                     path: target_path.display().to_string(),
                 });
@@ -155,7 +158,7 @@ impl LibraryRepository {
                     path: target_path.display().to_string(),
                 });
             }
-            Ok(_) => fs::remove_file(&target_path)?,
+            Ok(_) => remove_directory_symlink(&target_path)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }

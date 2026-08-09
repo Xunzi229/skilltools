@@ -12,6 +12,15 @@ describe("normalizeCommandError", () => {
     ).toEqual({ code: "PATH_DENIED", message: "拒绝访问" });
   });
 
+  it("surfaces backend IO uninstall/link-delete messages as-is", () => {
+    const message =
+      "文件操作失败：删除安装链接失败（C:\\\\skills\\\\demo）：拒绝访问。(os error 5)";
+    expect(normalizeCommandError({ code: "IO", message })).toEqual({
+      code: "IO",
+      message,
+    });
+  });
+
   it("accepts plain string errors from Tauri plugins", () => {
     expect(
       normalizeCommandError("Could not fetch a valid release JSON from the remote"),

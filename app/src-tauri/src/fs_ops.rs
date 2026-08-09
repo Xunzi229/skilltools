@@ -227,6 +227,116 @@ fn hex_digest(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// 是否为应只删链接本身的符号链接/junction（不含普通目录/文件）。
+pub(crate) fn is_symlink_link(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // Junction / mount point：带 REPARSE_POINT，但 `is_symlink()` 为 false。
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// 删除目录/文件符号链接（或 Windows junction）本身，绝不跟随到目标内容。
+/// Windows 上目录链接必须用 `remove_dir`；误用 `remove_file` 会报拒绝访问 (os error 5)。
+pub(crate) fn remove_directory_symlink(path: &Path) -> Result<(), AppError> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !is_symlink_link(&metadata) {
+        return Err(AppError::TargetConflict {
+            path: path.display().to_string(),
+        });
+    }
+
+    #[cfg(windows)]
+    {
+        clear_reparse_point_readonly(path);
+        let remove_result = match classify_windows_link(&metadata) {
+            SymlinkKind::Directory => fs::remove_dir(path),
+            SymlinkKind::File => fs::remove_file(path),
+        };
+        match remove_result {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => {
+                fs::remove_file(path).map_err(|error| map_link_remove_error(path, error))
+            }
+            Err(error) => Err(map_link_remove_error(path, error)),
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        fs::remove_file(path).map_err(|error| map_link_remove_error(path, error))
+    }
+}
+
+fn map_link_remove_error(path: &Path, error: std::io::Error) -> AppError {
+    AppError::Io {
+        message: format!(
+            "删除安装链接失败（{}）：{}",
+            path.display(),
+            error
+        ),
+    }
+}
+
+#[cfg(windows)]
+fn classify_windows_link(metadata: &fs::Metadata) -> SymlinkKind {
+    use std::os::windows::fs::{FileTypeExt, MetadataExt};
+
+    let file_type = metadata.file_type();
+    if file_type.is_symlink_file() {
+        return SymlinkKind::File;
+    }
+    if file_type.is_symlink_dir() {
+        return SymlinkKind::Directory;
+    }
+    // Junction 等目录 reparse point：按目录链接删除。
+    const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+    if metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        SymlinkKind::Directory
+    } else {
+        SymlinkKind::File
+    }
+}
+
+/// 仅清除链接自身的只读属性，不跟随目标（`fs::set_permissions` 会穿透 symlink）。
+#[cfg(windows)]
+fn clear_reparse_point_readonly(path: &Path) {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileAttributesW(lp_file_name: *const u16) -> u32;
+        fn SetFileAttributesW(lp_file_name: *const u16, dw_file_attributes: u32) -> i32;
+    }
+
+    const INVALID_FILE_ATTRIBUTES: u32 = u32::MAX;
+    const FILE_ATTRIBUTE_READONLY: u32 = 0x1;
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let attrs = GetFileAttributesW(wide.as_ptr());
+        if attrs == INVALID_FILE_ATTRIBUTES {
+            return;
+        }
+        if attrs & FILE_ATTRIBUTE_READONLY != 0 {
+            let _ = SetFileAttributesW(wide.as_ptr(), attrs & !FILE_ATTRIBUTE_READONLY);
+        }
+    }
+}
+
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SymlinkKind {
@@ -260,7 +370,10 @@ fn copy_symlink(source: &Path, target: &Path, _file_type: &fs::FileType) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use super::{dispatch_symlink_copy, SymlinkKind};
+    use super::{dispatch_symlink_copy, remove_directory_symlink, SymlinkKind};
+    use crate::error::AppError;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn symlink_copy_dispatch_uses_link_kind_without_target_probe() {
@@ -280,6 +393,69 @@ mod tests {
         )
         .unwrap();
         assert_eq!(selected, "file");
+    }
+
+    #[test]
+    fn remove_directory_symlink_rejects_real_directory() {
+        let dir = tempdir().unwrap();
+        let err = remove_directory_symlink(dir.path()).unwrap_err();
+        assert!(matches!(err, AppError::TargetConflict { .. }));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn remove_directory_symlink_removes_dir_link_keeps_target() {
+        use std::os::windows::fs::symlink_dir;
+
+        let base = tempdir().unwrap();
+        let target = base.path().join("target");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("SKILL.md"), "# keep").unwrap();
+        let link = base.path().join("link");
+        if let Err(error) = symlink_dir(&target, &link) {
+            let message = error.to_string();
+            if message.contains("特权")
+                || message.contains("privilege")
+                || message.contains("os error 1314")
+            {
+                eprintln!("skip: creating directory symlink requires privilege: {message}");
+                return;
+            }
+            panic!("symlink_dir failed: {message}");
+        }
+
+        remove_directory_symlink(&link).unwrap();
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert!(target.join("SKILL.md").is_file());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn remove_directory_symlink_removes_junction_keeps_target() {
+        let base = tempdir().unwrap();
+        let target = base.path().join("target");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("SKILL.md"), "# keep").unwrap();
+        let link = base.path().join("junction");
+        let status = std::process::Command::new("cmd")
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                &link.to_string_lossy(),
+                &target.to_string_lossy(),
+            ])
+            .status()
+            .expect("spawn mklink");
+        assert!(status.success(), "mklink /J failed: {status}");
+        assert!(
+            super::is_symlink_link(&fs::symlink_metadata(&link).unwrap()),
+            "junction should be treated as a directory link"
+        );
+
+        remove_directory_symlink(&link).unwrap();
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert!(target.join("SKILL.md").is_file(), "不得删除 junction 目标内容");
     }
 }
 
