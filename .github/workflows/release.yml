@@ -86,7 +86,7 @@ jobs:
           # preview/rc 的 Windows 跳过 MSI（WiX 不支持非数字 pre-release）
           args: ${{ matrix.args }}${{ startsWith(matrix.platform, 'windows') && (contains(github.ref_name, 'preview') || contains(github.ref_name, '-rc')) && ' --bundles nsis' || '' }}
           updaterJsonPreferNsis: true
-          # 资源名带平台/架构，例如 Skill.Manager_0.8.0-preview.2_windows-x64-setup.exe
+          # 资源名带平台/架构，例如 Skill.Manager_*_windows-x64-setup.exe
           releaseAssetNamePattern: "[name]_[version]_[platform]-[arch][setup][ext]"
 
       # uploadPlainBinary 会把 [name] 固定为 binary，故改为手动上传以匹配 Skill.Manager_*_windows-x64.exe
