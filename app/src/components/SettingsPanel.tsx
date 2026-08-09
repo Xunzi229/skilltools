@@ -27,6 +27,8 @@ import {
 interface SettingsPanelProps {
   api: SkillApi;
   onSettingsSaved: () => void;
+  /** 备份列表变更（如清理）后回调，仅刷新备份计数 */
+  onBackupsChanged?: () => void;
 }
 
 const providerLabels: Record<Provider, string> = {
@@ -41,7 +43,11 @@ function asCommandError(err: unknown, fallback: string): CommandError {
     : { code: "UNKNOWN", message: fallback };
 }
 
-export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
+export function SettingsPanel({
+  api,
+  onSettingsSaved,
+  onBackupsChanged,
+}: SettingsPanelProps) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [paths, setPaths] = useState<AppPathsInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -142,7 +148,7 @@ export function SettingsPanel({ api, onSettingsSaved }: SettingsPanelProps) {
     try {
       const deleted = await api.cleanupBackups();
       setMessage(`已清理 ${deleted} 条备份`);
-      onSettingsSaved();
+      onBackupsChanged?.();
     } catch (err: unknown) {
       setError(asCommandError(err, "清理备份失败"));
     } finally {

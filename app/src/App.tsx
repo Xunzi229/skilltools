@@ -94,6 +94,13 @@ function App({ api = tauriSkillApi }: AppProps) {
   const library = useLibrary(api);
   const installations = useInstallations(api);
 
+  /** 库/安装/Provider 任一源变更后静默同步：侧栏计数、列表徽章、安装总览等，不闪整页 loading */
+  const syncAfterLibraryChange = () => {
+    void library.refresh({ silent: true });
+    void refresh({ silent: true });
+    void installations.refresh({ silent: true });
+  };
+
   useEffect(() => {
     void api
       .getSettings()
@@ -109,10 +116,6 @@ function App({ api = tauriSkillApi }: AppProps) {
         });
       });
   }, [api]);
-
-  useEffect(() => {
-    void installations.refresh();
-  }, [library.librarySkills, installations.refresh]);
 
   const visibleSkills = useMemo(() => {
     if (
@@ -252,9 +255,10 @@ function App({ api = tauriSkillApi }: AppProps) {
         <SettingsPanel
           api={api}
           onSettingsSaved={() => {
-            void refresh();
-            void library.refresh();
-            void installations.refresh();
+            syncAfterLibraryChange();
+          }}
+          onBackupsChanged={() => {
+            void loadBackups();
           }}
         />
       ) : filter === "installations" ? (
@@ -263,9 +267,7 @@ function App({ api = tauriSkillApi }: AppProps) {
           librarySkills={library.librarySkills}
           selectedSkillIds={[...librarySelectedIds]}
           onChanged={() => {
-            void library.refresh();
-            void refresh();
-            void installations.refresh();
+            syncAfterLibraryChange();
           }}
         />
       ) : filter === "projects" ? (
@@ -279,8 +281,17 @@ function App({ api = tauriSkillApi }: AppProps) {
           onAddGit={library.addGitProject}
           onRetryGitImport={library.retryGitImport}
           onDismissGitImport={library.dismissGitImport}
-          onPull={library.pullGitProject}
-          onRemove={library.removeProject}
+          onPull={async (id) => {
+            const result = await library.pullGitProject(id);
+            if (result !== undefined) {
+              syncAfterLibraryChange();
+            }
+            return result;
+          }}
+          onRemove={async (id) => {
+            await library.removeProject(id);
+            syncAfterLibraryChange();
+          }}
           onImportZip={library.importSkillZip}
           onExportZip={library.exportProjectZip}
           onClearError={library.clearActionError}
@@ -293,7 +304,12 @@ function App({ api = tauriSkillApi }: AppProps) {
           actionError={actionError}
           pendingAction={pendingAction}
           onRetry={() => void loadBackups()}
-          onRestore={restoreBackup}
+          onRestore={async (id) => {
+            await restoreBackup(id);
+            // restoreBackup 已 refresh skills + loadBackups；补齐库/安装索引
+            void library.refresh({ silent: true });
+            void installations.refresh({ silent: true });
+          }}
           onDelete={deleteBackup}
           onClearActionError={clearActionError}
         />
@@ -321,31 +337,33 @@ function App({ api = tauriSkillApi }: AppProps) {
               const ids = [...librarySelectedIds];
               if (batchBusy || ids.length === 0) return;
               void batchInstallSkills(ids, provider).then(() => {
-                void library.refresh();
-                void installations.refresh();
+                syncAfterLibraryChange();
               });
             }}
             onBatchUninstall={(provider: Provider) => {
               const ids = [...librarySelectedIds];
               if (batchBusy || ids.length === 0) return;
               void batchUninstallSkills(ids, provider).then(() => {
-                void library.refresh();
-                void installations.refresh();
+                syncAfterLibraryChange();
               });
             }}
             onBatchSetGroup={(groupId) => {
               const ids = [...librarySelectedIds];
               if (batchBusy || ids.length === 0) return;
-              void batchSetSkillGroup(ids, groupId).then(() => void library.refresh());
+              void batchSetSkillGroup(ids, groupId).then(() =>
+                void library.refresh({ silent: true }),
+              );
             }}
             onBatchAddTag={(tagId) => {
               const ids = [...librarySelectedIds];
               if (batchBusy || ids.length === 0) return;
-              void batchAddSkillTags(ids, tagId).then(() => void library.refresh());
+              void batchAddSkillTags(ids, tagId).then(() =>
+                void library.refresh({ silent: true }),
+              );
             }}
             onCreateSkill={async (name) => {
               await library.createLibrarySkill(name, "");
-              void installations.refresh();
+              void installations.refresh({ silent: true });
             }}
             onRetry={() => void library.refresh()}
             onClearBatchResult={clearBatchResult}
@@ -373,11 +391,13 @@ function App({ api = tauriSkillApi }: AppProps) {
             }
             onInstall={async (id, provider) => {
               await library.installSkill(id, provider);
-              void installations.refresh();
+              void refresh({ silent: true });
+              void installations.refresh({ silent: true });
             }}
             onUninstall={async (id, provider) => {
               await library.uninstallSkill(id, provider);
-              void installations.refresh();
+              void refresh({ silent: true });
+              void installations.refresh({ silent: true });
             }}
             onExportZip={library.exportLibrarySkillZip}
             onRename={async (id, newName) => {
@@ -385,10 +405,14 @@ function App({ api = tauriSkillApi }: AppProps) {
             }}
             onDelete={async (id) => {
               await library.deleteLibrarySkill(id);
-              void installations.refresh();
+              void refresh({ silent: true });
+              void installations.refresh({ silent: true });
             }}
             onClearError={library.clearActionError}
-            onMetadataSaved={() => void library.refresh({ silent: true })}
+            onMetadataSaved={() => {
+              void library.refresh({ silent: true });
+              void refresh({ silent: true });
+            }}
           />
         </>
       ) : (
@@ -414,18 +438,18 @@ function App({ api = tauriSkillApi }: AppProps) {
             onBatchPause={() => {
               const ids = [...skillSelectedIds];
               if (batchBusy || ids.length === 0) return;
-              void batchPauseSkills(ids).then(() => void refresh());
+              void batchPauseSkills(ids).then(() => void refresh({ silent: true }));
             }}
             onBatchResume={() => {
               const ids = [...skillSelectedIds];
               if (batchBusy || ids.length === 0) return;
-              void batchResumeSkills(ids).then(() => void refresh());
+              void batchResumeSkills(ids).then(() => void refresh({ silent: true }));
             }}
             onBatchBackup={() => {
               const ids = [...skillSelectedIds];
               if (batchBusy || ids.length === 0) return;
               void batchBackupSkills(ids).then(() => {
-                void refresh();
+                void refresh({ silent: true });
                 void loadBackups();
               });
             }}
@@ -434,7 +458,7 @@ function App({ api = tauriSkillApi }: AppProps) {
               if (batchBusy || ids.length === 0) return;
               void batchDeleteSkills(ids).then(() => {
                 setSkillSelectedIds(new Set());
-                void refresh();
+                syncAfterLibraryChange();
                 void loadBackups();
               });
             }}
@@ -442,8 +466,7 @@ function App({ api = tauriSkillApi }: AppProps) {
               const ids = [...skillSelectedIds];
               if (batchBusy || ids.length === 0) return;
               void batchMigrateProviderSkills(ids, replaceWithLink).then(() => {
-                void refresh();
-                void library.refresh();
+                syncAfterLibraryChange();
               });
             }}
             onRetry={() => void refresh()}
@@ -459,14 +482,20 @@ function App({ api = tauriSkillApi }: AppProps) {
             onPause={pauseSkill}
             onResume={resumeSkill}
             onBackup={createBackup}
-            onDelete={deleteSkill}
+            onDelete={async (id) => {
+              await deleteSkill(id);
+              // deleteSkill 已 refresh skills(clearSelection) + loadBackups；补齐库/安装索引
+              void library.refresh({ silent: true });
+              void installations.refresh({ silent: true });
+            }}
             onMigrated={() => {
-              void refresh();
-              void library.refresh();
-              void installations.refresh();
+              syncAfterLibraryChange();
             }}
             onClearActionError={clearActionError}
-            onMetadataSaved={() => void refresh()}
+            onMetadataSaved={() => {
+              void refresh({ silent: true });
+              void library.refresh({ silent: true });
+            }}
           />
         </>
       )}

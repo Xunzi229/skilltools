@@ -73,6 +73,14 @@ export function LibraryList({
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+
+  const selectionActive = selectionMode || selectedIds.size > 0;
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    onClearSelection();
+  };
 
   const filtered = useMemo(() => {
     return skills.filter((skill) => {
@@ -214,6 +222,21 @@ export function LibraryList({
             <p className="mt-1 text-[12px] text-ink-2">浏览和管理可用的 Skills</p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              className="macos-btn-ghost macos-btn-sm"
+              aria-pressed={selectionActive}
+              disabled={batchBusy}
+              onClick={() => {
+                if (selectionActive) {
+                  exitSelectionMode();
+                } else {
+                  setSelectionMode(true);
+                }
+              }}
+            >
+              {selectionActive ? "完成" : "选择"}
+            </button>
             <button
               type="button"
               className="macos-btn-primary"
@@ -392,11 +415,17 @@ export function LibraryList({
               const expandable = childCount > 0;
               const expanded = expandable && !collapsed.has(skill.id);
               return (
-                <li key={skill.id} className="flex items-center gap-1.5">
+                <li key={skill.id} className="group flex items-center gap-1.5">
                   <input
                     type="checkbox"
-                    className="ml-1.5 size-3.5 shrink-0 accent-[var(--color-brand)]"
+                    className={[
+                      "ml-1.5 size-3.5 shrink-0 accent-[var(--color-brand)] transition-opacity",
+                      selectionActive
+                        ? "opacity-100"
+                        : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100",
+                    ].join(" ")}
                     checked={selectedIds.has(skill.id)}
+                    tabIndex={selectionActive ? 0 : -1}
                     aria-label={`选择 ${skill.name}`}
                     onChange={() => onToggleSelect(skill.id)}
                   />

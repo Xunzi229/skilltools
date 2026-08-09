@@ -114,30 +114,6 @@ export function useLibrary(api: SkillApi) {
     void loadDetail(selectedLibrarySkillId);
   }, [loadDetail, selectedLibrarySkillId]);
 
-  const patchInstalledProviders = useCallback(
-    (id: string, provider: Provider, installed: boolean) => {
-      const update = (providers: Provider[]) => {
-        if (installed) {
-          return providers.includes(provider) ? providers : [...providers, provider];
-        }
-        return providers.filter((item) => item !== provider);
-      };
-      setLibrarySkills((skills) =>
-        skills.map((skill) =>
-          skill.id === id
-            ? { ...skill, installedProviders: update(skill.installedProviders) }
-            : skill,
-        ),
-      );
-      setSelectedLibrarySkill((detail) =>
-        detail && detail.id === id
-          ? { ...detail, installedProviders: update(detail.installedProviders) }
-          : detail,
-      );
-    },
-    [],
-  );
-
   const runAction = useCallback(async <T,>(
     key: string,
     action: () => Promise<T>,
@@ -161,7 +137,7 @@ export function useLibrary(api: SkillApi) {
     async (key: string, action: () => Promise<unknown>): Promise<void> => {
       await runAction(key, async () => {
         await action();
-        await refresh();
+        await refresh({ silent: true });
       });
     },
     [refresh, runAction],
@@ -259,7 +235,7 @@ export function useLibrary(api: SkillApi) {
       setActionError(null);
       try {
         await api.installSkill(id, provider);
-        patchInstalledProviders(id, provider, true);
+        await refresh({ silent: true });
       } catch (error) {
         setActionError(normalizeCommandError(error));
         throw error;
@@ -269,7 +245,7 @@ export function useLibrary(api: SkillApi) {
       setActionError(null);
       try {
         await api.uninstallSkill(id, provider);
-        patchInstalledProviders(id, provider, false);
+        await refresh({ silent: true });
       } catch (error) {
         setActionError(normalizeCommandError(error));
         throw error;
@@ -285,7 +261,7 @@ export function useLibrary(api: SkillApi) {
     ): Promise<Tag | undefined> =>
       runAction("tag:create", async () => {
         const tag = await api.createTag(name.trim(), color);
-        await refresh();
+        await refresh({ silent: true });
         return tag;
       }),
     renameTag: (id: string, name: string, color: string | null = null) =>
@@ -311,7 +287,7 @@ export function useLibrary(api: SkillApi) {
     ): Promise<LibrarySkillSummary | undefined> =>
       runAction("library:create", async () => {
         const skill = await api.createLibrarySkill(name.trim(), description.trim(), projectId);
-        await refresh();
+        await refresh({ silent: true });
         setSelectedLibrarySkillId(skill.id);
         return skill;
       }),
@@ -321,7 +297,7 @@ export function useLibrary(api: SkillApi) {
     ): Promise<LibrarySkillSummary | undefined> =>
       runAction(`library:rename:${id}`, async () => {
         const skill = await api.renameLibrarySkill(id, newName.trim());
-        await refresh();
+        await refresh({ silent: true });
         setSelectedLibrarySkillId(skill.id);
         return skill;
       }),
@@ -337,7 +313,7 @@ export function useLibrary(api: SkillApi) {
           order ??
           groups.reduce((max, group) => Math.max(max, group.order), -1) + 1;
         const group = await api.createGroup(name.trim(), nextOrder, color);
-        await refresh();
+        await refresh({ silent: true });
         return group;
       }),
     renameGroup: (id: string, name: string) =>

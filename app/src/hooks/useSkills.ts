@@ -22,40 +22,83 @@ export function useSkills(api: SkillApi) {
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
   const [backupsError, setBackupsError] = useState<CommandError | null>(null);
-  const [detailEpoch, setDetailEpoch] = useState(0);
   const detailRequest = useRef(0);
   const pendingActionRef = useRef<string | null>(null);
+  const selectedSkillIdRef = useRef<string | null>(null);
+  selectedSkillIdRef.current = selectedSkillId;
 
-  const refresh = useCallback(async () => {
-    setListLoading(true);
-    setScanError(null);
-
-    try {
-      const result = await api.scanSkills();
-      const nextSkills = result.skills;
-      setSkills(nextSkills);
-      setScanWarnings(result.warnings);
-      setSelectedSkillId((currentId) => {
-        if (currentId && nextSkills.some((skill) => skill.id === currentId)) {
-          return currentId;
-        }
-        return nextSkills[0]?.id ?? null;
-      });
-      if (nextSkills.length === 0) {
-        detailRequest.current += 1;
-        setSelectedSkill(null);
-        setDetailLoading(false);
-        setDetailError(null);
-      } else {
-        // Force detail reload even when the selected ID stays the same.
-        setDetailEpoch((epoch) => epoch + 1);
+  const loadDetail = useCallback(
+    async (skillId: string, options?: { silent?: boolean }) => {
+      const requestId = ++detailRequest.current;
+      if (!options?.silent) {
+        setDetailLoading(true);
       }
-    } catch (error) {
-      setScanError(normalizeCommandError(error));
-    } finally {
-      setListLoading(false);
-    }
-  }, [api]);
+      setDetailError(null);
+      try {
+        const detail = await api.getSkillDetail(skillId);
+        if (requestId === detailRequest.current) {
+          setSelectedSkill(detail);
+        }
+      } catch (error: unknown) {
+        if (requestId === detailRequest.current) {
+          setSelectedSkill(null);
+          setDetailError(normalizeCommandError(error));
+        }
+      } finally {
+        if (requestId === detailRequest.current && !options?.silent) {
+          setDetailLoading(false);
+        }
+      }
+    },
+    [api],
+  );
+
+  const refresh = useCallback(
+    async (options?: {
+      silent?: boolean;
+      clearSelection?: boolean;
+    }): Promise<SkillSummary[]> => {
+      if (!options?.silent) {
+        setListLoading(true);
+      }
+      setScanError(null);
+
+      try {
+        const result = await api.scanSkills();
+        const nextSkills = result.skills;
+        setSkills(nextSkills);
+        setScanWarnings(result.warnings);
+        const currentId = options?.clearSelection
+          ? null
+          : selectedSkillIdRef.current;
+        const nextSelectedId =
+          currentId && nextSkills.some((skill) => skill.id === currentId)
+            ? currentId
+            : options?.clearSelection
+              ? null
+              : nextSkills[0]?.id ?? null;
+        setSelectedSkillId(nextSelectedId);
+        if (!nextSelectedId) {
+          detailRequest.current += 1;
+          setSelectedSkill(null);
+          setDetailLoading(false);
+          setDetailError(null);
+        } else if (nextSelectedId === currentId) {
+          // 选中项未变时 useEffect 不会重跑，需在此同步详情
+          await loadDetail(nextSelectedId, { silent: options?.silent });
+        }
+        return nextSkills;
+      } catch (error) {
+        setScanError(normalizeCommandError(error));
+        return [];
+      } finally {
+        if (!options?.silent) {
+          setListLoading(false);
+        }
+      }
+    },
+    [api, loadDetail],
+  );
 
   useEffect(() => {
     void refresh();
@@ -65,30 +108,8 @@ export function useSkills(api: SkillApi) {
     if (!selectedSkillId) {
       return;
     }
-
-    const requestId = ++detailRequest.current;
-    setDetailLoading(true);
-    setDetailError(null);
-
-    void api
-      .getSkillDetail(selectedSkillId)
-      .then((detail) => {
-        if (requestId === detailRequest.current) {
-          setSelectedSkill(detail);
-        }
-      })
-      .catch((error: unknown) => {
-        if (requestId === detailRequest.current) {
-          setSelectedSkill(null);
-          setDetailError(normalizeCommandError(error));
-        }
-      })
-      .finally(() => {
-        if (requestId === detailRequest.current) {
-          setDetailLoading(false);
-        }
-      });
-  }, [api, selectedSkillId, detailEpoch]);
+    void loadDetail(selectedSkillId);
+  }, [loadDetail, selectedSkillId]);
 
   const selectSkill = useCallback((skillId: string) => {
     setSelectedSkillId(skillId);
@@ -130,7 +151,7 @@ export function useSkills(api: SkillApi) {
     (skillId: string) =>
       runAction(`pause:${skillId}`, async () => {
         await api.pauseSkill(skillId);
-        await refresh();
+        await refresh({ silent: true });
       }),
     [api, refresh, runAction],
   );
@@ -139,7 +160,7 @@ export function useSkills(api: SkillApi) {
     (skillId: string) =>
       runAction(`resume:${skillId}`, async () => {
         await api.resumeSkill(skillId);
-        await refresh();
+        await refresh({ silent: true });
       }),
     [api, refresh, runAction],
   );
@@ -148,7 +169,7 @@ export function useSkills(api: SkillApi) {
     (skillId: string) =>
       runAction(`backup:${skillId}`, async () => {
         await api.createBackup(skillId);
-        await refresh();
+        await refresh({ silent: true });
         await loadBackups();
       }),
     [api, loadBackups, refresh, runAction],
@@ -158,37 +179,24 @@ export function useSkills(api: SkillApi) {
     (skillId: string) =>
       runAction(`delete:${skillId}`, async () => {
         await api.deleteSkill(skillId);
-        detailRequest.current += 1;
-        setSelectedSkillId(null);
-        setSelectedSkill(null);
-        setDetailLoading(false);
-        setDetailError(null);
-        const result = await api.scanSkills();
-        const nextSkills = result.skills;
-        setSkills(nextSkills);
-        setScanWarnings(result.warnings);
-        setScanError(null);
+        // 删除后保持未选中，避免 refresh 自动选中第一项
+        await refresh({ silent: true, clearSelection: true });
         await loadBackups();
       }),
-    [api, loadBackups, runAction],
+    [api, loadBackups, refresh, runAction],
   );
 
   const restoreBackup = useCallback(
     (backupId: string) =>
       runAction(`restore:${backupId}`, async () => {
         const restoredSkill = await api.restoreBackup(backupId);
-        const result = await api.scanSkills();
-        const nextSkills = result.skills;
-        setSkills(nextSkills);
-        setScanWarnings(result.warnings);
-        setScanError(null);
+        const nextSkills = await refresh({ silent: true });
         await loadBackups();
         if (nextSkills.some((skill) => skill.id === restoredSkill.id)) {
           setSelectedSkillId(restoredSkill.id);
-          setDetailEpoch((epoch) => epoch + 1);
         }
       }),
-    [api, loadBackups, runAction],
+    [api, loadBackups, refresh, runAction],
   );
 
   const deleteBackup = useCallback(

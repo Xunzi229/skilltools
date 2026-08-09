@@ -733,16 +733,32 @@ describe("Skill Manager", () => {
       .fn<() => Promise<ScanResult>>()
       .mockResolvedValueOnce(scanResult(skills))
       .mockResolvedValueOnce(scanResult([skills[1]]));
-    const user = await renderLoaded(createApi({ deleteSkill, scanSkills }));
+    const listLibrarySkills = vi.fn(async () => librarySkills);
+    const getInstallOverview = vi.fn(async () => ({
+      managed: [],
+      unmanaged: [],
+      duplicates: [],
+      health: { issues: [], repaired: 0 },
+    }));
+    const user = await renderLoaded(
+      createApi({ deleteSkill, scanSkills, listLibrarySkills, getInstallOverview }),
+    );
 
     await user.click(await screen.findByRole("button", { name: "删除" }));
     expect(deleteSkill).not.toHaveBeenCalled();
     expect(screen.getByText(/先自动备份再删除/)).toBeInTheDocument();
 
+    const libraryCallsBefore = listLibrarySkills.mock.calls.length;
+    const installCallsBefore = getInstallOverview.mock.calls.length;
+
     await user.click(screen.getByRole("button", { name: "备份并删除" }));
     await waitFor(() => expect(deleteSkill).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("选择一个 Skill 查看详情")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "brainstorming" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(listLibrarySkills.mock.calls.length).toBeGreaterThan(libraryCallsBefore);
+      expect(getInstallOverview.mock.calls.length).toBeGreaterThan(installCallsBefore);
+    });
   });
 
   it("删除处理中禁用确认按钮并阻止重复提交", async () => {
@@ -915,12 +931,35 @@ describe("Skill Manager", () => {
     await renderLibrary();
     const user = userEvent.setup();
     const list = screen.getByRole("region", { name: "库 Skill 列表" });
+    await user.click(within(list).getByRole("button", { name: "选择" }));
     await user.click(within(list).getByRole("checkbox", { name: "选择 reviewer" }));
 
     const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
     await user.click(within(navigation).getByRole("button", { name: /^安装/ }));
 
     expect(await screen.findByText("已选 1 个库 Skill")).toBeInTheDocument();
+  });
+
+  it("库列表默认隐藏勾选框，选择模式可进入退出", async () => {
+    await renderLibrary();
+    const user = userEvent.setup();
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+
+    const checkbox = within(list).getByRole("checkbox", { name: "选择 reviewer" });
+    expect(checkbox).toHaveAttribute("tabindex", "-1");
+
+    await user.click(within(list).getByRole("button", { name: "选择" }));
+    expect(within(list).getByRole("button", { name: "完成" })).toBeInTheDocument();
+    expect(checkbox).toHaveAttribute("tabindex", "0");
+
+    await user.click(within(list).getByRole("checkbox", { name: "选择 reviewer" }));
+    expect(within(list).getByText("已选 1 项")).toBeInTheDocument();
+
+    await user.click(within(list).getByRole("button", { name: "完成" }));
+    expect(within(list).getByRole("button", { name: "选择" })).toBeInTheDocument();
+    expect(within(list).queryByText("已选 1 项")).not.toBeInTheDocument();
+    expect(checkbox).toHaveAttribute("tabindex", "-1");
+    expect(checkbox).not.toBeChecked();
   });
 
   it("点击父 Skill 可收起和展开子 Skill", async () => {
@@ -1063,6 +1102,113 @@ describe("Skill Manager", () => {
     expect(toggle).not.toBeChecked();
     expect(installSkill).not.toHaveBeenCalled();
     expect(within(targets).queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
+  });
+
+  it("应用安装后静默同步侧栏已安装/Cursor/安装计数且不闪库列表骨架", async () => {
+    let libraryState = librarySkills.map((skill) => ({ ...skill, tagIds: [...skill.tagIds] }));
+    let scannedSkills = [...skills];
+    const installSkill = vi.fn(async (librarySkillId: string, provider: Provider) => {
+      libraryState = libraryState.map((skill) =>
+        skill.id === librarySkillId
+          ? {
+              ...skill,
+              installedProviders: skill.installedProviders.includes(provider)
+                ? skill.installedProviders
+                : [...skill.installedProviders, provider],
+            }
+          : skill,
+      );
+      const installed = libraryState.find((skill) => skill.id === librarySkillId)!;
+      scannedSkills = [
+        ...scannedSkills.filter((skill) => skill.id !== `${provider}:${installed.name}`),
+        {
+          id: `${provider}:${installed.name}`,
+          name: installed.name,
+          description: installed.description,
+          provider,
+          status: "active",
+          originalPath: `/tmp/${provider}/${installed.name}`,
+          currentPath: `/tmp/${provider}/${installed.name}`,
+          warnings: [],
+        },
+      ];
+      return {
+        librarySkillId,
+        provider,
+        sourcePath: installed.absolutePath,
+        targetPath: `/tmp/${provider}/${installed.name}`,
+        installedAt: "2026-08-09T00:00:00.000Z",
+      };
+    });
+    const user = userEvent.setup();
+    await renderLibrary(
+      createApi({
+        installSkill,
+        listLibrarySkills: async () => libraryState,
+        getLibrarySkillDetail: async (id) => {
+          const summary =
+            libraryState.find((skill) => skill.id === id) ?? libraryState[0];
+          return {
+            ...summary,
+            skillMarkdown: `# ${summary.name}\n`,
+            files: ["SKILL.md"],
+          };
+        },
+        scanSkills: async () => scanResult(scannedSkills),
+        getInstallOverview: async () => ({
+          managed: libraryState.flatMap((skill) =>
+            skill.installedProviders.map((provider) => ({
+              librarySkillId: skill.id,
+              provider,
+              sourcePath: skill.absolutePath,
+              targetPath: `/tmp/${provider}/${skill.name}`,
+              installedAt: "2026-08-09T00:00:00.000Z",
+            })),
+          ),
+          unmanaged: [],
+          duplicates: [],
+          health: { issues: [], repaired: 0 },
+        }),
+      }),
+    );
+
+    const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
+    expect(within(navigation).getByRole("button", { name: /^已安装/ })).toHaveTextContent("1");
+    expect(within(navigation).getByRole("button", { name: /^Cursor/ })).toHaveTextContent("1");
+    expect(within(navigation).getByRole("button", { name: /^安装/ })).toHaveTextContent("0");
+
+    await user.click(
+      await within(screen.getByRole("region", { name: "库 Skill 列表" })).findByText(
+        "reviewer",
+      ),
+    );
+    const targets = screen.getByRole("region", { name: "安装目标" });
+    await user.click(within(targets).getByRole("checkbox", { name: "安装到 Cursor" }));
+    await user.click(within(targets).getByRole("button", { name: "应用" }));
+
+    await waitFor(() => {
+      expect(within(navigation).getByRole("button", { name: /^已安装/ })).toHaveTextContent(
+        "2",
+      );
+      expect(within(navigation).getByRole("button", { name: /^Cursor/ })).toHaveTextContent(
+        "2",
+      );
+      expect(within(navigation).getByRole("button", { name: /^安装/ })).toHaveTextContent(
+        "1",
+      );
+    });
+    expect(screen.queryByText("正在加载 Skill 库…")).not.toBeInTheDocument();
+    expect(screen.queryByText("正在加载库 Skill…")).not.toBeInTheDocument();
+
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+    const reviewerRow = within(list).getByRole("button", { name: /reviewer/ });
+    expect(within(reviewerRow).getByText("已安装")).toBeInTheDocument();
+    expect(within(list).getByRole("tab", { name: /已安装/ })).toHaveTextContent("1");
+
+    await user.click(within(navigation).getByRole("button", { name: /^Cursor/ }));
+    const skillList = await screen.findByLabelText("Skill 列表");
+    expect(await within(skillList).findByText("reviewer")).toBeInTheDocument();
+    expect(within(skillList).getByText("brainstorming")).toBeInTheDocument();
   });
 
   it("项目面板展示名称与更新/拉取时间，以及添加与拉取错误", async () => {
