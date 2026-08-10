@@ -174,6 +174,7 @@ export function TranslatePreviewButton({
                   {!loading && result
                     ? ` · ${result.sourceFiles.join("、")} → ${result.targetLang}`
                     : null}
+                  {!loading && result?.fromCache ? " · 来自缓存" : null}
                   {!loading && result?.truncated ? " · 源文本已截断" : null}
                 </p>
               </div>

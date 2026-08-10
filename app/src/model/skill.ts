@@ -225,6 +225,8 @@ export interface TranslatePreview {
   truncated: boolean;
   targetLang: string;
   model: string;
+  /** 命中本地内容哈希缓存，未调用模型 */
+  fromCache?: boolean;
 }
 
 export interface AppSettings {

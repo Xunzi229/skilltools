@@ -1,10 +1,13 @@
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::error::AppError;
+use crate::json_store::{read_json_value, write_json_value};
 use crate::settings::TranslateSettings;
 use crate::skill_files::read_skill_file_at;
 
@@ -12,6 +15,8 @@ use crate::skill_files::read_skill_file_at;
 const MAX_SOURCE_CHARS: usize = 80_000;
 const HTTP_TIMEOUT_SECS: u64 = 120;
 const ERROR_BODY_SNIPPET_CHARS: usize = 400;
+const TRANSLATE_CACHE_MAX_ENTRIES: usize = 200;
+const TRANSLATE_CACHE_FILE: &str = "translate-cache.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +33,9 @@ pub struct TranslatePreview {
     pub truncated: bool,
     pub target_lang: String,
     pub model: String,
+    /// True when markdown was loaded from local content-hash cache (no model call).
+    #[serde(default)]
+    pub from_cache: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +43,25 @@ pub struct CollectedSource {
     pub prompt_body: String,
     pub source_files: Vec<String>,
     pub truncated: bool,
+    /// Hex MD5 of raw file content (before prompt wrapping / truncation).
+    pub content_md5: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct TranslateCacheStore {
+    entries: HashMap<String, TranslateCacheEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TranslateCacheEntry {
+    md5: String,
+    target_lang: String,
+    relative_path: String,
+    translated: String,
+    model: String,
+    updated_at: String,
 }
 
 /// Build OpenAI-compatible chat completions URL from a configured base URL.
@@ -112,6 +139,7 @@ pub fn collect_translate_source(
         });
     }
 
+    let content_md5 = content_md5_hex(&content);
     let header = format!("<!-- file: {relative_path} -->\n");
     let mut truncated = false;
     let mut body = content;
@@ -125,7 +153,191 @@ pub fn collect_translate_source(
         prompt_body: format!("{header}{body}"),
         source_files: vec![relative_path],
         truncated,
+        content_md5,
     })
+}
+
+/// Hex MD5 of file content bytes (UTF-8). Used as cache key material.
+pub fn content_md5_hex(content: &str) -> String {
+    md5_hex(content.as_bytes())
+}
+
+/// Minimal MD5 (RFC 1321) — avoids extra crate; local builds without cargo still keep deps stable.
+fn md5_hex(data: &[u8]) -> String {
+    let mut state = [0x6745_2301u32, 0xefcd_ab89, 0x98ba_dcfe, 0x1032_5476];
+    let bit_len = (data.len() as u64).saturating_mul(8);
+    let mut buf = data.to_vec();
+    buf.push(0x80);
+    while buf.len() % 64 != 56 {
+        buf.push(0);
+    }
+    buf.extend_from_slice(&bit_len.to_le_bytes());
+
+    for chunk in buf.chunks_exact(64) {
+        let mut w = [0u32; 16];
+        for (i, word) in w.iter_mut().enumerate() {
+            let o = i * 4;
+            *word = u32::from_le_bytes([chunk[o], chunk[o + 1], chunk[o + 2], chunk[o + 3]]);
+        }
+        let (mut a, mut b, mut c, mut d) = (state[0], state[1], state[2], state[3]);
+        for i in 0..64 {
+            let (f, g) = match i {
+                0..=15 => ((b & c) | ((!b) & d), i),
+                16..=31 => ((d & b) | ((!d) & c), (5 * i + 1) % 16),
+                32..=47 => (b ^ c ^ d, (3 * i + 5) % 16),
+                _ => (c ^ (b | (!d)), (7 * i) % 16),
+            };
+            let temp = d;
+            d = c;
+            c = b;
+            let sum = a
+                .wrapping_add(f)
+                .wrapping_add(MD5_K[i])
+                .wrapping_add(w[g]);
+            b = b.wrapping_add(sum.rotate_left(MD5_S[i]));
+            a = temp;
+        }
+        state[0] = state[0].wrapping_add(a);
+        state[1] = state[1].wrapping_add(b);
+        state[2] = state[2].wrapping_add(c);
+        state[3] = state[3].wrapping_add(d);
+    }
+
+    let mut out = String::with_capacity(32);
+    for word in state {
+        for byte in word.to_le_bytes() {
+            out.push_str(&format!("{byte:02x}"));
+        }
+    }
+    out
+}
+
+const MD5_S: [u32; 64] = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9,
+    14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15,
+    21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+];
+
+const MD5_K: [u32; 64] = [
+    0xd76a_a478, 0xe8c7_b756, 0x2420_70db, 0xc1bd_ceee, 0xf57c_0faf, 0x4787_c62a, 0xa830_4613,
+    0xfd46_9501, 0x6980_98d8, 0x8b44_f7af, 0xffff_5bb1, 0x895c_d7be, 0x6b90_1122, 0xfd98_7193,
+    0xa679_438e, 0x49b4_0821, 0xf61e_2562, 0xc040_b340, 0x265e_5a51, 0xe9b6_c7aa, 0xd62f_105d,
+    0x0244_1453, 0xd8a1_e681, 0xe7d3_fbc8, 0x21e1_cde6, 0xc337_07d6, 0xf4d5_0d87, 0x455a_14ed,
+    0xa9e3_e905, 0xfcef_a3f8, 0x676f_02d9, 0x8d2a_4c8a, 0xfffa_3942, 0x8771_f681, 0x6d9d_6122,
+    0xfde5_380c, 0xa4be_ea44, 0x4bde_cfa9, 0xf6bb_4b60, 0xbebf_bc70, 0x289b_7ec6, 0xeaa1_27fa,
+    0xd4ef_3085, 0x0488_1d05, 0xd9d4_d039, 0xe6db_99e5, 0x1fa2_7cf8, 0xc4ac_5665, 0xf429_2244,
+    0x432a_ff97, 0xab94_23a7, 0xfc93_a039, 0x655b_59c3, 0x8f0c_cc92, 0xffef_f47d, 0x8584_5dd1,
+    0x6fa8_7e4f, 0xfe2c_e6e0, 0xa301_4314, 0x4e08_11a1, 0xf753_7e82, 0xbd3a_f235, 0x2ad7_d2bb,
+    0xeb86_d391,
+];
+
+pub fn translate_cache_key(md5: &str, target_lang: &str, relative_path: &str) -> String {
+    let lang = target_lang.trim();
+    let path = relative_path.trim().replace('\\', "/");
+    format!("{md5}:{lang}:{path}")
+}
+
+pub fn translate_cache_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join(TRANSLATE_CACHE_FILE)
+}
+
+fn load_translate_cache(app_data_dir: &Path) -> Result<TranslateCacheStore, AppError> {
+    read_json_value(
+        &translate_cache_path(app_data_dir),
+        TranslateCacheStore::default,
+        |message| AppError::Translate {
+            message: format!("读取翻译缓存失败：{message}"),
+        },
+    )
+}
+
+fn save_translate_cache(app_data_dir: &Path, store: &TranslateCacheStore) -> Result<(), AppError> {
+    std::fs::create_dir_all(app_data_dir)?;
+    write_json_value(&translate_cache_path(app_data_dir), store, |message| {
+        AppError::Translate {
+            message: format!("写入翻译缓存失败：{message}"),
+        }
+    })
+}
+
+fn evict_oldest_if_needed(store: &mut TranslateCacheStore) {
+    while store.entries.len() > TRANSLATE_CACHE_MAX_ENTRIES {
+        let oldest_key = store
+            .entries
+            .iter()
+            .min_by(|(_, a), (_, b)| a.updated_at.cmp(&b.updated_at))
+            .map(|(key, _)| key.clone());
+        if let Some(key) = oldest_key {
+            store.entries.remove(&key);
+        } else {
+            break;
+        }
+    }
+}
+
+/// Preview translate with local content-hash cache. Cache hit skips `translate_fn`.
+pub fn preview_translate_with_cache<F>(
+    app_data_dir: &Path,
+    settings: &TranslateSettings,
+    source: &CollectedSource,
+    translate_fn: F,
+) -> Result<TranslatePreview, AppError>
+where
+    F: FnOnce(&TranslateSettings, &CollectedSource) -> Result<TranslatePreview, AppError>,
+{
+    if !settings.is_configured() {
+        return Err(AppError::Translate {
+            message: "请先在设置中配置完整的翻译接口（Base URL、API Key、模型、目标语言）".into(),
+        });
+    }
+
+    let target_lang = settings.target_lang.trim().to_string();
+    let relative_path = source
+        .source_files
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    let key = translate_cache_key(&source.content_md5, &target_lang, relative_path);
+
+    if let Ok(store) = load_translate_cache(app_data_dir) {
+        if let Some(entry) = store.entries.get(&key) {
+            if entry.md5 == source.content_md5 && entry.target_lang == target_lang {
+                return Ok(TranslatePreview {
+                    markdown: entry.translated.clone(),
+                    source_files: source.source_files.clone(),
+                    truncated: source.truncated,
+                    target_lang,
+                    model: if entry.model.is_empty() {
+                        settings.model.trim().to_string()
+                    } else {
+                        entry.model.clone()
+                    },
+                    from_cache: true,
+                });
+            }
+        }
+    }
+
+    let mut preview = translate_fn(settings, source)?;
+    preview.from_cache = false;
+
+    let mut store = load_translate_cache(app_data_dir).unwrap_or_default();
+    store.entries.insert(
+        key,
+        TranslateCacheEntry {
+            md5: source.content_md5.clone(),
+            target_lang: preview.target_lang.clone(),
+            relative_path: relative_path.to_string(),
+            translated: preview.markdown.clone(),
+            model: preview.model.clone(),
+            updated_at: Utc::now().to_rfc3339(),
+        },
+    );
+    evict_oldest_if_needed(&mut store);
+    // Cache write failure must not fail the preview response.
+    let _ = save_translate_cache(app_data_dir, &store);
+
+    Ok(preview)
 }
 
 #[derive(Debug, Deserialize)]
@@ -350,6 +562,7 @@ pub fn translate_with_openai_compatible(
         truncated: source.truncated,
         target_lang,
         model,
+        from_cache: false,
     })
 }
 
@@ -527,5 +740,161 @@ mod tests {
         let cleaned = sanitize_api_error_body(raw, 400);
         assert!(!cleaned.contains("sk-abcdefgh"), "{cleaned}");
         assert!(cleaned.contains("bearer ***") || cleaned.contains("sk-***"), "{cleaned}");
+    }
+
+    #[test]
+    fn content_md5_changes_with_content() {
+        // RFC / common test vectors
+        assert_eq!(content_md5_hex(""), "d41d8cd98f00b204e9800998ecf8427e");
+        assert_eq!(content_md5_hex("abc"), "900150983cd24fb0d6963f7d28e17f72");
+        let a = content_md5_hex("# Hello\n");
+        let b = content_md5_hex("# Hello\n\nChanged");
+        assert_ne!(a, b);
+        assert_eq!(a, content_md5_hex("# Hello\n"));
+    }
+
+    #[test]
+    fn cache_hit_skips_translate_fn() {
+        let dir = tempdir().unwrap();
+        let settings = TranslateSettings {
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "sk-x".into(),
+            model: "gpt-4o-mini".into(),
+            target_lang: "中文".into(),
+        };
+        let source = CollectedSource {
+            prompt_body: "<!-- file: SKILL.md -->\n# Hello".into(),
+            source_files: vec!["SKILL.md".into()],
+            truncated: false,
+            content_md5: content_md5_hex("# Hello"),
+        };
+
+        let mut calls = 0_u32;
+        let first = preview_translate_with_cache(dir.path(), &settings, &source, |s, src| {
+            calls += 1;
+            Ok(TranslatePreview {
+                markdown: "# 你好".into(),
+                source_files: src.source_files.clone(),
+                truncated: src.truncated,
+                target_lang: s.target_lang.clone(),
+                model: s.model.clone(),
+                from_cache: false,
+            })
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert!(!first.from_cache);
+        assert_eq!(first.markdown, "# 你好");
+
+        let second = preview_translate_with_cache(dir.path(), &settings, &source, |_s, _src| {
+            calls += 1;
+            panic!("translate_fn must not run on cache hit");
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert!(second.from_cache);
+        assert_eq!(second.markdown, "# 你好");
+    }
+
+    #[test]
+    fn cache_miss_on_content_or_lang_change() {
+        let dir = tempdir().unwrap();
+        let mut settings = TranslateSettings {
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "sk-x".into(),
+            model: "gpt-4o-mini".into(),
+            target_lang: "中文".into(),
+        };
+        let source_v1 = CollectedSource {
+            prompt_body: "<!-- file: SKILL.md -->\n# A".into(),
+            source_files: vec!["SKILL.md".into()],
+            truncated: false,
+            content_md5: content_md5_hex("# A"),
+        };
+        preview_translate_with_cache(dir.path(), &settings, &source_v1, |s, src| {
+            Ok(TranslatePreview {
+                markdown: "中文A".into(),
+                source_files: src.source_files.clone(),
+                truncated: false,
+                target_lang: s.target_lang.clone(),
+                model: s.model.clone(),
+                from_cache: false,
+            })
+        })
+        .unwrap();
+
+        let mut calls = 0_u32;
+        let source_v2 = CollectedSource {
+            prompt_body: "<!-- file: SKILL.md -->\n# B".into(),
+            source_files: vec!["SKILL.md".into()],
+            truncated: false,
+            content_md5: content_md5_hex("# B"),
+        };
+        let changed = preview_translate_with_cache(dir.path(), &settings, &source_v2, |s, src| {
+            calls += 1;
+            Ok(TranslatePreview {
+                markdown: "中文B".into(),
+                source_files: src.source_files.clone(),
+                truncated: false,
+                target_lang: s.target_lang.clone(),
+                model: s.model.clone(),
+                from_cache: false,
+            })
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert!(!changed.from_cache);
+        assert_eq!(changed.markdown, "中文B");
+
+        settings.target_lang = "English".into();
+        let lang_changed =
+            preview_translate_with_cache(dir.path(), &settings, &source_v2, |s, src| {
+                calls += 1;
+                Ok(TranslatePreview {
+                    markdown: "English B".into(),
+                    source_files: src.source_files.clone(),
+                    truncated: false,
+                    target_lang: s.target_lang.clone(),
+                    model: s.model.clone(),
+                    from_cache: false,
+                })
+            })
+            .unwrap();
+        assert_eq!(calls, 2);
+        assert!(!lang_changed.from_cache);
+        assert_eq!(lang_changed.markdown, "English B");
+    }
+
+    #[test]
+    fn cache_evicts_oldest_beyond_max() {
+        let dir = tempdir().unwrap();
+        let settings = TranslateSettings {
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "sk-x".into(),
+            model: "m".into(),
+            target_lang: "中文".into(),
+        };
+        for i in 0..(TRANSLATE_CACHE_MAX_ENTRIES + 3) {
+            let body = format!("# doc {i}");
+            let source = CollectedSource {
+                prompt_body: format!("<!-- file: f{i}.md -->\n{body}"),
+                source_files: vec![format!("f{i}.md")],
+                truncated: false,
+                content_md5: content_md5_hex(&body),
+            };
+            preview_translate_with_cache(dir.path(), &settings, &source, |s, src| {
+                Ok(TranslatePreview {
+                    markdown: format!("t{i}"),
+                    source_files: src.source_files.clone(),
+                    truncated: false,
+                    target_lang: s.target_lang.clone(),
+                    model: s.model.clone(),
+                    from_cache: false,
+                })
+            })
+            .unwrap();
+        }
+        let store = load_translate_cache(dir.path()).unwrap();
+        assert!(store.entries.len() <= TRANSLATE_CACHE_MAX_ENTRIES);
     }
 }

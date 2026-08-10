@@ -803,8 +803,13 @@ pub async fn preview_translate_skill(
         };
         let collected = translate::collect_translate_source(&skill_root, &relative_path)
             .map_err(map_app_error)?;
-        translate::translate_with_openai_compatible(&settings.translate, &collected)
-            .map_err(map_app_error)
+        translate::preview_translate_with_cache(
+            &paths.app_data_dir,
+            &settings.translate,
+            &collected,
+            translate::translate_with_openai_compatible,
+        )
+        .map_err(map_app_error)
     })
     .await
     .map_err(|error| CommandError {
