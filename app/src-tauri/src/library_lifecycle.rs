@@ -51,7 +51,7 @@ impl LibraryRepository {
         };
 
         let skill_dir = project.local_path.join(&name);
-        if !skill_dir.starts_with(&project.local_path) {
+        if !crate::path_norm::path_is_under(&skill_dir, &project.local_path) {
             return Err(AppError::PathOutsideManagedRoots {
                 path: skill_dir.display().to_string(),
             });
@@ -61,10 +61,9 @@ impl LibraryRepository {
                 path: skill_dir.display().to_string(),
             });
         }
+        // 库内项目走白名单；外部已登记项目以索引为准（与 read/write_library_skill_file 一致）。
         if is_under_library(self.paths().library_dir.as_path(), &project.local_path) {
             self.paths().assert_allowed(&skill_dir)?;
-        } else {
-            self.paths().assert_skill_access(&project.local_path)?;
         }
         fs::create_dir_all(&skill_dir)?;
         let description = description.trim();
@@ -296,6 +295,30 @@ mod tests {
 
         repository.delete_library_skill(&renamed.id).unwrap();
         assert!(repository.list_library_skills().unwrap().is_empty());
+    }
+
+    #[test]
+    fn create_library_skill_in_external_project() {
+        let base = tempdir().unwrap();
+        let external = tempdir().unwrap();
+        write_skill(&external.path().join("existing"), "existing");
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+        let project = repository.add_local_project(external.path()).unwrap();
+
+        let created = repository
+            .create_library_skill(
+                "brand-new".into(),
+                "外部项目新建".into(),
+                Some(project.id.clone()),
+            )
+            .unwrap();
+        assert_eq!(created.name, "brand-new");
+        assert_eq!(created.project_id, project.id);
+        assert!(created.absolute_path.join("SKILL.md").is_file());
+        assert!(!is_under_library(
+            repository.paths().library_dir.as_path(),
+            &created.absolute_path
+        ));
     }
 
     #[test]

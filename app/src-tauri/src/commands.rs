@@ -775,6 +775,8 @@ pub fn preview_translate_skill(
     let settings = settings::load_settings(&paths.app_data_dir).map_err(map_app_error)?;
     let skill_root = match source {
         TranslateSkillSource::Provider => {
+            // detail() 已对 current_path 做过 assert_skill_access；外链 Skill 的
+            // resolved_path 可能在白名单外（指向库/外部项目），与 update_skill_metadata 一致不再二次设卡。
             let detail = state
                 .skills
                 .lock()
@@ -792,13 +794,11 @@ pub fn preview_translate_skill(
                 .map_err(|_| state_lock_error())?
                 .get_library_skill_detail(&skill_id)
                 .map_err(map_app_error)?;
+            // 库 Skill 可能位于已登记的外部本地项目路径（不在 library_dir 内），
+            // 与 read_library_skill_file 一致：以索引登记为准，只读预览。
             detail.summary.absolute_path
         }
     };
-    // Ensure the skill root stays inside managed directories (symlinked provider skills allowed).
-    paths
-        .assert_skill_access(&skill_root)
-        .map_err(map_app_error)?;
     let collected = translate::collect_translate_source(&skill_root).map_err(map_app_error)?;
     translate::translate_with_openai_compatible(&settings.translate, &collected)
         .map_err(map_app_error)
