@@ -127,6 +127,7 @@ export interface SkillApi {
   deleteGroup(id: string): Promise<void>;
   setSkillGroup(skillId: string, groupId: string | null): Promise<LibrarySkillSummary>;
   getSettings(): Promise<AppSettings>;
+  listSystemFonts(): Promise<string[]>;
   saveSettings(settings: AppSettings): Promise<AppSettings>;
   previewTranslateSkill(
     source: TranslateSkillSource,
@@ -257,6 +258,7 @@ export const tauriSkillApi: SkillApi = {
   setSkillGroup: (skillId, groupId) =>
     call("set_skill_group", { skillId, groupId }),
   getSettings: () => call("get_settings"),
+  listSystemFonts: () => call("list_system_fonts"),
   saveSettings: (settings) => call("save_settings", { next: settings }),
   previewTranslateSkill: (source, skillId) =>
     call("preview_translate_skill", { source, skillId }),

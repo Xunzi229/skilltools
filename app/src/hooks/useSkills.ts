@@ -108,12 +108,13 @@ export function useSkills(api: SkillApi) {
 
   useEffect(() => {
     if (!selectedSkillId) {
+      setSelectedSkill(null);
       return;
     }
     void loadDetail(selectedSkillId);
   }, [loadDetail, selectedSkillId]);
 
-  const selectSkill = useCallback((skillId: string) => {
+  const selectSkill = useCallback((skillId: string | null) => {
     setSelectedSkillId(skillId);
   }, []);
 

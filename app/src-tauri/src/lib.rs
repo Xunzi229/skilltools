@@ -14,6 +14,7 @@ pub mod library_repository;
 mod library_taxonomy;
 mod path_norm;
 mod skill_metadata;
+mod system_fonts;
 pub mod model;
 pub mod paths;
 pub mod settings;
@@ -109,6 +110,7 @@ pub fn run() {
             commands::delete_group,
             commands::set_skill_group,
             commands::get_settings,
+            commands::list_system_fonts,
             commands::save_settings,
             commands::preview_translate_skill,
             commands::get_app_paths,

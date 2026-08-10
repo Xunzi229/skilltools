@@ -10,12 +10,15 @@ import type {
 import { APP_VERSION } from "../version";
 import { pickDirectory } from "../utils/dialogs";
 import { formatUpdaterError } from "../utils/errors";
+import { FontFamilyPicker } from "./FontFamilyPicker";
 import {
   DEFAULT_PREVIEW_FONT_FAMILY,
   DEFAULT_PREVIEW_FONT_SIZE,
   PREVIEW_FONT_OPTIONS,
   PREVIEW_FONT_SIZE_OPTIONS,
   applyPreviewTypography,
+  fontsToOptions,
+  type PreviewFontOption,
 } from "../utils/previewTypography";
 import {
   DEFAULT_TRANSLATE_SETTINGS,
@@ -57,12 +60,19 @@ export function SettingsPanel({
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [fontOptions, setFontOptions] = useState<PreviewFontOption[]>(() => [
+    ...PREVIEW_FONT_OPTIONS,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void Promise.all([api.getSettings(), api.getAppPaths()])
-      .then(([nextSettings, nextPaths]) => {
+    void Promise.all([
+      api.getSettings(),
+      api.getAppPaths(),
+      api.listSystemFonts().catch(() => [] as string[]),
+    ])
+      .then(([nextSettings, nextPaths, systemFonts]) => {
         if (cancelled) return;
         const normalized = {
           ...nextSettings,
@@ -70,6 +80,9 @@ export function SettingsPanel({
         };
         setSettings(normalized);
         setPaths(nextPaths);
+        if (systemFonts.length > 0) {
+          setFontOptions(fontsToOptions(systemFonts));
+        }
         applyPreviewTypography(normalized);
       })
       .catch((err: unknown) => {
@@ -227,44 +240,23 @@ export function SettingsPanel({
             <section className="macos-card mb-6 p-4">
               <h3 className="macos-section-title">预览字体</h3>
               <p className="mt-2 text-[12px] text-ink-3">
-                用于文件预览与编辑区的字体类型和字号。
+                用于文件预览与编辑区。字体列表来自本机已安装字体。
               </p>
               <div className="mt-3 flex flex-wrap gap-4">
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
                   字体类型
-                  <select
-                    className="macos-select min-w-[200px]"
+                  <FontFamilyPicker
                     value={settings?.previewFontFamily || DEFAULT_PREVIEW_FONT_FAMILY}
+                    options={fontOptions}
                     disabled={saving || !settings}
-                    onChange={(event) => {
+                    onChange={(family) => {
                       if (!settings) return;
                       void save({
                         ...settings,
-                        previewFontFamily: event.target.value,
+                        previewFontFamily: family,
                       });
                     }}
-                    style={{
-                      fontFamily: `"${settings?.previewFontFamily || DEFAULT_PREVIEW_FONT_FAMILY}"`,
-                    }}
-                  >
-                    {PREVIEW_FONT_OPTIONS.map((font) => (
-                      <option
-                        key={font.family}
-                        value={font.family}
-                        style={{ fontFamily: `"${font.family}"` }}
-                      >
-                        {font.label}
-                      </option>
-                    ))}
-                    {settings?.previewFontFamily &&
-                      !PREVIEW_FONT_OPTIONS.some(
-                        (font) => font.family === settings.previewFontFamily,
-                      ) && (
-                        <option value={settings.previewFontFamily}>
-                          {settings.previewFontFamily}
-                        </option>
-                      )}
-                  </select>
+                  />
                 </label>
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
                   字号

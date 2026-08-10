@@ -167,16 +167,45 @@ function App({ api = tauriSkillApi }: AppProps) {
         ? library.tags.find((tag) => tag.id === filter.slice(4))?.name ?? "标签"
         : "Skill 库";
 
+  // 当前筛选列表变化时：选中项不在列表中则改选第一项；列表为空则清空详情
   useEffect(() => {
+    if (libraryMode) {
+      const selectedId = library.selectedLibrarySkillId;
+      const inView =
+        selectedId !== null &&
+        visibleLibrarySkills.some((skill) => skill.id === selectedId);
+      if (inView) return;
+      if (visibleLibrarySkills.length === 0) {
+        if (selectedId !== null) {
+          library.selectLibrarySkill(null);
+        }
+        return;
+      }
+      library.selectLibrarySkill(visibleLibrarySkills[0]!.id);
+      return;
+    }
+
     if (
-      filter !== "backups" &&
+      filter === "backups" ||
+      filter === "settings" ||
+      filter === "installations" ||
+      filter === "projects"
+    ) {
+      return;
+    }
+
+    if (selectedSkillId !== null && visibleSkills.length === 0) {
+      selectSkill(null);
+      return;
+    }
+    if (
       selectedSkillId !== null &&
       visibleSkills.length > 0 &&
       !visibleSkills.some((skill) =>
         skillMemberIds(skill).includes(selectedSkillId),
       )
     ) {
-      selectSkill(skillIdForProviderFilter(visibleSkills[0], filter));
+      selectSkill(skillIdForProviderFilter(visibleSkills[0]!, filter));
       return;
     }
     if (
@@ -192,7 +221,17 @@ function App({ api = tauriSkillApi }: AppProps) {
         selectSkill(nextId);
       }
     }
-  }, [filter, selectSkill, selectedSkillId, skills, visibleSkills]);
+  }, [
+    filter,
+    library.selectLibrarySkill,
+    library.selectedLibrarySkillId,
+    libraryMode,
+    selectSkill,
+    selectedSkillId,
+    skills,
+    visibleLibrarySkills,
+    visibleSkills,
+  ]);
 
   useEffect(() => {
     void loadBackups();
@@ -403,7 +442,14 @@ function App({ api = tauriSkillApi }: AppProps) {
           />
           <LibraryDetail
             api={api}
-            skill={library.selectedLibrarySkill}
+            skill={
+              library.selectedLibrarySkill &&
+              visibleLibrarySkills.some(
+                (skill) => skill.id === library.selectedLibrarySkill?.id,
+              )
+                ? library.selectedLibrarySkill
+                : null
+            }
             tags={library.tags}
             groups={library.groups}
             loading={library.detailLoading}
@@ -505,7 +551,14 @@ function App({ api = tauriSkillApi }: AppProps) {
           />
           <SkillDetail
             api={api}
-            skill={selectedSkill}
+            skill={
+              selectedSkill &&
+              visibleSkills.some((skill) =>
+                skillMemberIds(skill).includes(selectedSkill.id),
+              )
+                ? selectedSkill
+                : null
+            }
             loading={detailLoading}
             error={detailError}
             actionError={actionError}

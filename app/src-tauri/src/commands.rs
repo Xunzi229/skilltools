@@ -727,6 +727,11 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, CommandEr
 }
 
 #[tauri::command]
+pub fn list_system_fonts() -> Result<Vec<String>, CommandError> {
+    crate::system_fonts::list_system_font_families().map_err(map_app_error)
+}
+
+#[tauri::command]
 pub fn save_settings(
     state: State<'_, AppState>,
     next: AppSettings,

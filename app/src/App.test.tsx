@@ -323,6 +323,7 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     }),
     deleteGroup: async () => undefined,
     setSkillGroup: unavailable,
+    listSystemFonts: async () => ["Microsoft YaHei", "Consolas", "PingFang SC"],
     getSettings: async () => ({
       theme: "light",
       skillRootOverrides: { cursor: null, claude: null, codex: null },
@@ -1147,6 +1148,26 @@ describe("Skill Manager", () => {
     expect(
       await within(navigation).findByRole("button", { name: /^前端/ }),
     ).toBeInTheDocument();
+  });
+
+  it("切换到空分组时清空右侧库 Skill 详情", async () => {
+    const user = userEvent.setup();
+    await renderLibrary();
+
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+    await user.click(await within(list).findByText("reviewer"));
+    expect(
+      await screen.findByRole("region", { name: "库 Skill 详情" }),
+    ).toHaveTextContent("reviewer");
+
+    const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
+    await user.click(within(navigation).getByRole("button", { name: /^开发/ }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "库 Skill 详情" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("选择一个库 Skill 查看详情")).toBeInTheDocument();
+    expect(screen.getByText("暂无库 Skill")).toBeInTheDocument();
   });
 
   it("详情可新建分组并应用到当前 Skill", async () => {
