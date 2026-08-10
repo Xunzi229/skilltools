@@ -5,13 +5,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::error::AppError;
-use crate::model::{FileNode, FileNodeKind};
 use crate::settings::TranslateSettings;
-use crate::skill_files::{list_skill_tree_at, read_skill_file_at};
+use crate::skill_files::read_skill_file_at;
 
 /// Soft cap so a single request does not blow past common model context limits.
 const MAX_SOURCE_CHARS: usize = 80_000;
-const MAX_FILES: usize = 6;
 const HTTP_TIMEOUT_SECS: u64 = 120;
 const ERROR_BODY_SNIPPET_CHARS: usize = 400;
 
@@ -87,99 +85,45 @@ pub fn chat_completions_url(base_url: &str) -> String {
     }
 }
 
-fn file_name_of(relative_path: &str) -> &str {
-    relative_path
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(relative_path)
-}
-
-fn is_readme_markdown(relative_path: &str) -> bool {
-    let name = file_name_of(relative_path).to_ascii_lowercase();
-    name.starts_with("readme") && (name.ends_with(".md") || name.ends_with(".markdown"))
-}
-
-fn flatten_file_paths(nodes: &[FileNode], out: &mut Vec<String>) {
-    for node in nodes {
-        match node.kind {
-            FileNodeKind::File => out.push(node.relative_path.clone()),
-            FileNodeKind::Directory => flatten_file_paths(&node.children, out),
-        }
-    }
-}
-
-/// Collect SKILL.md (+ root/near-root README*.md). Read-only; never writes.
-pub fn collect_translate_source(skill_root: &Path) -> Result<CollectedSource, AppError> {
-    let tree = list_skill_tree_at(skill_root)?;
-    let mut all_paths = Vec::new();
-    flatten_file_paths(&tree, &mut all_paths);
-
-    let mut selected = Vec::new();
-    if all_paths.iter().any(|p| p == "SKILL.md") {
-        selected.push("SKILL.md".to_string());
-    } else {
+/// Collect a single selected skill file for translation preview. Read-only; never writes.
+pub fn collect_translate_source(
+    skill_root: &Path,
+    relative_path: &str,
+) -> Result<CollectedSource, AppError> {
+    let relative_path = relative_path.trim().replace('\\', "/");
+    if relative_path.is_empty() {
         return Err(AppError::Translate {
-            message: "未找到 SKILL.md，无法翻译".into(),
+            message: "请先在左侧选择要翻译的文件".into(),
         });
     }
 
-    let mut readmes: Vec<String> = all_paths
-        .into_iter()
-        .filter(|path| path != "SKILL.md" && is_readme_markdown(path))
-        .collect();
-    // Prefer shallower paths, then stable name order.
-    readmes.sort_by(|a, b| {
-        let depth = |p: &str| p.matches('/').count();
-        depth(a)
-            .cmp(&depth(b))
-            .then_with(|| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()))
-    });
-    for path in readmes {
-        if selected.len() >= MAX_FILES {
-            break;
-        }
-        selected.push(path);
+    let file = read_skill_file_at(skill_root, &relative_path)?;
+    let Some(content) = file.content else {
+        return Err(AppError::Translate {
+            message: format!(
+                "无法翻译「{relative_path}」：{}",
+                file.message.unwrap_or_else(|| "不支持预览的文件".into())
+            ),
+        });
+    };
+    if content.trim().is_empty() {
+        return Err(AppError::Translate {
+            message: format!("「{relative_path}」没有可翻译的文本内容"),
+        });
     }
 
-    let mut parts = Vec::new();
-    let mut used = Vec::new();
-    let mut total_chars = 0usize;
+    let header = format!("<!-- file: {relative_path} -->\n");
     let mut truncated = false;
-
-    for relative_path in &selected {
-        let file = read_skill_file_at(skill_root, relative_path)?;
-        let Some(content) = file.content else {
-            continue;
-        };
-        let header = format!("<!-- file: {relative_path} -->\n");
-        let piece_len = header.len() + content.len();
-        if total_chars > 0 && total_chars + piece_len > MAX_SOURCE_CHARS {
-            truncated = true;
-            break;
-        }
-        let mut body = content;
-        if total_chars + header.len() + body.len() > MAX_SOURCE_CHARS {
-            let keep = MAX_SOURCE_CHARS.saturating_sub(total_chars + header.len());
-            body.truncate(keep);
-            truncated = true;
-        }
-        total_chars += header.len() + body.len();
-        parts.push(format!("{header}{body}"));
-        used.push(relative_path.clone());
-        if truncated {
-            break;
-        }
-    }
-
-    if used.is_empty() {
-        return Err(AppError::Translate {
-            message: "没有可翻译的文本内容".into(),
-        });
+    let mut body = content;
+    if header.len() + body.len() > MAX_SOURCE_CHARS {
+        let keep = MAX_SOURCE_CHARS.saturating_sub(header.len());
+        body.truncate(keep);
+        truncated = true;
     }
 
     Ok(CollectedSource {
-        prompt_body: parts.join("\n\n"),
-        source_files: used,
+        prompt_body: format!("{header}{body}"),
+        source_files: vec![relative_path],
         truncated,
     })
 }
@@ -468,26 +412,34 @@ mod tests {
     }
 
     #[test]
-    fn collects_skill_md_and_readme() {
+    fn collects_selected_file() {
         let dir = tempdir().unwrap();
         let root = dir.path();
+        fs::create_dir_all(root.join("references")).unwrap();
         fs::write(root.join("SKILL.md"), "# Hello\n\nDo something.").unwrap();
-        fs::write(root.join("README.md"), "# Readme\n\nMore text.").unwrap();
-        fs::write(root.join("notes.txt"), "ignore").unwrap();
+        fs::write(
+            root.join("references/thresholds.md"),
+            "# Thresholds\n\nMore text.",
+        )
+        .unwrap();
 
-        let collected = collect_translate_source(root).unwrap();
-        assert_eq!(collected.source_files, vec!["SKILL.md", "README.md"]);
-        assert!(collected.prompt_body.contains("<!-- file: SKILL.md -->"));
-        assert!(collected.prompt_body.contains("<!-- file: README.md -->"));
+        let collected = collect_translate_source(root, "references/thresholds.md").unwrap();
+        assert_eq!(
+            collected.source_files,
+            vec!["references/thresholds.md".to_string()]
+        );
+        assert!(collected.prompt_body.contains("<!-- file: references/thresholds.md -->"));
+        assert!(collected.prompt_body.contains("# Thresholds"));
+        assert!(!collected.prompt_body.contains("# Hello"));
         assert!(!collected.truncated);
     }
 
     #[test]
-    fn requires_skill_md() {
+    fn requires_selected_file() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("README.md"), "only readme").unwrap();
-        let err = collect_translate_source(dir.path()).unwrap_err();
-        assert!(err.to_string().contains("SKILL.md"));
+        fs::write(dir.path().join("SKILL.md"), "# Skill").unwrap();
+        let err = collect_translate_source(dir.path(), "   ").unwrap_err();
+        assert!(err.to_string().contains("选择"));
     }
 
     #[test]

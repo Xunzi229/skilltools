@@ -149,6 +149,7 @@ export function LibraryDetail({
               api={api}
               source="library"
               skillId={skill.id}
+              relativePath={files.preview?.relativePath ?? null}
               disabled={busy}
             />
             <button

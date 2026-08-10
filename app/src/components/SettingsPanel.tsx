@@ -294,8 +294,7 @@ export function SettingsPanel({
               <h3 className="macos-section-title">Skill 翻译预览</h3>
               <p className="mt-2 text-[12px] text-ink-3">
                 OpenAI 兼容接口（chat/completions）。配置完整后，Skill
-                详情页显示「翻译」按钮；仅预览，不修改原文件。范围：SKILL.md 与
-                README*.md（超大将截断）。
+                详情页显示「翻译」按钮；仅预览，不修改原文件。翻译当前选中文件（超大将截断）。
               </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2 sm:col-span-2">

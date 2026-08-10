@@ -765,43 +765,52 @@ pub fn get_app_paths(state: State<'_, AppState>) -> Result<AppPathsInfo, Command
 }
 
 /// Read-only translation preview. Never writes or modifies skill files.
+/// HTTP 翻译是阻塞 I/O，必须放到 blocking 线程，避免卡住 UI。
 #[tauri::command]
-pub fn preview_translate_skill(
-    state: State<'_, AppState>,
+pub async fn preview_translate_skill(
+    app: AppHandle,
     source: TranslateSkillSource,
     skill_id: String,
+    relative_path: String,
 ) -> Result<TranslatePreview, CommandError> {
-    let paths = current_paths(state.inner())?;
-    let settings = settings::load_settings(&paths.app_data_dir).map_err(map_app_error)?;
-    let skill_root = match source {
-        TranslateSkillSource::Provider => {
-            // detail() 已对 current_path 做过 assert_skill_access；外链 Skill 的
-            // resolved_path 可能在白名单外（指向库/外部项目），与 update_skill_metadata 一致不再二次设卡。
-            let detail = state
-                .skills
-                .lock()
-                .map_err(|_| state_lock_error())?
-                .detail(&skill_id)
-                .map_err(map_app_error)?;
-            detail
-                .resolved_path
-                .unwrap_or(detail.current_path)
-        }
-        TranslateSkillSource::Library => {
-            let detail = state
-                .library
-                .lock()
-                .map_err(|_| state_lock_error())?
-                .get_library_skill_detail(&skill_id)
-                .map_err(map_app_error)?;
-            // 库 Skill 可能位于已登记的外部本地项目路径（不在 library_dir 内），
-            // 与 read_library_skill_file 一致：以索引登记为准，只读预览。
-            detail.summary.absolute_path
-        }
-    };
-    let collected = translate::collect_translate_source(&skill_root).map_err(map_app_error)?;
-    translate::translate_with_openai_compatible(&settings.translate, &collected)
-        .map_err(map_app_error)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let paths = current_paths(state.inner())?;
+        let settings = settings::load_settings(&paths.app_data_dir).map_err(map_app_error)?;
+        let skill_root = match source {
+            TranslateSkillSource::Provider => {
+                // detail() 已对 current_path 做过 assert_skill_access；外链 Skill 的
+                // resolved_path 可能在白名单外（指向库/外部项目），与 update_skill_metadata 一致不再二次设卡。
+                let detail = state
+                    .skills
+                    .lock()
+                    .map_err(|_| state_lock_error())?
+                    .detail(&skill_id)
+                    .map_err(map_app_error)?;
+                detail.resolved_path.unwrap_or(detail.current_path)
+            }
+            TranslateSkillSource::Library => {
+                let detail = state
+                    .library
+                    .lock()
+                    .map_err(|_| state_lock_error())?
+                    .get_library_skill_detail(&skill_id)
+                    .map_err(map_app_error)?;
+                // 库 Skill 可能位于已登记的外部本地项目路径（不在 library_dir 内），
+                // 与 read_library_skill_file 一致：以索引登记为准，只读预览。
+                detail.summary.absolute_path
+            }
+        };
+        let collected = translate::collect_translate_source(&skill_root, &relative_path)
+            .map_err(map_app_error)?;
+        translate::translate_with_openai_compatible(&settings.translate, &collected)
+            .map_err(map_app_error)
+    })
+    .await
+    .map_err(|error| CommandError {
+        code: "TASK_JOIN",
+        message: format!("翻译任务失败：{error}"),
+    })?
 }
 
 #[tauri::command]

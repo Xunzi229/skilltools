@@ -132,6 +132,7 @@ export interface SkillApi {
   previewTranslateSkill(
     source: TranslateSkillSource,
     skillId: string,
+    relativePath: string,
   ): Promise<TranslatePreview>;
   getAppPaths(): Promise<AppPathsInfo>;
   revealPath(path: string): Promise<void>;
@@ -260,8 +261,8 @@ export const tauriSkillApi: SkillApi = {
   getSettings: () => call("get_settings"),
   listSystemFonts: () => call("list_system_fonts"),
   saveSettings: (settings) => call("save_settings", { next: settings }),
-  previewTranslateSkill: (source, skillId) =>
-    call("preview_translate_skill", { source, skillId }),
+  previewTranslateSkill: (source, skillId, relativePath) =>
+    call("preview_translate_skill", { source, skillId, relativePath }),
   getAppPaths: () => call("get_app_paths"),
   revealPath: (path) => call("reveal_path", { path }),
   exportLibrarySkillZip: (id, destPath) =>

@@ -139,6 +139,7 @@ export function SkillDetail({
               api={api}
               source="provider"
               skillId={skill.id}
+              relativePath={files.preview?.relativePath ?? null}
               disabled={busy}
             />
             <button
