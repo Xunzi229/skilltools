@@ -1131,7 +1131,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn install_rejects_real_directory_and_unmanaged_symlink_conflicts() {
+    fn install_rejects_real_directory_conflict() {
         let base = tempdir().unwrap();
         let source = tempdir().unwrap();
         write_skill(&source.path().join("alpha"), "Alpha");
@@ -1146,9 +1146,58 @@ mod tests {
             repository.install_skill(&skill_id, Provider::Cursor),
             Err(AppError::TargetConflict { .. })
         ));
+    }
 
-        fs::remove_dir(&target).unwrap();
-        std::os::unix::fs::symlink(source.path(), &target).unwrap();
+    #[cfg(unix)]
+    #[test]
+    fn install_takes_over_same_name_historical_symlink() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        let historical = tempdir().unwrap();
+        write_skill(&source.path().join("grill-me"), "grill-me");
+        write_skill(&historical.path().join("grill-me"), "grill-me");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill = repository.list_library_skills().unwrap()[0].clone();
+        let target = paths
+            .provider_root(Provider::Claude)
+            .unwrap()
+            .join("grill-me");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        // 模拟 cc-switch 等历史工具留下的同名外链
+        std::os::unix::fs::symlink(historical.path().join("grill-me"), &target).unwrap();
+
+        let installation = repository
+            .install_skill(&skill.id, Provider::Claude)
+            .unwrap();
+
+        assert_eq!(
+            fs::read_link(&installation.target_path).unwrap(),
+            skill.absolute_path.canonicalize().unwrap()
+        );
+        assert_eq!(
+            repository.list_library_skills().unwrap()[0].installed_providers,
+            vec![Provider::Claude]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_rejects_unmanaged_symlink_with_different_skill_name() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        let other = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        write_skill(&other.path().join("beta"), "Beta");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let target = paths.provider_root(Provider::Cursor).unwrap().join("Alpha");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(other.path().join("beta"), &target).unwrap();
+
         assert!(matches!(
             repository.install_skill(&skill_id, Provider::Cursor),
             Err(AppError::TargetConflict { .. })

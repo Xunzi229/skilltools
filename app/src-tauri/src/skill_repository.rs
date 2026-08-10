@@ -814,7 +814,7 @@ mod tests {
     };
     use crate::error::AppError;
     use crate::json_store::replace_existing_index_with_backup;
-    use crate::model::{Provider, SkillStatus, SkillSummary};
+    use crate::model::{PauseRecord, Provider, SkillStatus, SkillSummary};
     use crate::paths::AppPaths;
 
     fn write_skill(paths: &AppPaths, root_index: usize, directory: &str, markdown: &str) {

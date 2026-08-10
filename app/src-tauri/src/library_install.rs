@@ -64,9 +64,14 @@ impl LibraryRepository {
                 });
             }
             Ok(_) if managed_position.is_none() => {
-                return Err(AppError::TargetConflict {
-                    path: target_path.display().to_string(),
-                });
+                // 历史工具留下的同名 symlink（如 .cc-switch）：校验为同一 skill 后接管替换
+                if unmanaged_symlink_matches_skill(&target_path, &skill.name) {
+                    Some(fs::read_link(&target_path)?)
+                } else {
+                    return Err(AppError::TargetConflict {
+                        path: target_path.display().to_string(),
+                    });
+                }
             }
             Ok(_) => Some(fs::read_link(&target_path)?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -384,4 +389,20 @@ impl LibraryRepository {
             health,
         })
     }
+}
+
+/// 未纳管 symlink 是否与库 Skill 同名（目录名或 SKILL.md frontmatter name）。
+fn unmanaged_symlink_matches_skill(target_path: &Path, skill_name: &str) -> bool {
+    let Ok(resolved) = target_path.canonicalize() else {
+        return false;
+    };
+    if resolved
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case(skill_name))
+    {
+        return true;
+    }
+    let metadata = crate::skill_repository::read_skill_metadata(&resolved);
+    !metadata.name.is_empty() && metadata.name.eq_ignore_ascii_case(skill_name)
 }
