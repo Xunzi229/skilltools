@@ -8,7 +8,10 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::error::AppError;
-use crate::fs_ops::{copy_directory, rename_directory_no_replace, verify_directory_copy};
+use crate::fs_ops::{
+    copy_directory, is_symlink_link, path_is_symlink_link, rename_directory_no_replace,
+    verify_directory_copy,
+};
 use crate::json_store::{read_json, write_json};
 use crate::model::{
     PauseRecord, Provider, ScanResult, SkillDetail, SkillProviderInstall, SkillStatus, SkillSummary,
@@ -70,16 +73,17 @@ impl SkillRepository {
                     }
                 };
                 let skill_path = entry.path();
-                match entry.file_type() {
-                    // 库安装产物：链接本身在 provider 根下，目标可在库路径（白名单外）
-                    Ok(file_type) if file_type.is_symlink() => {
-                        if skill_path.parent() != Some(root.path.as_path()) {
-                            continue;
-                        }
-                        if is_skill_directory(&skill_path) {
-                            skills.push(read_summary(root.provider, &skill_path));
-                        }
+                // symlink / junction（Windows）统一按安装链接处理
+                if path_is_symlink_link(&skill_path) {
+                    if skill_path.parent() != Some(root.path.as_path()) {
+                        continue;
                     }
+                    if is_skill_directory(&skill_path) {
+                        skills.push(read_summary(root.provider, &skill_path));
+                    }
+                    continue;
+                }
+                match entry.file_type() {
                     Ok(file_type) if file_type.is_dir() && is_skill_directory(&skill_path) => {
                         if let Err(error) = self.paths.assert_allowed(&skill_path) {
                             reject_unsafe_skill_path(&skill_path, &error);
@@ -90,7 +94,7 @@ impl SkillRepository {
                     Ok(_) => {}
                     Err(error) => {
                         if let Ok(metadata) = fs::symlink_metadata(&skill_path) {
-                            if metadata.file_type().is_symlink() {
+                            if is_symlink_link(&metadata) {
                                 if skill_path.parent() == Some(root.path.as_path())
                                     && is_skill_directory(&skill_path)
                                 {
@@ -475,8 +479,8 @@ fn provider_directory(provider: Provider) -> &'static str {
 fn move_directory(source: &Path, target: &Path) -> Result<(), AppError> {
     match rename_directory_no_replace(source, target) {
         Ok(()) => return Ok(()),
-        Err(error) if !is_cross_device_error(&error) => return Err(error),
-        Err(_) => {}
+        Err(AppError::CrossDevice { .. }) => {}
+        Err(error) => return Err(error),
     }
 
     let parent = target.parent().ok_or_else(|| AppError::Io {
@@ -503,31 +507,6 @@ fn move_directory(source: &Path, target: &Path) -> Result<(), AppError> {
         let _ = fs::remove_dir_all(&temp_path);
     }
     result
-}
-
-#[cfg(unix)]
-fn is_cross_device_error(error: &AppError) -> bool {
-    matches!(
-        error,
-        AppError::Io { message }
-            if message == &std::io::Error::from_raw_os_error(libc::EXDEV).to_string()
-    )
-}
-
-#[cfg(windows)]
-fn is_cross_device_error(error: &AppError) -> bool {
-    const ERROR_NOT_SAME_DEVICE: i32 = 17;
-    matches!(
-        error,
-        AppError::Io { message }
-            if message
-                == &std::io::Error::from_raw_os_error(ERROR_NOT_SAME_DEVICE).to_string()
-    )
-}
-
-#[cfg(not(any(unix, windows)))]
-fn is_cross_device_error(_error: &AppError) -> bool {
-    false
 }
 
 fn commit_verified_copy<Rename, Remove>(
@@ -700,7 +679,7 @@ fn summary_with_warnings(
     let current_path = skill_path.to_path_buf();
     let resolved_path = fs::symlink_metadata(skill_path)
         .ok()
-        .filter(|metadata| metadata.file_type().is_symlink())
+        .filter(|metadata| is_symlink_link(metadata))
         .and_then(|_| skill_path.canonicalize().ok());
 
     SkillSummary {
@@ -727,11 +706,13 @@ fn provider_sort_key(provider: Provider) -> u8 {
 }
 
 /// 去重键：symlink 解析目标，否则 canonicalize(current_path)，再退回 current_path。
-fn skill_canonical_key(skill: &SkillSummary) -> std::path::PathBuf {
-    if let Some(resolved) = &skill.resolved_path {
-        return resolved.clone();
-    }
-    fs::canonicalize(&skill.current_path).unwrap_or_else(|_| skill.current_path.clone())
+fn skill_canonical_key(skill: &SkillSummary) -> String {
+    let path = if let Some(resolved) = &skill.resolved_path {
+        resolved.clone()
+    } else {
+        fs::canonicalize(&skill.current_path).unwrap_or_else(|_| skill.current_path.clone())
+    };
+    crate::path_norm::normalize_path_key(&path)
 }
 
 /// 同一原始源路径（多 Provider 仅引用/symlink）合并为一行。
@@ -741,8 +722,6 @@ pub(crate) fn merge_skills_by_canonical_path(skills: Vec<SkillSummary>) -> Vec<S
     let mut groups: BTreeMap<String, Vec<SkillSummary>> = BTreeMap::new();
     for skill in skills {
         let key = skill_canonical_key(&skill);
-        // Windows 下统一比较形态
-        let key = key.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
         groups.entry(key).or_default().push(skill);
     }
 

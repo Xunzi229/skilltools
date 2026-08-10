@@ -237,9 +237,20 @@ fn open_with_default(path: &Path) -> Result<(), AppError> {
         })
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 fn open_with_default(path: &Path) -> Result<(), AppError> {
     Command::new("open")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| AppError::Io {
+            message: format!("打开失败：{error}"),
+        })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_with_default(path: &Path) -> Result<(), AppError> {
+    Command::new("xdg-open")
         .arg(path)
         .spawn()
         .map(|_| ())

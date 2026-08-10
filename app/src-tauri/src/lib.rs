@@ -12,6 +12,7 @@ mod library_install;
 mod library_lifecycle;
 pub mod library_repository;
 mod library_taxonomy;
+mod path_norm;
 mod skill_metadata;
 pub mod model;
 pub mod paths;

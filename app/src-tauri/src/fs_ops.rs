@@ -25,10 +25,13 @@ pub(crate) struct ManifestEntry {
 
 pub(crate) fn directory_manifest(root: &Path) -> Result<Vec<ManifestEntry>, AppError> {
     let mut manifest = Vec::new();
-    for entry_result in WalkDir::new(root).follow_links(false).min_depth(1) {
+    for entry_result in iter_tree_no_follow_reparse(root) {
         let entry = entry_result.map_err(|error| AppError::Io {
             message: error.to_string(),
         })?;
+        if entry.depth() < 1 {
+            continue;
+        }
         let path = entry
             .path()
             .strip_prefix(root)
@@ -36,13 +39,14 @@ pub(crate) fn directory_manifest(root: &Path) -> Result<Vec<ManifestEntry>, AppE
                 message: error.to_string(),
             })?
             .to_path_buf();
-        let kind = if entry.file_type().is_dir() {
-            ManifestEntryKind::Directory
-        } else if entry.file_type().is_symlink() {
+        let metadata = fs::symlink_metadata(entry.path())?;
+        let kind = if is_symlink_link(&metadata) {
             ManifestEntryKind::Symlink {
                 target: fs::read_link(entry.path())?,
             }
-        } else if entry.file_type().is_file() {
+        } else if metadata.is_dir() {
+            ManifestEntryKind::Directory
+        } else if metadata.is_file() {
             ManifestEntryKind::File {
                 sha256: sha256_file(entry.path())?,
             }
@@ -66,10 +70,13 @@ pub(crate) fn manifest_checksum(manifest: &[ManifestEntry]) -> Result<String, Ap
 
 pub(crate) fn copy_directory(source: &Path, target: &Path) -> Result<(), AppError> {
     fs::create_dir(target)?;
-    for entry_result in WalkDir::new(source).follow_links(false).min_depth(1) {
+    for entry_result in iter_tree_no_follow_reparse(source) {
         let entry = entry_result.map_err(|error| AppError::Io {
             message: error.to_string(),
         })?;
+        if entry.depth() < 1 {
+            continue;
+        }
         let relative = entry
             .path()
             .strip_prefix(source)
@@ -77,15 +84,35 @@ pub(crate) fn copy_directory(source: &Path, target: &Path) -> Result<(), AppErro
                 message: error.to_string(),
             })?;
         let destination = target.join(relative);
-        if entry.file_type().is_dir() {
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if is_symlink_link(&metadata) {
+            copy_symlink(entry.path(), &destination, &metadata)?;
+        } else if metadata.is_dir() {
             fs::create_dir(&destination)?;
-        } else if entry.file_type().is_symlink() {
-            copy_symlink(entry.path(), &destination, &entry.file_type())?;
-        } else if entry.file_type().is_file() {
+        } else if metadata.is_file() {
             fs::copy(entry.path(), destination)?;
         }
     }
     Ok(())
+}
+
+/// 不跟随 symlink/junction：父路径是链接时跳过其子项，避免 WalkDir 把 junction 当目录递归。
+fn iter_tree_no_follow_reparse(
+    root: &Path,
+) -> impl Iterator<Item = Result<walkdir::DirEntry, walkdir::Error>> {
+    let root = root.to_path_buf();
+    WalkDir::new(&root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(move |entry| {
+            if entry.depth() == 0 {
+                return true;
+            }
+            match entry.path().parent() {
+                Some(parent) if parent != root => !path_is_symlink_link(parent),
+                _ => true,
+            }
+        })
 }
 
 pub(crate) fn verify_directory_copy(source: &Path, target: &Path) -> Result<(), AppError> {
@@ -245,6 +272,103 @@ pub(crate) fn is_symlink_link(metadata: &fs::Metadata) -> bool {
     }
 }
 
+pub(crate) fn path_is_symlink_link(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| is_symlink_link(&metadata))
+        .unwrap_or(false)
+}
+
+/// 创建目录安装链接：Unix symlink；Windows 先 symlink_dir，特权不足时回退 junction。
+pub(crate) fn create_directory_link(source: &Path, target: &Path) -> Result<(), AppError> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(source, target).map_err(AppError::from)
+    }
+    #[cfg(windows)]
+    {
+        create_directory_link_windows(source, target)
+    }
+}
+
+#[cfg(windows)]
+fn create_directory_link_windows(source: &Path, target: &Path) -> Result<(), AppError> {
+    use std::os::windows::fs::symlink_dir;
+
+    let source_abs = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    let target_abs = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(target))
+            .unwrap_or_else(|_| target.to_path_buf())
+    };
+    match symlink_dir(&source_abs, target) {
+        Ok(()) => Ok(()),
+        Err(error) if is_privilege_not_held(&error) => {
+            if !crate::path_norm::same_windows_volume(&source_abs, &target_abs) {
+                return Err(AppError::Io {
+                    message: format!(
+                        "创建安装链接失败：源与目标不在同一卷，无法使用 junction 回退（符号链接错误：{error}）。请启用 Windows「开发人员模式」（设置 → 系统 → 开发者选项）后重试。"
+                    ),
+                });
+            }
+            create_directory_junction(&source_abs, target).map_err(|junction_error| {
+                AppError::Io {
+                    message: format!(
+                        "创建安装链接失败：需要管理员权限或启用 Windows「开发人员模式」（设置 → 系统 → 开发者选项）。符号链接错误：{error}；junction 回退错误：{junction_error}"
+                    ),
+                }
+            })
+        }
+        Err(error) => Err(AppError::from(error)),
+    }
+}
+
+#[cfg(windows)]
+fn is_privilege_not_held(error: &std::io::Error) -> bool {
+    // ERROR_PRIVILEGE_NOT_HELD
+    error.raw_os_error() == Some(1314)
+}
+
+#[cfg(windows)]
+fn create_directory_junction(source: &Path, target: &Path) -> Result<(), AppError> {
+    use std::process::Command;
+
+    let source_arg = strip_verbatim_prefix(source);
+    let target_arg = strip_verbatim_prefix(target);
+    let output = Command::new("cmd")
+        .args(["/C", "mklink", "/J", &target_arg, &source_arg])
+        .output()
+        .map_err(|error| AppError::Io {
+            message: format!("创建 junction 失败：{error}"),
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Err(AppError::Io {
+        message: format!(
+            "mklink /J 失败（{}）：{}{}",
+            output.status,
+            stderr.trim(),
+            stdout.trim()
+        ),
+    })
+}
+
+#[cfg(windows)]
+fn strip_verbatim_prefix(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        text.into_owned()
+    }
+}
+
 /// 删除目录/文件符号链接（或 Windows junction）本身，绝不跟随到目标内容。
 /// Windows 上目录链接必须用 `remove_dir`；误用 `remove_file` 会报拒绝访问 (os error 5)。
 pub(crate) fn remove_directory_symlink(path: &Path) -> Result<(), AppError> {
@@ -361,7 +485,7 @@ where
 }
 
 #[cfg(unix)]
-fn copy_symlink(source: &Path, target: &Path, _file_type: &fs::FileType) -> Result<(), AppError> {
+fn copy_symlink(source: &Path, target: &Path, _metadata: &fs::Metadata) -> Result<(), AppError> {
     use std::os::unix::fs::symlink;
 
     symlink(fs::read_link(source)?, target)?;
@@ -460,23 +584,12 @@ mod tests {
 }
 
 #[cfg(windows)]
-fn copy_symlink(source: &Path, target: &Path, file_type: &fs::FileType) -> Result<(), AppError> {
-    use std::os::windows::fs::{symlink_dir, symlink_file, FileTypeExt};
+fn copy_symlink(source: &Path, target: &Path, metadata: &fs::Metadata) -> Result<(), AppError> {
+    use std::os::windows::fs::symlink_file;
 
     let link_target = fs::read_link(source)?;
-    let kind = if file_type.is_symlink_dir() {
-        SymlinkKind::Directory
-    } else if file_type.is_symlink_file() {
-        SymlinkKind::File
-    } else {
-        return Err(AppError::Io {
-            message: format!("无法识别 Windows 符号链接类型：{}", source.display()),
-        });
-    };
-    dispatch_symlink_copy(
-        kind,
-        || symlink_file(&link_target, target),
-        || symlink_dir(&link_target, target),
-    )?;
-    Ok(())
+    match classify_windows_link(metadata) {
+        SymlinkKind::File => symlink_file(&link_target, target).map_err(AppError::from),
+        SymlinkKind::Directory => create_directory_link(&link_target, target),
+    }
 }

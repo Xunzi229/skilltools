@@ -145,8 +145,8 @@ fn build_tree(root: &Path, directory: &Path) -> Result<Vec<FileNode>, AppError> 
             .map_err(|_| outside_error(&path))?
             .to_string_lossy()
             .replace('\\', "/");
-        let (kind, size, children) = if file_type.is_symlink() {
-            // Treat symlinks as opaque file nodes; never follow into the target.
+        let (kind, size, children) = if crate::fs_ops::is_symlink_link(&metadata) {
+            // Treat symlinks/junctions as opaque file nodes; never follow into the target.
             (FileNodeKind::File, Some(metadata.len()), Vec::new())
         } else if file_type.is_dir() {
             (FileNodeKind::Directory, None, build_tree(root, &path)?)
@@ -192,10 +192,7 @@ fn resolve_file_path(root: &Path, relative_path: &str) -> Result<PathBuf, AppErr
             return Err(outside_error(relative));
         };
         candidate.push(component);
-        if fs::symlink_metadata(&candidate)
-            .map(|metadata| metadata.file_type().is_symlink())
-            .unwrap_or(false)
-        {
+        if crate::fs_ops::path_is_symlink_link(&candidate) {
             return Err(outside_error(&candidate));
         }
     }
@@ -229,7 +226,7 @@ fn resolve_writable_file_path(root: &Path, relative_path: &str) -> Result<PathBu
         candidate.push(name);
         let is_leaf = index + 1 == components.len();
         match fs::symlink_metadata(&candidate) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if crate::fs_ops::is_symlink_link(&metadata) => {
                 return Err(outside_error(&candidate));
             }
             Ok(metadata) if !is_leaf && !metadata.is_dir() => {

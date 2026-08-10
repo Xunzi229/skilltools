@@ -52,7 +52,7 @@ export function SkillCard({
           {expandable && (
             <button
               type="button"
-              className="grid size-5 shrink-0 place-items-center rounded-[6px] text-[11px] text-ink-3 hover:bg-black/6 hover:text-ink"
+              className="grid size-6 shrink-0 place-items-center rounded-[6px] text-[14px] leading-none text-ink-3 hover:bg-black/6 hover:text-ink"
               aria-expanded={expanded}
               aria-label={`${expanded ? "收起" : "展开"} ${name} 的子 Skill`}
               onClick={(event) => {

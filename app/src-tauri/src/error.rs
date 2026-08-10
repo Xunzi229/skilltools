@@ -14,6 +14,9 @@ pub enum AppError {
     MoveRollback { message: String },
     #[error("文件操作失败：{message}")]
     Io { message: String },
+    /// 跨设备/跨卷（Unix EXDEV / Windows ERROR_NOT_SAME_DEVICE），调用方可改走 copy。
+    #[error("跨设备操作：{message}")]
+    CrossDevice { message: String },
     #[error("备份校验失败：{id}")]
     BackupVerificationFailed { id: String },
     #[error("未找到备份：{id}")]
@@ -57,9 +60,31 @@ pub enum AppError {
 
 impl From<std::io::Error> for AppError {
     fn from(error: std::io::Error) -> Self {
+        if is_cross_device_io_error(&error) {
+            return Self::CrossDevice {
+                message: error.to_string(),
+            };
+        }
         Self::Io {
             message: error.to_string(),
         }
+    }
+}
+
+pub(crate) fn is_cross_device_io_error(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(libc::EXDEV)
+    }
+    #[cfg(windows)]
+    {
+        // ERROR_NOT_SAME_DEVICE
+        error.raw_os_error() == Some(17)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = error;
+        false
     }
 }
 
@@ -74,5 +99,21 @@ mod tests {
         let app_error = AppError::from(error);
 
         assert_eq!(app_error.to_string(), "文件操作失败：disk unavailable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exdev_maps_to_cross_device() {
+        let error = std::io::Error::from_raw_os_error(libc::EXDEV);
+        let app_error = AppError::from(error);
+        assert!(matches!(app_error, AppError::CrossDevice { .. }));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn not_same_device_maps_to_cross_device() {
+        let error = std::io::Error::from_raw_os_error(17);
+        let app_error = AppError::from(error);
+        assert!(matches!(app_error, AppError::CrossDevice { .. }));
     }
 }

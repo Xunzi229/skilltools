@@ -56,6 +56,7 @@ pub(crate) fn map_app_error(error: AppError) -> CommandError {
         AppError::PauseIndex { .. } => "PAUSE_INDEX",
         AppError::MoveRollback { .. } => "MOVE_ROLLBACK",
         AppError::Io { .. } => "IO",
+        AppError::CrossDevice { .. } => "CROSS_DEVICE",
         AppError::BackupVerificationFailed { .. } => "BACKUP_VERIFICATION_FAILED",
         AppError::BackupNotFound { .. } => "BACKUP_NOT_FOUND",
         AppError::BackupIndex { .. } => "BACKUP_INDEX",

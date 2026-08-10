@@ -245,12 +245,12 @@ impl LibraryRepository {
 
 fn is_under_library(library_dir: &Path, path: &Path) -> bool {
     let Ok(canon) = path.canonicalize() else {
-        return path.starts_with(library_dir);
+        return crate::path_norm::path_is_under(path, library_dir);
     };
     let Ok(lib) = library_dir.canonicalize() else {
-        return canon.starts_with(library_dir);
+        return crate::path_norm::path_is_under(&canon, library_dir);
     };
-    canon.starts_with(&lib)
+    crate::path_norm::path_is_under(&canon, &lib)
 }
 
 fn rewrite_skill_frontmatter_name(skill_dir: &Path, new_name: &str) -> Result<(), AppError> {

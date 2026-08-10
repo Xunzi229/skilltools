@@ -27,15 +27,30 @@ pub fn export_directory_to_zip(source_dir: &Path, dest_zip: &Path) -> Result<(),
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "skill".to_string());
 
-    for entry in WalkDir::new(source_dir).follow_links(false) {
+    let source_root = source_dir.to_path_buf();
+    for entry in WalkDir::new(source_dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(move |entry| {
+            if entry.depth() == 0 {
+                return true;
+            }
+            match entry.path().parent() {
+                Some(parent) if parent != source_root => {
+                    !crate::fs_ops::path_is_symlink_link(parent)
+                }
+                _ => true,
+            }
+        })
+    {
         let entry = entry.map_err(|error| AppError::Zip {
             message: format!("遍历目录失败：{error}"),
         })?;
         let path = entry.path();
-        let metadata = entry.metadata().map_err(|error| AppError::Zip {
+        let metadata = fs::symlink_metadata(path).map_err(|error| AppError::Zip {
             message: format!("读取元数据失败：{error}"),
         })?;
-        if metadata.file_type().is_symlink() {
+        if crate::fs_ops::is_symlink_link(&metadata) {
             continue;
         }
         let relative = path.strip_prefix(source_dir).map_err(|_| AppError::Zip {

@@ -215,9 +215,9 @@ impl LibraryRepository {
         let _guard = lock_app_transaction(self.paths())?;
         self.paths().assert_skill_access(source_path)?;
         let meta = fs::symlink_metadata(source_path)?;
-        if meta.file_type().is_symlink() {
+        if is_symlink_link(&meta) {
             let resolved = fs::canonicalize(source_path)?;
-            if resolved.starts_with(&self.paths().library_dir) {
+            if crate::path_norm::path_is_under(&resolved, &self.paths().library_dir) {
                 return Err(AppError::Io {
                     message: "该 Skill 已是库安装链接，无需迁移".into(),
                 });
@@ -320,16 +320,18 @@ impl LibraryRepository {
         let library_dir = &self.paths().library_dir;
         let managed_targets = managed
             .iter()
-            .map(|installation| installation.target_path.clone())
+            .map(|installation| crate::path_norm::normalize_path_key(&installation.target_path))
             .collect::<std::collections::HashSet<_>>();
         let unmanaged = provider_skills
             .iter()
             .filter(|skill| {
-                if managed_targets.contains(&skill.current_path) {
+                if managed_targets
+                    .contains(&crate::path_norm::normalize_path_key(&skill.current_path))
+                {
                     return false;
                 }
                 if let Some(resolved) = &skill.resolved_path {
-                    if resolved.starts_with(library_dir) {
+                    if crate::path_norm::path_is_under(resolved, library_dir) {
                         return false;
                     }
                 }

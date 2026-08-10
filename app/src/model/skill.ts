@@ -44,11 +44,20 @@ export function skillProviders(skill: Pick<SkillSummary, "provider" | "providers
   return [skill.provider];
 }
 
-/** 去重键：resolvedPath（symlink 目标）优先，否则 currentPath */
+/** 去重键：resolvedPath（symlink 目标）优先，否则 currentPath；剥离 Windows verbatim 前缀 */
 export function skillCanonicalKey(
   skill: Pick<SkillSummary, "resolvedPath" | "currentPath">,
 ): string {
-  const raw = (skill.resolvedPath ?? skill.currentPath).trim();
+  let raw = (skill.resolvedPath ?? skill.currentPath).trim();
+  if (raw.startsWith("\\\\?\\UNC\\")) {
+    raw = `\\\\${raw.slice("\\\\?\\UNC\\".length)}`;
+  } else if (raw.startsWith("\\\\?\\")) {
+    raw = raw.slice("\\\\?\\".length);
+  } else if (raw.startsWith("//?/UNC/")) {
+    raw = `//${raw.slice("//?/UNC/".length)}`;
+  } else if (raw.startsWith("//?/")) {
+    raw = raw.slice("//?/".length);
+  }
   return raw.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 

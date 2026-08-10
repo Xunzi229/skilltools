@@ -9,6 +9,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::error::AppError;
+use crate::fs_ops::{create_directory_link, is_symlink_link, path_is_symlink_link};
 use crate::git_ops::{
     browse_url_from_git_url, clone_repository, latest_commit_time, project_name_from_git_url,
     pull_fast_forward, read_origin_url, source_repo_from_git_url, validate_git_url,
@@ -620,7 +621,7 @@ fn collect_child_skill_directories(
 
 fn is_plain_directory(path: &Path) -> bool {
     fs::symlink_metadata(path)
-        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .map(|metadata| metadata.is_dir() && !is_symlink_link(&metadata))
         .unwrap_or(false)
 }
 
@@ -666,14 +667,8 @@ pub(crate) fn safe_skill_target(root: &Path, name: &str) -> Result<PathBuf, AppE
     Ok(root.join(path))
 }
 
-#[cfg(unix)]
 pub(crate) fn create_directory_symlink(source: &Path, target: &Path) -> Result<(), AppError> {
-    std::os::unix::fs::symlink(source, target).map_err(AppError::from)
-}
-
-#[cfg(windows)]
-pub(crate) fn create_directory_symlink(source: &Path, target: &Path) -> Result<(), AppError> {
-    std::os::windows::fs::symlink_dir(source, target).map_err(AppError::from)
+    create_directory_link(source, target)
 }
 
 /// 发现各 provider 根下已指向库 Skill 的符号链接，回填到 installations。
@@ -702,16 +697,16 @@ pub(crate) fn adopt_existing_installations(index: &mut LibraryIndex, paths: &App
         };
         for entry in entries.flatten() {
             let target_path = entry.path();
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            if !file_type.is_symlink() {
+            if !path_is_symlink_link(&target_path) {
                 continue;
             }
             let Ok(resolved) = target_path.canonicalize() else {
                 continue;
             };
-            let Some((_, skill_id)) = sources.iter().find(|(source, _)| *source == resolved) else {
+            let Some((_, skill_id)) = sources
+                .iter()
+                .find(|(source, _)| crate::path_norm::paths_eq(source, &resolved))
+            else {
                 continue;
             };
             let already = index.installations.iter().any(|installation| {
@@ -732,11 +727,7 @@ pub(crate) fn adopt_existing_installations(index: &mut LibraryIndex, paths: &App
 }
 
 pub(crate) fn prune_missing_installations(index: &mut LibraryIndex) {
-    index.installations.retain(|installation| {
-        fs::symlink_metadata(&installation.target_path)
-            .map(|metadata| metadata.file_type().is_symlink())
-            .unwrap_or(false)
-    });
+    index.installations.retain(|installation| path_is_symlink_link(&installation.target_path));
 }
 
 pub(crate) fn sync_installation_statuses(index: &mut LibraryIndex) {

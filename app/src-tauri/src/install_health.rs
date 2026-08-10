@@ -5,6 +5,7 @@ use crate::error::AppError;
 use crate::fs_ops::{is_symlink_link, remove_directory_symlink};
 use crate::library_repository::LibraryIndex;
 use crate::model::{InstallHealthIssue, InstallHealthKind, InstallHealthReport};
+use crate::path_norm::{normalize_path_key, path_is_under, paths_eq};
 use crate::paths::AppPaths;
 
 pub fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<InstallHealthIssue> {
@@ -12,7 +13,7 @@ pub fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<Inst
     let mut indexed_targets = HashSet::new();
 
     for installation in &index.installations {
-        indexed_targets.insert(installation.target_path.clone());
+        indexed_targets.insert(normalize_path_key(&installation.target_path));
         let skill = index
             .library_skills
             .iter()
@@ -48,7 +49,7 @@ pub fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<Inst
                 Ok(resolved) => {
                     if expected_source
                         .as_ref()
-                        .is_some_and(|expected| expected != &resolved)
+                        .is_some_and(|expected| !paths_eq(expected, &resolved))
                     {
                         issues.push(InstallHealthIssue {
                             kind: InstallHealthKind::SourceMismatch,
@@ -92,13 +93,13 @@ pub fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<Inst
             if !is_symlink_link(&metadata) {
                 continue;
             }
-            if indexed_targets.contains(&path) {
+            if indexed_targets.contains(&normalize_path_key(&path)) {
                 continue;
             }
             let Ok(resolved) = fs::canonicalize(&path) else {
                 continue;
             };
-            if !resolved.starts_with(&paths.library_dir) {
+            if !path_is_under(&resolved, &paths.library_dir) {
                 continue;
             }
             issues.push(InstallHealthIssue {

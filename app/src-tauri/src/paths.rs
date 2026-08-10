@@ -123,7 +123,7 @@ impl AppPaths {
         let Ok(metadata) = fs::symlink_metadata(path) else {
             return false;
         };
-        if !metadata.file_type().is_symlink() {
+        if !crate::fs_ops::is_symlink_link(&metadata) {
             return false;
         }
         let Some(parent) = path.parent() else {
@@ -196,7 +196,8 @@ fn resolve_path(path: &Path) -> Result<PathBuf, AppError> {
     };
 
     let mut resolved = existing.canonicalize().map_err(|error| {
-        if metadata.file_type().is_symlink() && error.kind() == std::io::ErrorKind::NotFound {
+        if crate::fs_ops::is_symlink_link(&metadata) && error.kind() == std::io::ErrorKind::NotFound
+        {
             AppError::PathOutsideManagedRoots {
                 path: path.display().to_string(),
             }
