@@ -93,7 +93,7 @@ export function BackupList({
   return (
     <>
       <section
-        className="flex h-full min-h-0 min-w-0 w-[340px] flex-col overflow-hidden border-r border-line-strong bg-panel"
+        className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-r border-line-strong bg-panel"
         aria-label="备份列表"
       >
         <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">

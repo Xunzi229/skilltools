@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
-import type { BatchResult, Provider } from "../model/skill";
+import type { BatchResult, Provider, SkillGroupAssignment } from "../model/skill";
 
 export function useBatchActions(api: SkillApi) {
   const [batchBusy, setBatchBusy] = useState(false);
@@ -38,6 +38,33 @@ export function useBatchActions(api: SkillApi) {
       run(() => api.batchUninstallSkills(skillIds, provider)),
     batchSetSkillGroup: (skillIds: string[], groupId: string | null) =>
       run(() => api.batchSetSkillGroup(skillIds, groupId)),
+    batchApplySkillGroups: (assignments: SkillGroupAssignment[]) =>
+      run(async () => {
+        const buckets = new Map<string, string[]>();
+        for (const item of assignments) {
+          const key = item.groupId ?? "__none__";
+          const list = buckets.get(key) ?? [];
+          list.push(item.skillId);
+          buckets.set(key, list);
+        }
+        const merged: BatchResult = {
+          total: 0,
+          success: 0,
+          failed: 0,
+          skipped: 0,
+          items: [],
+        };
+        for (const [key, skillIds] of buckets) {
+          const groupId = key === "__none__" ? null : key;
+          const result = await api.batchSetSkillGroup(skillIds, groupId);
+          merged.total += result.total;
+          merged.success += result.success;
+          merged.failed += result.failed;
+          merged.skipped += result.skipped;
+          merged.items.push(...result.items);
+        }
+        return merged;
+      }),
     batchAddSkillTags: (skillIds: string[], tagId: string) =>
       run(() => api.batchAddSkillTags(skillIds, tagId)),
     batchMigrateProviderSkills: (skillIds: string[], replaceWithLink: boolean) =>

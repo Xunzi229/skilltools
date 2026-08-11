@@ -48,7 +48,7 @@ export function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-[2px]">
       <div
-        className="macos-sheet w-full max-w-md p-5"
+        className="macos-sheet max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto p-5"
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"

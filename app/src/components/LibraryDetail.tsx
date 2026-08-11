@@ -202,7 +202,7 @@ export function LibraryDetail({
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
         {actionError && (
           <div
             className="macos-alert-error flex shrink-0 items-center justify-between gap-3"
@@ -338,7 +338,7 @@ export function LibraryDetail({
           />
         )}
 
-        <div className="macos-split flex min-h-0 flex-1">
+        <div className="macos-split flex min-h-[240px] flex-1">
           <FileTree
             nodes={files.tree}
             selectedPath={files.preview?.relativePath ?? null}

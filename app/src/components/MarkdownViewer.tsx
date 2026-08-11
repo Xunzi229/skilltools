@@ -113,7 +113,7 @@ export function MarkdownViewer({
     kind === "markdown" ? stripMarkdownFrontmatter(file?.content ?? "") : "";
 
   return (
-    <article className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
+    <article className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line-strong px-3 py-2 text-[12px] font-medium text-ink-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate">{file?.relativePath ?? "SKILL.md"}</span>

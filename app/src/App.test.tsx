@@ -340,6 +340,7 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     }),
     saveSettings: async (settings) => settings,
     previewTranslateSkill: unavailable,
+    suggestSkillGroups: unavailable,
     getAppPaths: async () => ({
       appDataDir: "/tmp/app-data",
       disabledDir: "/tmp/app-data/disabled",

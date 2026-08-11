@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import type { SkillApi } from "../api/skillApi";
 import type {
   BatchResult,
   LibrarySkillSummary,
   Provider,
   SkillGroup,
+  SkillGroupAssignment,
   Tag,
 } from "../model/skill";
 import { formatBatchSummary } from "../hooks/useBatchActions";
@@ -12,6 +14,7 @@ import {
   useSelectionMode,
 } from "../hooks/useSelectionMode";
 import { displayDescription, matchesLibrarySkillSearch } from "../utils/skillDisplay";
+import { AiGroupButton } from "./AiGroupButton";
 import { NameDialog } from "./NameDialog";
 import { PanelToggle } from "./PanelToggle";
 import { SelectionModeButton } from "./SelectionModeButton";
@@ -20,6 +23,7 @@ import { SkillCard } from "./SkillCard";
 type StatusTab = "all" | "uninstalled" | "installed" | "custom";
 
 interface LibraryListProps {
+  api: SkillApi;
   title: string;
   skills: LibrarySkillSummary[];
   groups: SkillGroup[];
@@ -36,11 +40,14 @@ interface LibraryListProps {
   onSearchChange: (value: string) => void;
   onSelect: (id: string) => void;
   onToggleSelect: (id: string) => void;
+  onSetSelection: (ids: string[]) => void;
+  onInvertSelection: (ids: string[]) => void;
   onClearSelection: () => void;
   onBatchInstall: (provider: Provider) => void;
   onBatchUninstall: (provider: Provider) => void;
   onBatchSetGroup: (groupId: string | null) => void;
   onBatchAddTag: (tagId: string) => void;
+  onApplyAiGroups: (assignments: SkillGroupAssignment[]) => Promise<void>;
   onCreateSkill: (name: string) => Promise<void>;
   onRetry: () => void;
   onClearBatchResult: () => void;
@@ -48,6 +55,7 @@ interface LibraryListProps {
 }
 
 export function LibraryList({
+  api,
   title,
   skills,
   groups,
@@ -64,11 +72,14 @@ export function LibraryList({
   onSearchChange,
   onSelect,
   onToggleSelect,
+  onSetSelection,
+  onInvertSelection,
   onClearSelection,
   onBatchInstall,
   onBatchUninstall,
   onBatchSetGroup,
   onBatchAddTag,
+  onApplyAiGroups,
   onCreateSkill,
   onRetry,
   onClearBatchResult,
@@ -169,6 +180,11 @@ export function LibraryList({
     }
     return ordered;
   }, [childrenByParent, collapsed, filtered, parents]);
+
+  const selectableIds = useMemo(
+    () => filtered.map((skill) => skill.id),
+    [filtered],
+  );
 
   const tabs: Array<{ id: StatusTab; label: string }> = [
     { id: "all", label: "全部" },
@@ -280,81 +296,123 @@ export function LibraryList({
             );
           })}
         </div>
-        {selectedIds.size > 0 && (
-          <div className="mt-3 flex flex-col gap-1.5">
-            <span className="text-[11px] text-ink-2">已选 {selectedIds.size} 项</span>
-            <div className="flex flex-wrap gap-1.5">
-              {(["cursor", "claude", "codex"] as const).map((provider) => (
+        {selectionActive && (
+          <div className="library-batch mt-3">
+            <section className="library-batch-block" aria-label="选择">
+              <div className="library-batch-actions">
+                <span className="library-batch-count">已选 {selectedIds.size} 项</span>
                 <button
-                  key={`install-${provider}`}
                   type="button"
-                  className="macos-btn-ghost macos-btn-sm"
-                  disabled={batchBusy}
-                  onClick={() => onBatchInstall(provider)}
+                  className="macos-btn-ghost"
+                  disabled={batchBusy || selectableIds.length === 0}
+                  title="选中当前列表中的全部 Skill"
+                  onClick={() => onSetSelection(selectableIds)}
                 >
-                  安装 {provider}
+                  全选
                 </button>
-              ))}
-              {(["cursor", "claude", "codex"] as const).map((provider) => (
                 <button
-                  key={`uninstall-${provider}`}
                   type="button"
-                  className="macos-btn-ghost macos-btn-sm"
-                  disabled={batchBusy}
-                  onClick={() => onBatchUninstall(provider)}
+                  className="macos-btn-ghost"
+                  disabled={batchBusy || selectableIds.length === 0}
+                  title="反转当前列表中的勾选状态"
+                  onClick={() => onInvertSelection(selectableIds)}
                 >
-                  卸载 {provider}
+                  反选
                 </button>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              <select
-                className="macos-select macos-select-sm"
-                aria-label="批量设置分组"
-                disabled={batchBusy}
-                defaultValue=""
-                onChange={(event) => {
-                  const value = event.target.value;
-                  onBatchSetGroup(value === "" ? null : value === "__none__" ? null : value);
-                  event.target.value = "";
-                }}
-              >
-                <option value="">设置分组…</option>
-                <option value="__none__">未分组</option>
-                {[...groups]
-                  .sort((a, b) => a.order - b.order)
-                  .map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name}
-                    </option>
-                  ))}
-              </select>
-              <select
-                className="macos-select macos-select-sm"
-                aria-label="批量追加标签"
-                disabled={batchBusy || tags.length === 0}
-                defaultValue=""
-                onChange={(event) => {
-                  if (event.target.value) onBatchAddTag(event.target.value);
-                  event.target.value = "";
-                }}
-              >
-                <option value="">追加标签…</option>
-                {tags.map((tag) => (
-                  <option key={tag.id} value={tag.id}>
-                    {tag.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="macos-btn-ghost macos-btn-sm"
-                disabled={batchBusy}
-                onClick={onClearSelection}
-              >
-                清除
-              </button>
-            </div>
+                {selectedIds.size > 0 ? (
+                  <button
+                    type="button"
+                    className="macos-btn-ghost"
+                    disabled={batchBusy}
+                    onClick={onClearSelection}
+                  >
+                    清除
+                  </button>
+                ) : null}
+              </div>
+            </section>
+            {selectedIds.size > 0 ? (
+              <>
+                <section className="library-batch-block" aria-label="安装">
+                  <div className="library-batch-actions">
+                    {(["cursor", "claude", "codex"] as const).map((provider) => (
+                      <button
+                        key={`install-${provider}`}
+                        type="button"
+                        className="macos-btn-ghost"
+                        disabled={batchBusy}
+                        onClick={() => onBatchInstall(provider)}
+                      >
+                        安装 {provider}
+                      </button>
+                    ))}
+                    {(["cursor", "claude", "codex"] as const).map((provider) => (
+                      <button
+                        key={`uninstall-${provider}`}
+                        type="button"
+                        className="macos-btn-ghost"
+                        disabled={batchBusy}
+                        onClick={() => onBatchUninstall(provider)}
+                      >
+                        卸载 {provider}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section className="library-batch-block" aria-label="分组">
+                  <div className="library-batch-actions">
+                    <select
+                      className="macos-select"
+                      aria-label="批量设置分组"
+                      disabled={batchBusy}
+                      defaultValue=""
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        onBatchSetGroup(
+                          value === "" ? null : value === "__none__" ? null : value,
+                        );
+                        event.target.value = "";
+                      }}
+                    >
+                      <option value="">设置分组…</option>
+                      <option value="__none__">未分组</option>
+                      {[...groups]
+                        .sort((a, b) => a.order - b.order)
+                        .map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {group.name}
+                          </option>
+                        ))}
+                    </select>
+                    <AiGroupButton
+                      api={api}
+                      skills={skills}
+                      groups={groups}
+                      selectedIds={selectedIds}
+                      disabled={batchBusy}
+                      onApply={onApplyAiGroups}
+                    />
+                    <select
+                      className="macos-select"
+                      aria-label="批量追加标签"
+                      disabled={batchBusy || tags.length === 0}
+                      defaultValue=""
+                      onChange={(event) => {
+                        if (event.target.value) onBatchAddTag(event.target.value);
+                        event.target.value = "";
+                      }}
+                    >
+                      <option value="">追加标签…</option>
+                      {tags.map((tag) => (
+                        <option key={tag.id} value={tag.id}>
+                          {tag.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </section>
+              </>
+            ) : null}
           </div>
         )}
         {batchResult && (

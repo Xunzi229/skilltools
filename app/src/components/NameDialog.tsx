@@ -47,7 +47,7 @@ export function NameDialog({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-[2px]">
       <form
-        className="macos-sheet w-full max-w-sm p-5"
+        className="macos-sheet max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto p-5"
         role="dialog"
         aria-modal="true"
         aria-labelledby="name-dialog-title"

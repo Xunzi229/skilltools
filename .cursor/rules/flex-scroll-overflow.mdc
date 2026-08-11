@@ -1,0 +1,55 @@
+---
+description: 防止 flex 布局导致内容被裁切却无法滚动
+globs: app/src/**/*.{tsx,css}
+alwaysApply: false
+---
+
+# Flex 布局滚动约束
+
+「看得见截断但滚不动」几乎总是高度约束链断了：外层 `overflow-hidden`，中间层没把高度限死，内层 `overflow-auto` 拿不到有限高度，只能跟着内容撑开，再被父级裁掉。
+
+## 必须遵守
+
+1. **滚动发生在有限高度的盒子里**。谁负责滚，谁就要在受限高度内：`min-h-0` + `overflow-auto` / `overflow-y-auto`。
+2. **flex 列从根到滚动子级，每一层都要能收缩**：`flex flex-col` + `min-h-0`（或明确 `h-*` / `max-h-*`）。缺一层就会整链失效。
+3. **禁止**「父级 `overflow-hidden`，子级全是 `shrink-0`，又没有任何 `overflow-auto`」——内容一高就会被裁且无法滚动。
+4. **弹层 / sheet** 必须有高度上限，例如 `max-h-[calc(100vh-2rem)]`，内容区再 `overflow-y-auto`；不要只靠 `place-items-center` 居中无限长内容。
+5. **中间 wrapper** 若包着可滚动组件（如 `MarkdownViewer`），不能只写 `h-full`；要写成 `flex h-full min-h-0 flex-col overflow-hidden`，让子级 `flex-1 min-h-0 overflow-auto` 生效。
+
+## 正确骨架
+
+```tsx
+// 页面 / 弹层主体
+<div className="flex h-[min(85vh,720px)] flex-col overflow-hidden">
+  <header className="shrink-0">...</header>
+  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div className="min-h-0 flex-1 overflow-auto">
+      {/* 长内容 */}
+    </div>
+  </div>
+</div>
+```
+
+```tsx
+// ❌ BAD：中间层不断高度，滚动永不触发
+<div className="flex flex-col overflow-hidden h-[80vh]">
+  <div className="h-full">           {/* 缺 flex + min-h-0 */}
+    <article className="flex-1">   {/* 随内容撑高 */}
+      <div className="overflow-auto">...</div>
+    </article>
+  </div>
+</div>
+```
+
+## 自检（改 UI 时过一遍）
+
+- [ ] 长内容下能否滚到末尾？
+- [ ] flex 子项是否都有 `min-h-0` 或合理 `min-h-[…]` 下限？
+- [ ] `overflow-hidden` 父级内部是否至少有一个滚动出口？
+- [ ] 弹层是否设了 `max-h` + 内部滚动？
+- [ ] 代码预览等嵌套滚动：横向条不要沉在超长内容最底部（优先让外层统一滚）
+
+## 历史案例
+
+- 翻译预览：`TranslatePreviewButton` 中间 wrapper 缺 flex/`min-h-0`，预览区被裁切。
+- Skill/库详情：内容区 `overflow-hidden` 但上方块全是 `shrink-0`，元数据变高后文件区被挤没且无法滚。

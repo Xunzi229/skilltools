@@ -229,6 +229,17 @@ export interface TranslatePreview {
   fromCache?: boolean;
 }
 
+/** AI 智能分组建议（groupName 为现有分组名，null 表示未分组） */
+export interface GroupSuggestion {
+  skillId: string;
+  groupName: string | null;
+}
+
+export interface SkillGroupAssignment {
+  skillId: string;
+  groupId: string | null;
+}
+
 export interface AppSettings {
   theme: ThemePreference;
   skillRootOverrides: SkillRootOverrides;

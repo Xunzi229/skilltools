@@ -284,6 +284,48 @@
     border-radius: 7px;
   }
 
+  /* 库列表批量操作：三块浅底 + 统一控件高度 */
+  .library-batch {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .library-batch-block {
+    border: none;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-ink) 0.6%, var(--color-panel));
+    padding: 8px 10px;
+  }
+
+  .library-batch-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .library-batch-actions .macos-btn-ghost,
+  .library-batch-actions .macos-select {
+    height: 28px;
+    min-height: 28px;
+    padding: 0 0.7rem;
+    font-size: 12px;
+    border-radius: 8px;
+    box-sizing: border-box;
+  }
+
+  .library-batch-actions .macos-select {
+    padding-right: 1.55rem;
+    background-position: right 0.4rem center;
+  }
+
+  .library-batch-count {
+    margin-right: 2px;
+    font-size: 12px;
+    color: var(--color-ink-2);
+  }
+
   .macos-search {
     display: flex;
     align-items: center;
@@ -653,7 +695,8 @@
   }
 
   .code-panel {
-    @apply grid min-h-full grid-cols-[auto_minmax(0,1fr)] bg-panel;
+    /* 宽度随内容，纵向滚动交给 .file-preview-body，避免横向滚动条沉在文件底部 */
+    @apply grid w-max min-w-full grid-cols-[auto_minmax(0,1fr)] bg-panel;
   }
 
   .code-gutter {
@@ -665,7 +708,7 @@
   }
 
   .code-pre {
-    @apply m-0 overflow-auto px-3 py-3;
+    @apply m-0 overflow-visible px-3 py-3;
   }
 
   .code-pre code {

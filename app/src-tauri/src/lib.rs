@@ -5,6 +5,7 @@ pub mod error;
 mod external_open;
 mod fs_ops;
 pub mod git_ops;
+mod group_suggest;
 mod install_health;
 mod install_presets;
 mod json_store;
@@ -113,6 +114,7 @@ pub fn run() {
             commands::list_system_fonts,
             commands::save_settings,
             commands::preview_translate_skill,
+            commands::suggest_skill_groups,
             commands::get_app_paths,
             commands::reveal_path,
             commands::export_library_skill_zip,

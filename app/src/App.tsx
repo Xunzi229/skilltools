@@ -68,6 +68,7 @@ function App({ api = tauriSkillApi }: AppProps) {
     batchInstallSkills,
     batchUninstallSkills,
     batchSetSkillGroup,
+    batchApplySkillGroups,
     batchAddSkillTags,
     batchMigrateProviderSkills,
   } = useBatchActions(api);
@@ -253,6 +254,20 @@ function App({ api = tauriSkillApi }: AppProps) {
     });
   };
 
+  const invertSet = (
+    setter: Dispatch<SetStateAction<Set<string>>>,
+    ids: string[],
+  ) => {
+    setter((current) => {
+      const next = new Set(current);
+      for (const id of ids) {
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  };
+
   const sidebarWidth = sidebarCollapsed ? 52 : 240;
   const listWidth = listCollapsed ? 44 : 340;
 
@@ -381,6 +396,7 @@ function App({ api = tauriSkillApi }: AppProps) {
       ) : libraryMode ? (
         <>
           <LibraryList
+            api={api}
             title={libraryTitle}
             skills={visibleLibrarySkills}
             groups={library.groups}
@@ -397,6 +413,8 @@ function App({ api = tauriSkillApi }: AppProps) {
             onSearchChange={setSearch}
             onSelect={library.selectLibrarySkill}
             onToggleSelect={(id) => toggleSet(setLibrarySelectedIds, id)}
+            onSetSelection={(ids) => setLibrarySelectedIds(new Set(ids))}
+            onInvertSelection={(ids) => invertSet(setLibrarySelectedIds, ids)}
             onClearSelection={() => setLibrarySelectedIds(new Set())}
             onBatchInstall={(provider: Provider) => {
               const ids = [...librarySelectedIds];
@@ -418,6 +436,11 @@ function App({ api = tauriSkillApi }: AppProps) {
               void batchSetSkillGroup(ids, groupId).then(() =>
                 void library.refresh({ silent: true }),
               );
+            }}
+            onApplyAiGroups={async (assignments) => {
+              if (batchBusy || assignments.length === 0) return;
+              await batchApplySkillGroups(assignments);
+              await library.refresh({ silent: true });
             }}
             onBatchAddTag={(tagId) => {
               const ids = [...librarySelectedIds];
@@ -511,6 +534,8 @@ function App({ api = tauriSkillApi }: AppProps) {
               );
             }}
             onToggleSelect={(ids) => toggleSet(setSkillSelectedIds, ids)}
+            onSetSelection={(ids) => setSkillSelectedIds(new Set(ids))}
+            onInvertSelection={(ids) => invertSet(setSkillSelectedIds, ids)}
             onClearSelection={() => setSkillSelectedIds(new Set())}
             onBatchPause={() => {
               const ids = [...skillSelectedIds];

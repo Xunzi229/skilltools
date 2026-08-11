@@ -23,6 +23,7 @@ use crate::skill_files::{
     write_skill_file as save_skill_file, resolve_skill_file_path,
 };
 use crate::skill_repository::SkillRepository;
+use crate::group_suggest::{self, GroupSuggestion};
 use crate::translate::{
     self, TranslatePreview, TranslateSkillSource,
 };
@@ -815,6 +816,62 @@ pub async fn preview_translate_skill(
     .map_err(|error| CommandError {
         code: "TASK_JOIN",
         message: format!("翻译任务失败：{error}"),
+    })?
+}
+
+/// AI suggest groups for selected library skills (description-based). Does not write.
+#[tauri::command]
+pub async fn suggest_skill_groups(
+    app: AppHandle,
+    skill_ids: Vec<String>,
+) -> Result<Vec<GroupSuggestion>, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let paths = current_paths(state.inner())?;
+        let settings = settings::load_settings(&paths.app_data_dir).map_err(map_app_error)?;
+        let library = state.library.lock().map_err(|_| state_lock_error())?;
+        let groups = library.list_groups().map_err(map_app_error)?;
+        let group_names: Vec<String> = groups.into_iter().map(|group| group.name).collect();
+        if group_names.is_empty() {
+            return Err(CommandError {
+                code: "TRANSLATE",
+                message: "请先在侧栏创建至少一个分组".into(),
+            });
+        }
+
+        let wanted: std::collections::HashSet<&str> =
+            skill_ids.iter().map(String::as_str).collect();
+        let skills = library
+            .list_library_skills()
+            .map_err(map_app_error)?
+            .into_iter()
+            .filter(|skill| wanted.contains(skill.id.as_str()))
+            .map(|skill| group_suggest::GroupSuggestSkill {
+                id: skill.id,
+                name: skill.name,
+                description: skill.description,
+            })
+            .collect::<Vec<_>>();
+        drop(library);
+
+        if skills.is_empty() {
+            return Err(CommandError {
+                code: "TRANSLATE",
+                message: "未找到选中的 Skill".into(),
+            });
+        }
+
+        group_suggest::suggest_groups_with_openai_compatible(
+            &settings.translate,
+            &skills,
+            &group_names,
+        )
+        .map_err(map_app_error)
+    })
+    .await
+    .map_err(|error| CommandError {
+        code: "TASK_JOIN",
+        message: format!("分组识别任务失败：{error}"),
     })?
 }
 

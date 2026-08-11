@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   skillMatchesSelection,
   skillMemberIds,
@@ -33,6 +33,8 @@ interface SkillListProps {
   onSearchChange: (value: string) => void;
   onSelect: (skillId: string) => void;
   onToggleSelect: (skillIds: string[]) => void;
+  onSetSelection: (ids: string[]) => void;
+  onInvertSelection: (ids: string[]) => void;
   onClearSelection: () => void;
   onBatchPause: () => void;
   onBatchResume: () => void;
@@ -60,6 +62,8 @@ export function SkillList({
   onSearchChange,
   onSelect,
   onToggleSelect,
+  onSetSelection,
+  onInvertSelection,
   onClearSelection,
   onBatchPause,
   onBatchResume,
@@ -75,6 +79,11 @@ export function SkillList({
   const { selectionActive, toggleSelectionMode } = useSelectionMode(
     selectedIds.size,
     onClearSelection,
+  );
+
+  const selectableIds = useMemo(
+    () => skills.flatMap((skill) => skillMemberIds(skill)),
+    [skills],
   );
 
   if (collapsed) {
@@ -207,15 +216,48 @@ export function SkillList({
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </label>
-        {selectedIds.size > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            <span className="w-full text-[11px] text-ink-2">已选 {selectedIds.size} 项</span>
-            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchPause}>暂停</button>
-            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchResume}>恢复</button>
-            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchBackup}>备份</button>
-            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => setMigrateOpen(true)}>迁入库</button>
-            <button type="button" className="macos-btn-danger-soft macos-btn-sm" disabled={batchBusy} onClick={() => setDeleteOpen(true)}>删除</button>
-            <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onClearSelection}>清除</button>
+        {selectionActive && (
+          <div className="mt-3 flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-ink-2">已选 {selectedIds.size} 项</span>
+              <button
+                type="button"
+                className="macos-btn-ghost macos-btn-sm"
+                disabled={batchBusy || selectableIds.length === 0}
+                title="选中当前列表中的全部 Skill"
+                onClick={() => onSetSelection(selectableIds)}
+              >
+                全选
+              </button>
+              <button
+                type="button"
+                className="macos-btn-ghost macos-btn-sm"
+                disabled={batchBusy || selectableIds.length === 0}
+                title="反转当前列表中的勾选状态"
+                onClick={() => onInvertSelection(selectableIds)}
+              >
+                反选
+              </button>
+              {selectedIds.size > 0 ? (
+                <button
+                  type="button"
+                  className="macos-btn-ghost macos-btn-sm"
+                  disabled={batchBusy}
+                  onClick={onClearSelection}
+                >
+                  清除
+                </button>
+              ) : null}
+            </div>
+            {selectedIds.size > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchPause}>暂停</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchResume}>恢复</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchBackup}>备份</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => setMigrateOpen(true)}>迁入库</button>
+                <button type="button" className="macos-btn-danger-soft macos-btn-sm" disabled={batchBusy} onClick={() => setDeleteOpen(true)}>删除</button>
+              </div>
+            ) : null}
           </div>
         )}
         {batchResult && (
@@ -263,7 +305,7 @@ export function SkillList({
       />
       {warnings.length > 0 && (
         <aside
-          className="macos-alert-warn mx-3 mt-3"
+          className="macos-alert-warn mx-3 mt-3 max-h-32 shrink-0 overflow-auto"
           aria-label="扫描目录警告"
         >
           <strong>部分目录未扫描</strong>

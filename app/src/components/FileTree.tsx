@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -20,10 +21,17 @@ interface FileTreeProps {
 }
 
 interface ContextMenuState {
+  /** 原始点击坐标，用于布局夹取 */
+  originX: number;
+  originY: number;
   x: number;
   y: number;
   relativePath: string;
+  /** 子菜单向左展开，避免贴右被裁切 */
+  submenuFlip: boolean;
 }
+
+const MENU_VIEWPORT_PAD = 8;
 
 function EditorIcon({ id }: { id: string }) {
   const common = "size-3.5 shrink-0";
@@ -237,8 +245,42 @@ export function FileTree({
     onSelect(relativePath);
     clearHideSubmenuTimer();
     setOpenSubmenu(false);
-    setMenu({ x: event.clientX, y: event.clientY, relativePath });
+    const x = event.clientX;
+    const y = event.clientY;
+    setMenu({
+      originX: x,
+      originY: y,
+      x,
+      y,
+      relativePath,
+      submenuFlip: false,
+    });
   };
+
+  useLayoutEffect(() => {
+    if (!menu || !menuRef.current) {
+      return;
+    }
+    const rect = menuRef.current.getBoundingClientRect();
+    const maxX = window.innerWidth - MENU_VIEWPORT_PAD - rect.width;
+    const maxY = window.innerHeight - MENU_VIEWPORT_PAD - rect.height;
+    const x = Math.min(Math.max(MENU_VIEWPORT_PAD, menu.originX), Math.max(MENU_VIEWPORT_PAD, maxX));
+    const y = Math.min(Math.max(MENU_VIEWPORT_PAD, menu.originY), Math.max(MENU_VIEWPORT_PAD, maxY));
+    const submenuWidth = 168;
+    const submenuFlip =
+      x + rect.width + submenuWidth > window.innerWidth - MENU_VIEWPORT_PAD;
+    if (
+      x !== menu.x ||
+      y !== menu.y ||
+      submenuFlip !== menu.submenuFlip
+    ) {
+      setMenu((current) =>
+        current
+          ? { ...current, x, y, submenuFlip }
+          : current,
+      );
+    }
+  }, [menu]);
 
   const chooseEditor = (editorId: string) => {
     if (!menu || !onOpenWith) {
@@ -384,14 +426,21 @@ export function FileTree({
                 <EditorIcon id="default" />
                 打开
               </span>
-              <span aria-hidden="true">▸</span>
+              <span aria-hidden="true">{menu.submenuFlip ? "◂" : "▸"}</span>
             </button>
             {openSubmenu && (
               <div
                 role="menu"
                 aria-label="选择应用"
-                className="macos-menu absolute top-0 left-full z-50"
-                style={{ marginLeft: "-1px" }}
+                className={[
+                  "macos-menu absolute top-0 z-50",
+                  menu.submenuFlip ? "right-full" : "left-full",
+                ].join(" ")}
+                style={
+                  menu.submenuFlip
+                    ? { marginRight: "-1px" }
+                    : { marginLeft: "-1px" }
+                }
                 onMouseEnter={showSubmenu}
                 onMouseLeave={scheduleHideSubmenu}
               >

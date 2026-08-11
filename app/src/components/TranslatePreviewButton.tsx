@@ -186,19 +186,17 @@ export function TranslatePreviewButton({
                 关闭
               </button>
             </header>
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {loading ? (
                 <TranslatingPanel />
               ) : (
-                <div className="translate-result-enter h-full min-h-0">
+                <div className="translate-result-enter flex h-full min-h-0 flex-col overflow-hidden">
                   <MarkdownViewer
                     file={
                       result
                         ? {
-                            relativePath:
-                              result.sourceFiles[0] != null
-                                ? `${result.sourceFiles[0]}（译文）`
-                                : "翻译预览.md",
+                            // 保留原扩展名，避免「.md（译文）」被识别成 Text 且布局异常
+                            relativePath: result.sourceFiles[0] ?? "翻译预览.md",
                             mediaType: "markdown",
                             content: result.markdown,
                             message: null,
