@@ -1,0 +1,34 @@
+---
+description: 未配置模型功能服务时，所有依赖模型的 UI 入口必须隐藏
+globs: app/src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# 模型功能服务：未配置则隐藏入口
+
+设置页「模型功能服务」（持久化字段仍为 `settings.translate`）是**所有**依赖 LLM 功能的统一开关。
+
+## 判定
+
+- 使用 `isModelServiceConfigured`（`app/src/utils/translateSettings.ts`）或 hook `useModelServiceConfigured(api)`。
+- 完整配置 = Base URL + API Key + 模型 + 目标语言均非空。
+
+## 前端入口
+
+- **未配置：组件直接 `return null`（隐藏）**，不要 disabled 占位，也不要跳转到设置的提示条（除非产品明确要求）。
+- **已配置：才渲染**翻译、智能分组及后续一切模型能力入口。
+- 新功能必须复用 `useModelServiceConfigured`，禁止各自再写一套 `getSettings` + 字段判断。
+
+## 现状入口（须遵守）
+
+- `TranslatePreviewButton`
+- `AiGroupButton`（含「允许新建」等附属控件一并隐藏）
+
+## 后端
+
+- 调用模型的 command 仍应校验配置并返回明确错误（防直接 IPC）；UI 隐藏不能替代后端校验。
+
+## 文案
+
+- 设置区块标题用「模型功能服务」，不要写回「Skill 翻译预览」。
+- 说明需写明：未配置时翻译、智能分组等入口全部隐藏。

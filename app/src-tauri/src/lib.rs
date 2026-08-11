@@ -14,6 +14,7 @@ mod library_lifecycle;
 pub mod library_repository;
 mod library_taxonomy;
 mod path_norm;
+mod skill_detect;
 mod skill_metadata;
 mod system_fonts;
 pub mod model;
@@ -128,6 +129,8 @@ pub fn run() {
             commands::batch_uninstall_skills,
             commands::batch_set_skill_group,
             commands::batch_add_skill_tags,
+            commands::batch_remove_skill_tags,
+            commands::batch_set_skill_tags,
             commands::batch_migrate_provider_skills,
             commands::list_install_presets,
             commands::save_install_preset,

@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TRANSLATE_SETTINGS,
+  isModelServiceConfigured,
   isTranslateConfigured,
   normalizeTranslateSettings,
 } from "./translateSettings";
+import { describe, expect, it } from "vitest";
 
 describe("translateSettings", () => {
   it("normalizes missing fields", () => {
@@ -25,8 +26,9 @@ describe("translateSettings", () => {
 
   it("detects complete configuration", () => {
     expect(isTranslateConfigured(DEFAULT_TRANSLATE_SETTINGS)).toBe(false);
+    expect(isModelServiceConfigured(DEFAULT_TRANSLATE_SETTINGS)).toBe(false);
     expect(
-      isTranslateConfigured({
+      isModelServiceConfigured({
         translate: {
           baseUrl: "https://api.openai.com/v1",
           apiKey: "sk-test",

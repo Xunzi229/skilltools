@@ -39,3 +39,6 @@ export function isTranslateConfigured(
     translate.baseUrl && translate.apiKey.trim() && translate.model && translate.targetLang,
   );
 }
+
+/** 设置页「模型功能服务」是否已完整配置；所有依赖模型的功能以此为准。 */
+export const isModelServiceConfigured = isTranslateConfigured;

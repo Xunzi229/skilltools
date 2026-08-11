@@ -5,7 +5,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::fs_ops::{is_symlink_link, remove_directory_symlink};
+use crate::fs_ops::{path_is_symlink_link, remove_directory_symlink};
 use crate::library_repository::{
     adopt_existing_installations, create_directory_symlink, ensure_project_path_is_new,
     project_for_source, prune_missing_installations, provider_order, safe_skill_target,
@@ -58,7 +58,7 @@ impl LibraryRepository {
             None => safe_skill_target(root, &skill.name)?,
         };
         let old_link = match fs::symlink_metadata(&target_path) {
-            Ok(metadata) if !is_symlink_link(&metadata) => {
+            Ok(_) if !path_is_symlink_link(&target_path) => {
                 return Err(AppError::TargetConflict {
                     path: target_path.display().to_string(),
                 });
@@ -153,7 +153,7 @@ impl LibraryRepository {
             None => safe_skill_target(root, &skill_name)?,
         };
         match fs::symlink_metadata(&target_path) {
-            Ok(metadata) if !is_symlink_link(&metadata) => {
+            Ok(_) if !path_is_symlink_link(&target_path) => {
                 return Err(AppError::TargetConflict {
                     path: target_path.display().to_string(),
                 });
@@ -214,8 +214,7 @@ impl LibraryRepository {
     ) -> Result<MigrateResult, AppError> {
         let _guard = lock_app_transaction(self.paths())?;
         self.paths().assert_skill_access(source_path)?;
-        let meta = fs::symlink_metadata(source_path)?;
-        if is_symlink_link(&meta) {
+        if path_is_symlink_link(source_path) {
             let resolved = fs::canonicalize(source_path)?;
             if crate::path_norm::path_is_under(&resolved, &self.paths().library_dir) {
                 return Err(AppError::Io {

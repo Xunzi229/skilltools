@@ -304,8 +304,8 @@ export function SkillDetail({
         title={`删除 ${skill.name}？`}
         message={
           skill.resolvedPath
-            ? "该 Skill 是符号链接，删除只会移除链接，不会删除原始目录中的文件。"
-            : "此操作会先自动备份再删除 Skill，删除后可从备份记录恢复。"
+            ? "该 Skill 是符号链接：只会移除链接，不删除原始目录。会写入「删除前」事件备份，之后可按原样恢复链接。"
+            : "此操作会先自动备份再删除 Skill（「删除前」事件），删除后可从备份记录恢复。"
         }
         confirmLabel={skill.resolvedPath ? "移除链接" : "备份并删除"}
         tone="danger"

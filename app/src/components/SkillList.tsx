@@ -5,6 +5,7 @@ import {
   type BatchResult,
   type SkillSummary,
 } from "../model/skill";
+import type { TaxonomyChip } from "../model/taxonomy";
 import { formatBatchSummary } from "../hooks/useBatchActions";
 import {
   rowCheckboxClass,
@@ -15,6 +16,12 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { PanelToggle } from "./PanelToggle";
 import { SelectionModeButton } from "./SelectionModeButton";
 import { SkillCard } from "./SkillCard";
+
+export type InstalledSkillTaxonomy = {
+  librarySkillId: string;
+  groupLabel: string | null;
+  tagLabels: string[];
+};
 
 interface SkillListProps {
   title: string;
@@ -29,6 +36,9 @@ interface SkillListProps {
   batchBusy: boolean;
   batchResult: BatchResult | null;
   collapsed?: boolean;
+  taxonomyActive?: boolean;
+  queryChips?: TaxonomyChip[];
+  resolveTaxonomy?: (skill: SkillSummary) => InstalledSkillTaxonomy | null;
   onToggleCollapse?: () => void;
   onSearchChange: (value: string) => void;
   onSelect: (skillId: string) => void;
@@ -36,6 +46,9 @@ interface SkillListProps {
   onSetSelection: (ids: string[]) => void;
   onInvertSelection: (ids: string[]) => void;
   onClearSelection: () => void;
+  onRemoveQueryChip?: (chip: TaxonomyChip) => void;
+  onClearQuery?: () => void;
+  onOpenLibrarySkill?: (librarySkillId: string) => void;
   onBatchPause: () => void;
   onBatchResume: () => void;
   onBatchBackup: () => void;
@@ -58,6 +71,9 @@ export function SkillList({
   batchBusy,
   batchResult,
   collapsed = false,
+  taxonomyActive = false,
+  queryChips = [],
+  resolveTaxonomy,
   onToggleCollapse,
   onSearchChange,
   onSelect,
@@ -65,6 +81,8 @@ export function SkillList({
   onSetSelection,
   onInvertSelection,
   onClearSelection,
+  onRemoveQueryChip,
+  onClearQuery,
   onBatchPause,
   onBatchResume,
   onBatchBackup,
@@ -73,6 +91,40 @@ export function SkillList({
   onRetry,
   onClearBatchResult,
 }: SkillListProps) {
+  const [deleteTitle, deleteMessage, deleteConfirmLabel] = useMemo(() => {
+    let linkCount = 0;
+    let bodyCount = 0;
+    for (const skill of skills) {
+      for (const id of skillMemberIds(skill)) {
+        if (!selectedIds.has(id)) continue;
+        if (skill.resolvedPath) linkCount += 1;
+        else bodyCount += 1;
+      }
+    }
+    const total = linkCount + bodyCount;
+    if (total === 0) {
+      return ["删除 Skill？", "", "删除"] as const;
+    }
+    if (bodyCount === 0) {
+      return [
+        `移除 ${linkCount} 个安装链接？`,
+        "仅移除软链，不删除库/原始目录中的文件。会写入「删除前」事件备份，之后可按原样恢复链接。",
+        "移除链接",
+      ] as const;
+    }
+    if (linkCount === 0) {
+      return [
+        `删除 ${bodyCount} 个 Skill？`,
+        "本体将逐项先备份再删除，写入「删除前」事件；单项失败不会中断其余项。",
+        "备份并删除",
+      ] as const;
+    }
+    return [
+      `删除 ${total} 项？`,
+      `其中软链 ${linkCount} 个仅移除链接，本体 ${bodyCount} 个先备份再删除；均写入「删除前」事件，单项失败不中断其余项。`,
+      "确认删除",
+    ] as const;
+  }, [skills, selectedIds]);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [replaceWithLink, setReplaceWithLink] = useState(true);
@@ -138,7 +190,11 @@ export function SkillList({
     content = (
       <div className="px-3 py-8 text-center text-[13px] text-ink-3">
         <strong className="block text-ink">没有匹配结果</strong>
-        <span>请调整筛选条件或搜索关键词。</span>
+        <span>
+          {taxonomyActive
+            ? "当前分组/标签筛选仅显示已关联中央库的安装。"
+            : "请调整筛选条件或搜索关键词。"}
+        </span>
       </div>
     );
   } else {
@@ -147,6 +203,7 @@ export function SkillList({
         {skills.map((skill) => {
           const memberIds = skillMemberIds(skill);
           const checked = memberIds.every((id) => selectedIds.has(id));
+          const taxonomy = resolveTaxonomy?.(skill) ?? null;
           return (
             <li key={skill.id} className="group flex items-center gap-1.5">
               <input
@@ -167,6 +224,8 @@ export function SkillList({
                       : formatProviderLabels(skill)
                   }
                   selected={skillMatchesSelection(skill, selectedSkillId)}
+                  groupLabel={taxonomy?.groupLabel}
+                  tagLabels={taxonomy?.tagLabels ?? []}
                   onSelect={() => onSelect(skill.id)}
                 />
               </div>
@@ -186,7 +245,11 @@ export function SkillList({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">{title}</h2>
-            <p className="mt-1 text-[12px] text-ink-2">浏览本机已安装的 Skills</p>
+            <p className="mt-1 text-[12px] text-ink-2">
+              {taxonomyActive
+                ? "仅显示已关联中央库且符合分组/标签条件的安装"
+                : "浏览本机已安装的 Skills"}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <SelectionModeButton
@@ -216,6 +279,31 @@ export function SkillList({
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </label>
+        {queryChips.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="当前筛选条件">
+            {queryChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                className="inline-flex items-center gap-1 rounded-full bg-hover px-2 py-0.5 text-[11px] text-ink-2 hover:bg-black/8"
+                title="移除该条件"
+                onClick={() => onRemoveQueryChip?.(chip)}
+              >
+                <span>{chip.label}</span>
+                <span aria-hidden="true">×</span>
+              </button>
+            ))}
+            {onClearQuery && (
+              <button
+                type="button"
+                className="macos-link text-[11px]"
+                onClick={onClearQuery}
+              >
+                清除筛选
+              </button>
+            )}
+          </div>
+        )}
         {selectionActive && (
           <div className="mt-3 flex flex-col gap-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
@@ -292,9 +380,9 @@ export function SkillList({
       </ConfirmDialog>
       <ConfirmDialog
         open={deleteOpen}
-        title={`删除 ${selectedIds.size} 个 Skill？`}
-        message="将逐项先备份再删除。单项失败不会中断其余项。"
-        confirmLabel="备份并删除"
+        title={deleteTitle}
+        message={deleteMessage}
+        confirmLabel={deleteConfirmLabel}
         tone="danger"
         busy={batchBusy}
         onCancel={() => setDeleteOpen(false)}

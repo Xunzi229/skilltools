@@ -1,14 +1,17 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::fs_ops::{
-    copy_directory, directory_manifest, is_symlink_link, manifest_checksum,
-    remove_directory_symlink, rename_directory_no_replace, ManifestEntry,
+    copy_directory, create_directory_link, directory_manifest, manifest_checksum,
+    path_is_symlink_link, remove_directory_symlink, rename_directory_no_replace, ManifestEntry,
 };
+
+/// 软链 Skill 删除/备份归档标记：只记录链接目标，恢复时重建链接。
+const SYMLINK_TARGET_MARKER: &str = ".skill-manager-symlink-target";
 use crate::json_store::{read_json, write_json};
 use crate::model::{BackupReason, BackupRecord, SkillDetail, SkillStatus};
 use crate::paths::AppPaths;
@@ -241,7 +244,7 @@ impl BackupRepository {
         self.restore_backup_with_hooks(
             backup_id,
             || {},
-            |path| fs::remove_dir_all(path),
+            remove_restored_skill_path,
             |skill_id| SkillRepository::new(self.paths.clone()).detail(skill_id),
         )
     }
@@ -330,16 +333,24 @@ impl BackupRepository {
         fs::create_dir_all(parent)?;
         let temp_path = parent.join(format!(".restore-{}", Uuid::new_v4()));
         self.paths.assert_allowed(&temp_path)?;
-        let copied_manifest = copy_verified_directory(&record.archive_path, &temp_path)?;
-        if copied_manifest != archive_manifest {
-            remove_directory_if_present(&temp_path, "恢复临时目录");
-            return Err(AppError::BackupVerificationFailed {
-                id: backup_id.to_owned(),
-            });
+        if is_provider_symlink_archive(&record.archive_path) {
+            if let Err(error) = restore_provider_symlink_archive(&record.archive_path, &temp_path)
+            {
+                let _ = remove_restored_skill_path(&temp_path);
+                return Err(error);
+            }
+        } else {
+            let copied_manifest = copy_verified_directory(&record.archive_path, &temp_path)?;
+            if copied_manifest != archive_manifest {
+                remove_directory_if_present(&temp_path, "恢复临时目录");
+                return Err(AppError::BackupVerificationFailed {
+                    id: backup_id.to_owned(),
+                });
+            }
         }
         before_commit();
         if let Err(error) = rename_directory_no_replace(&temp_path, &record.original_path) {
-            remove_directory_if_present(&temp_path, "恢复临时目录");
+            let _ = remove_restored_skill_path(&temp_path);
             return Err(error);
         }
         match load_detail(&record.skill_id) {
@@ -498,9 +509,7 @@ where
 }
 
 fn is_symlink(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .map(|metadata| is_symlink_link(&metadata))
-        .unwrap_or(false)
+    crate::fs_ops::path_is_symlink_link(path)
 }
 
 /// 备份 provider 根下的 Skill 符号链接：只归档链接目标，不复制原始目录内容。
@@ -511,10 +520,42 @@ fn archive_provider_symlink(
     let link_target = fs::read_link(source)?;
     fs::create_dir_all(target)?;
     fs::write(
-        target.join(".skill-manager-symlink-target"),
+        target.join(SYMLINK_TARGET_MARKER),
         link_target.to_string_lossy().as_bytes(),
     )?;
     directory_manifest(target)
+}
+
+fn is_provider_symlink_archive(archive: &Path) -> bool {
+    archive.join(SYMLINK_TARGET_MARKER).is_file()
+}
+
+/// 从软链事件备份重建安装链接（不复制目标目录内容）。
+fn restore_provider_symlink_archive(archive: &Path, destination: &Path) -> Result<(), AppError> {
+    let raw = fs::read_to_string(archive.join(SYMLINK_TARGET_MARKER))?;
+    let link_target = PathBuf::from(raw.trim());
+    if link_target.as_os_str().is_empty() {
+        return Err(AppError::Io {
+            message: format!(
+                "软链备份缺少有效目标：{}",
+                archive.join(SYMLINK_TARGET_MARKER).display()
+            ),
+        });
+    }
+    create_directory_link(&link_target, destination)
+}
+
+fn remove_restored_skill_path(path: &Path) -> std::io::Result<()> {
+    if !path.exists() && fs::symlink_metadata(path).is_err() {
+        return Ok(());
+    }
+    if path_is_symlink_link(path) {
+        return remove_directory_symlink(path).map_err(|error| match error {
+            AppError::Io { message } => std::io::Error::other(message),
+            other => std::io::Error::other(other.to_string()),
+        });
+    }
+    fs::remove_dir_all(path)
 }
 
 fn copy_verified_directory(source: &Path, target: &Path) -> Result<Vec<ManifestEntry>, AppError> {
@@ -758,6 +799,45 @@ mod tests {
         assert_eq!(
             fs::read_to_string(record.archive_path.join(".skill-manager-symlink-target")).unwrap(),
             outside.path().to_string_lossy()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_provider_symlink_backup_recreates_link() {
+        use std::os::unix::fs::symlink;
+
+        let base = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("SKILL.md"), "# Keep Me").unwrap();
+        let paths = AppPaths::for_test(base.path());
+        fs::create_dir_all(&paths.skill_roots[0].path).unwrap();
+        let link = paths.skill_roots[0].path.join("linked-restore");
+        symlink(outside.path(), &link).unwrap();
+        let id = SkillRepository::new(paths.clone()).scan().unwrap()[0]
+            .id
+            .clone();
+        let repository = BackupRepository::new(paths);
+
+        let record = repository.delete_skill(&id).unwrap();
+        assert!(!link.exists());
+
+        let detail = repository.restore_backup(&record.id).unwrap();
+
+        assert!(crate::fs_ops::path_is_symlink_link(&link));
+        assert_eq!(fs::read_link(&link).unwrap(), outside.path());
+        assert_eq!(detail.current_path, link);
+        assert_eq!(
+            detail
+                .resolved_path
+                .as_ref()
+                .and_then(|path| path.canonicalize().ok())
+                .unwrap(),
+            outside.path().canonicalize().unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(outside.path().join("SKILL.md")).unwrap(),
+            "# Keep Me"
         );
     }
 

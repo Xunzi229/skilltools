@@ -819,23 +819,29 @@ pub async fn preview_translate_skill(
     })?
 }
 
-/// AI suggest groups for selected library skills (description-based). Does not write.
+/// AI suggest groups/tags for selected library skills (description-based). Does not write.
 #[tauri::command]
 pub async fn suggest_skill_groups(
     app: AppHandle,
     skill_ids: Vec<String>,
+    allow_new_groups: Option<bool>,
+    allow_new_tags: Option<bool>,
 ) -> Result<Vec<GroupSuggestion>, CommandError> {
+    let allow_new_groups = allow_new_groups.unwrap_or(false);
+    let allow_new_tags = allow_new_tags.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let paths = current_paths(state.inner())?;
         let settings = settings::load_settings(&paths.app_data_dir).map_err(map_app_error)?;
         let library = state.library.lock().map_err(|_| state_lock_error())?;
         let groups = library.list_groups().map_err(map_app_error)?;
+        let tags = library.list_tags().map_err(map_app_error)?;
         let group_names: Vec<String> = groups.into_iter().map(|group| group.name).collect();
-        if group_names.is_empty() {
+        let tag_names: Vec<String> = tags.into_iter().map(|tag| tag.name).collect();
+        if group_names.is_empty() && !allow_new_groups {
             return Err(CommandError {
                 code: "TRANSLATE",
-                message: "请先在侧栏创建至少一个分组".into(),
+                message: "请先在侧栏创建至少一个分组，或开启「允许新建分组」".into(),
             });
         }
 
@@ -865,6 +871,11 @@ pub async fn suggest_skill_groups(
             &settings.translate,
             &skills,
             &group_names,
+            &tag_names,
+            group_suggest::SuggestOptions {
+                allow_new_groups,
+                allow_new_tags,
+            },
         )
         .map_err(map_app_error)
     })
@@ -1108,6 +1119,26 @@ pub fn batch_add_skill_tags(
 ) -> Result<BatchResult, CommandError> {
     let library = state.library.lock().map_err(|_| state_lock_error())?;
     Ok(batch::batch_add_skill_tags(&library, skill_ids, tag_id))
+}
+
+#[tauri::command]
+pub fn batch_remove_skill_tags(
+    state: State<'_, AppState>,
+    skill_ids: Vec<String>,
+    tag_id: String,
+) -> Result<BatchResult, CommandError> {
+    let library = state.library.lock().map_err(|_| state_lock_error())?;
+    Ok(batch::batch_remove_skill_tags(&library, skill_ids, tag_id))
+}
+
+#[tauri::command]
+pub fn batch_set_skill_tags(
+    state: State<'_, AppState>,
+    skill_ids: Vec<String>,
+    tag_ids: Vec<String>,
+) -> Result<BatchResult, CommandError> {
+    let library = state.library.lock().map_err(|_| state_lock_error())?;
+    Ok(batch::batch_set_skill_tags(&library, skill_ids, tag_ids))
 }
 
 #[tauri::command]

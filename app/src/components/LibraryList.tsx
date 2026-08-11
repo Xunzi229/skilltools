@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
 import type {
+  AiTaxonomyApplyItem,
   BatchResult,
   LibrarySkillSummary,
   Provider,
   SkillGroup,
-  SkillGroupAssignment,
   Tag,
 } from "../model/skill";
 import { formatBatchSummary } from "../hooks/useBatchActions";
@@ -13,6 +13,7 @@ import {
   rowCheckboxClass,
   useSelectionMode,
 } from "../hooks/useSelectionMode";
+import type { TaxonomyChip } from "../model/taxonomy";
 import { displayDescription, matchesLibrarySkillSearch } from "../utils/skillDisplay";
 import { AiGroupButton } from "./AiGroupButton";
 import { NameDialog } from "./NameDialog";
@@ -28,6 +29,7 @@ interface LibraryListProps {
   skills: LibrarySkillSummary[];
   groups: SkillGroup[];
   tags: Tag[];
+  queryChips?: TaxonomyChip[];
   selectedId: string | null;
   selectedIds: Set<string>;
   search: string;
@@ -43,11 +45,15 @@ interface LibraryListProps {
   onSetSelection: (ids: string[]) => void;
   onInvertSelection: (ids: string[]) => void;
   onClearSelection: () => void;
+  onRemoveQueryChip?: (chip: TaxonomyChip) => void;
+  onClearQuery?: () => void;
   onBatchInstall: (provider: Provider) => void;
   onBatchUninstall: (provider: Provider) => void;
   onBatchSetGroup: (groupId: string | null) => void;
   onBatchAddTag: (tagId: string) => void;
-  onApplyAiGroups: (assignments: SkillGroupAssignment[]) => Promise<void>;
+  onBatchRemoveTag: (tagId: string) => void;
+  onBatchClearTags: () => void;
+  onApplyAiGroups: (items: AiTaxonomyApplyItem[]) => Promise<void>;
   onCreateSkill: (name: string) => Promise<void>;
   onRetry: () => void;
   onClearBatchResult: () => void;
@@ -60,6 +66,7 @@ export function LibraryList({
   skills,
   groups,
   tags,
+  queryChips = [],
   selectedId,
   selectedIds,
   search,
@@ -75,10 +82,14 @@ export function LibraryList({
   onSetSelection,
   onInvertSelection,
   onClearSelection,
+  onRemoveQueryChip,
+  onClearQuery,
   onBatchInstall,
   onBatchUninstall,
   onBatchSetGroup,
   onBatchAddTag,
+  onBatchRemoveTag,
+  onBatchClearTags,
   onApplyAiGroups,
   onCreateSkill,
   onRetry,
@@ -141,12 +152,19 @@ export function LibraryList({
     };
   }, [skills]);
 
+  const searchTaxonomy = useMemo(
+    () => ({ groups, tags }),
+    [groups, tags],
+  );
+
   // 搜索时自动展开匹配到子 Skill 的父节点
   useEffect(() => {
     if (!search.trim()) return;
     const parentsToExpand = filtered
       .filter(
-        (skill) => skill.parentSkillId && matchesLibrarySkillSearch(skill, search),
+        (skill) =>
+          skill.parentSkillId &&
+          matchesLibrarySkillSearch(skill, search, searchTaxonomy),
       )
       .map((skill) => skill.parentSkillId as string);
     if (parentsToExpand.length === 0) return;
@@ -158,7 +176,7 @@ export function LibraryList({
       }
       return changed ? next : current;
     });
-  }, [filtered, search]);
+  }, [filtered, search, searchTaxonomy]);
 
   const visible = useMemo(() => {
     const ordered: LibrarySkillSummary[] = [];
@@ -269,11 +287,36 @@ export function LibraryList({
           <input
             type="search"
             aria-label="搜索库 Skill"
-            placeholder="搜索名称、描述或来源"
+            placeholder="搜索名称、描述、来源、分组或标签"
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </label>
+        {queryChips.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="当前筛选条件">
+            {queryChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                className="inline-flex items-center gap-1 rounded-full bg-hover px-2 py-0.5 text-[11px] text-ink-2 hover:bg-black/8"
+                title="移除该条件"
+                onClick={() => onRemoveQueryChip?.(chip)}
+              >
+                <span>{chip.label}</span>
+                <span aria-hidden="true">×</span>
+              </button>
+            ))}
+            {onClearQuery && (
+              <button
+                type="button"
+                className="macos-link text-[11px]"
+                onClick={onClearQuery}
+              >
+                清除筛选
+              </button>
+            )}
+          </div>
+        )}
         <div
           className="macos-seg mt-3 w-full"
           role="tablist"
@@ -388,6 +431,7 @@ export function LibraryList({
                       api={api}
                       skills={skills}
                       groups={groups}
+                      tags={tags}
                       selectedIds={selectedIds}
                       disabled={batchBusy}
                       onApply={onApplyAiGroups}
@@ -409,6 +453,31 @@ export function LibraryList({
                         </option>
                       ))}
                     </select>
+                    <select
+                      className="macos-select"
+                      aria-label="批量移除标签"
+                      disabled={batchBusy || tags.length === 0}
+                      defaultValue=""
+                      onChange={(event) => {
+                        if (event.target.value) onBatchRemoveTag(event.target.value);
+                        event.target.value = "";
+                      }}
+                    >
+                      <option value="">移除标签…</option>
+                      {tags.map((tag) => (
+                        <option key={tag.id} value={tag.id}>
+                          {tag.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="macos-btn-ghost"
+                      disabled={batchBusy}
+                      onClick={onBatchClearTags}
+                    >
+                      清空标签
+                    </button>
                   </div>
                 </section>
               </>

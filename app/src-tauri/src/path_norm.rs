@@ -124,18 +124,14 @@ mod tests {
     }
 
     #[test]
-    fn same_volume_compares_drive_letters() {
-        assert!(same_windows_volume(
-            Path::new(r"\\?\C:\a\b"),
-            Path::new(r"C:\x\y")
-        ));
-        assert!(!same_windows_volume(
-            Path::new(r"C:\a"),
-            Path::new(r"D:\a")
-        ));
-        assert!(same_windows_volume(
-            Path::new(r"\\?\UNC\srv\share\a"),
-            Path::new(r"\\srv\share\b")
-        ));
+    fn collapses_duplicate_slashes() {
+        assert_eq!(
+            normalize_path_key_str(r"C:\Users\\Demo\\\library\"),
+            "c:/users/demo/library"
+        );
+        assert_eq!(
+            normalize_path_key_str("//server//share///a//"),
+            "//server/share/a"
+        );
     }
 }

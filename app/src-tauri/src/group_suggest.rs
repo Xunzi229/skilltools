@@ -24,8 +24,11 @@ pub struct GroupSuggestSkill {
 #[serde(rename_all = "camelCase")]
 pub struct GroupSuggestion {
     pub skill_id: String,
-    /// Existing group name, or null for ungrouped / uncertain.
+    /// Group name (existing or newly proposed), or null for ungrouped / uncertain.
     pub group_name: Option<String>,
+    /// Suggested tag names to append (existing or newly proposed).
+    #[serde(default)]
+    pub tag_names: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,14 +37,23 @@ struct ModelSuggestionRow {
     skill_id: String,
     #[serde(default)]
     group_name: Option<String>,
+    #[serde(default)]
+    tag_names: Vec<String>,
 }
 
-/// Suggest group names for skills using an OpenAI-compatible chat API.
-/// Only assigns names from `existing_groups` (or null).
+#[derive(Debug, Clone, Copy)]
+pub struct SuggestOptions {
+    pub allow_new_groups: bool,
+    pub allow_new_tags: bool,
+}
+
+/// Suggest group/tag names for skills using an OpenAI-compatible chat API.
 pub fn suggest_groups_with_openai_compatible(
     settings: &TranslateSettings,
     skills: &[GroupSuggestSkill],
     existing_groups: &[String],
+    existing_tags: &[String],
+    options: SuggestOptions,
 ) -> Result<Vec<GroupSuggestion>, AppError> {
     if !settings.is_configured() {
         return Err(AppError::Translate {
@@ -49,9 +61,9 @@ pub fn suggest_groups_with_openai_compatible(
                 .into(),
         });
     }
-    if existing_groups.is_empty() {
+    if existing_groups.is_empty() && !options.allow_new_groups {
         return Err(AppError::Translate {
-            message: "请先在侧栏创建至少一个分组".into(),
+            message: "请先在侧栏创建至少一个分组，或开启「允许新建分组」".into(),
         });
     }
     if skills.is_empty() {
@@ -73,12 +85,22 @@ pub fn suggest_groups_with_openai_compatible(
         });
     }
 
-    let allowed: HashSet<String> = existing_groups
+    let allowed_groups: HashSet<String> = existing_groups
         .iter()
         .map(|name| name.trim().to_string())
         .filter(|name| !name.is_empty())
         .collect();
-    let allowed_list: Vec<&str> = existing_groups
+    let allowed_tags: HashSet<String> = existing_tags
+        .iter()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .collect();
+    let group_list: Vec<&str> = existing_groups
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let tag_list: Vec<&str> = existing_tags
         .iter()
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
@@ -96,20 +118,42 @@ pub fn suggest_groups_with_openai_compatible(
         })
         .collect();
 
-    let system = "You classify developer agent skills into existing groups. \
-         Use only the provided group names. Prefer null over a weak match. \
+    let group_rule = if options.allow_new_groups {
+        "Prefer existing group names. You may propose a short new Chinese/English group name \
+         only when none of the existing groups fit; keep new names concise (2–8 chars / short phrase). \
+         Prefer null over inventing vague buckets."
+    } else {
+        "Use only the provided existing group names. Prefer null over a weak match. Do NOT invent groups."
+    };
+    let tag_rule = if options.allow_new_tags {
+        "tagNames: prefer existing tags; you may add a few short new tags when useful \
+         (provider/platform/risk). Keep 0–3 tags per skill."
+    } else if tag_list.is_empty() {
+        "tagNames: always return []."
+    } else {
+        "tagNames: use only existing tag names; 0–3 per skill; empty array when unsure."
+    };
+
+    let system = format!(
+        "You classify developer agent skills into groups and tags. \
+         {group_rule} \
          Assign a groupName ONLY when the skill clearly and primarily belongs to that group \
          based on its description. If it could fit multiple groups, fits none well, \
-         or you are not confident, return null for groupName. Do NOT force a guess. \
+         or you are not confident, return null for groupName. \
+         {tag_rule} \
          Output ONLY a JSON array (no markdown fences, no commentary). \
-         Each item: {\"skillId\":\"...\",\"groupName\":\"exact group name or null\"}. \
-         Include every input skillId exactly once.";
+         Each item: {{\"skillId\":\"...\",\"groupName\":\"name or null\",\"tagNames\":[\"...\"]}}. \
+         Include every input skillId exactly once."
+    );
 
     let user = format!(
-        "Existing groups (use exact names only):\n{}\n\n\
-         Classification rule: clear primary match → that group; otherwise → null.\n\n\
+        "Existing groups:\n{}\n\nExisting tags:\n{}\n\n\
+         allowNewGroups={}\nallowNewTags={}\n\n\
          Skills to classify:\n{}",
-        serde_json::to_string_pretty(&allowed_list).unwrap_or_else(|_| "[]".into()),
+        serde_json::to_string_pretty(&group_list).unwrap_or_else(|_| "[]".into()),
+        serde_json::to_string_pretty(&tag_list).unwrap_or_else(|_| "[]".into()),
+        options.allow_new_groups,
+        options.allow_new_tags,
         serde_json::to_string_pretty(&skill_payload).unwrap_or_else(|_| "[]".into()),
     );
 
@@ -149,7 +193,13 @@ pub fn suggest_groups_with_openai_compatible(
     })?;
 
     let content = parse_translate_api_response(status, &response_text)?;
-    parse_group_suggestions(&content, skills, &allowed)
+    parse_group_suggestions(
+        &content,
+        skills,
+        &allowed_groups,
+        &allowed_tags,
+        options,
+    )
 }
 
 fn truncate_chars(text: &str, max: usize) -> String {
@@ -174,10 +224,32 @@ fn strip_json_fence(raw: &str) -> &str {
         .trim()
 }
 
+fn resolve_name(name: &str, allowed: &HashSet<String>, allow_new: bool) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if allowed.contains(trimmed) {
+        return Some(trimmed.to_string());
+    }
+    if let Some(existing) = allowed.iter().find(|candidate| {
+        candidate.eq_ignore_ascii_case(trimmed)
+            || candidate.to_ascii_lowercase() == trimmed.to_ascii_lowercase()
+    }) {
+        return Some(existing.clone());
+    }
+    if allow_new {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
 fn parse_group_suggestions(
     raw: &str,
     skills: &[GroupSuggestSkill],
-    allowed: &HashSet<String>,
+    allowed_groups: &HashSet<String>,
+    allowed_tags: &HashSet<String>,
+    options: SuggestOptions,
 ) -> Result<Vec<GroupSuggestion>, AppError> {
     let text = strip_json_fence(raw);
     let rows: Vec<ModelSuggestionRow> = serde_json::from_str(text).map_err(|error| {
@@ -187,7 +259,7 @@ fn parse_group_suggestions(
     })?;
 
     let expected: HashSet<&str> = skills.iter().map(|s| s.id.as_str()).collect();
-    let mut by_id: HashMap<String, Option<String>> = HashMap::new();
+    let mut by_id: HashMap<String, (Option<String>, Vec<String>)> = HashMap::new();
 
     for row in rows {
         if !expected.contains(row.skill_id.as_str()) {
@@ -195,30 +267,35 @@ fn parse_group_suggestions(
         }
         let group_name = row
             .group_name
-            .map(|name| name.trim().to_string())
-            .filter(|name| !name.is_empty())
-            .and_then(|name| {
-                if allowed.contains(&name) {
-                    Some(name)
-                } else {
-                    // case-insensitive match against allowed
-                    allowed
-                        .iter()
-                        .find(|candidate| {
-                            candidate.eq_ignore_ascii_case(&name)
-                                || candidate.to_ascii_lowercase() == name.to_ascii_lowercase()
-                        })
-                        .cloned()
+            .as_deref()
+            .and_then(|name| resolve_name(name, allowed_groups, options.allow_new_groups));
+        let mut tag_names = Vec::new();
+        let mut seen = HashSet::new();
+        for tag in row.tag_names {
+            if let Some(resolved) = resolve_name(&tag, allowed_tags, options.allow_new_tags) {
+                if seen.insert(resolved.clone()) {
+                    tag_names.push(resolved);
                 }
-            });
-        by_id.insert(row.skill_id, group_name);
+            }
+            if tag_names.len() >= 3 {
+                break;
+            }
+        }
+        by_id.insert(row.skill_id, (group_name, tag_names));
     }
 
     Ok(skills
         .iter()
-        .map(|skill| GroupSuggestion {
-            skill_id: skill.id.clone(),
-            group_name: by_id.get(&skill.id).cloned().flatten(),
+        .map(|skill| {
+            let (group_name, tag_names) = by_id
+                .get(&skill.id)
+                .cloned()
+                .unwrap_or((None, Vec::new()));
+            GroupSuggestion {
+                skill_id: skill.id.clone(),
+                group_name,
+                tag_names,
+            }
         })
         .collect())
 }
@@ -241,26 +318,64 @@ mod tests {
                 description: "generate code".into(),
             },
         ];
-        let allowed = HashSet::from(["需求评审".to_string(), "代码生成".to_string()]);
+        let allowed_groups = HashSet::from(["需求评审".to_string(), "代码生成".to_string()]);
+        let allowed_tags = HashSet::from(["cursor".to_string()]);
         let raw = r#"[
-          {"skillId":"a","groupName":"需求评审"},
-          {"skillId":"b","groupName":"不存在的组"},
+          {"skillId":"a","groupName":"需求评审","tagNames":["cursor","windows"]},
+          {"skillId":"b","groupName":"不存在的组","tagNames":[]},
           {"skillId":"ghost","groupName":"代码生成"}
         ]"#;
-        let out = parse_group_suggestions(raw, &skills, &allowed).unwrap();
+        let out = parse_group_suggestions(
+            raw,
+            &skills,
+            &allowed_groups,
+            &allowed_tags,
+            SuggestOptions {
+                allow_new_groups: false,
+                allow_new_tags: false,
+            },
+        )
+        .unwrap();
         assert_eq!(
             out,
             vec![
                 GroupSuggestion {
                     skill_id: "a".into(),
                     group_name: Some("需求评审".into()),
+                    tag_names: vec!["cursor".into()],
                 },
                 GroupSuggestion {
                     skill_id: "b".into(),
                     group_name: None,
+                    tag_names: vec![],
                 },
             ]
         );
+    }
+
+    #[test]
+    fn allows_new_group_and_tag_names() {
+        let skills = vec![GroupSuggestSkill {
+            id: "a".into(),
+            name: "alpha".into(),
+            description: "x".into(),
+        }];
+        let allowed_groups = HashSet::new();
+        let allowed_tags = HashSet::new();
+        let raw = r#"[{"skillId":"a","groupName":"新分组","tagNames":["实验性"]}]"#;
+        let out = parse_group_suggestions(
+            raw,
+            &skills,
+            &allowed_groups,
+            &allowed_tags,
+            SuggestOptions {
+                allow_new_groups: true,
+                allow_new_tags: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(out[0].group_name.as_deref(), Some("新分组"));
+        assert_eq!(out[0].tag_names, vec!["实验性".to_string()]);
     }
 
     #[test]
@@ -270,9 +385,20 @@ mod tests {
             name: "alpha".into(),
             description: "x".into(),
         }];
-        let allowed = HashSet::from(["代码生成".to_string()]);
-        let raw = "```json\n[{\"skillId\":\"a\",\"groupName\":\"代码生成\"}]\n```";
-        let out = parse_group_suggestions(raw, &skills, &allowed).unwrap();
+        let allowed_groups = HashSet::from(["代码生成".to_string()]);
+        let allowed_tags = HashSet::new();
+        let raw = "```json\n[{\"skillId\":\"a\",\"groupName\":\"代码生成\",\"tagNames\":[]}]\n```";
+        let out = parse_group_suggestions(
+            raw,
+            &skills,
+            &allowed_groups,
+            &allowed_tags,
+            SuggestOptions {
+                allow_new_groups: false,
+                allow_new_tags: false,
+            },
+        )
+        .unwrap();
         assert_eq!(out[0].group_name.as_deref(), Some("代码生成"));
     }
 }

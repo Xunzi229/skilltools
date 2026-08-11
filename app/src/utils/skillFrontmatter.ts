@@ -37,7 +37,7 @@ export const STANDARD_FRONTMATTER_FIELDS = [
   },
   {
     key: "tags",
-    label: "tags",
+    label: "tags（文件内，≠侧栏标签）",
     required: false,
     multiline: false,
     hint: "逗号分隔，或 YAML 列表",

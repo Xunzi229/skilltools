@@ -40,7 +40,7 @@ pub(crate) fn directory_manifest(root: &Path) -> Result<Vec<ManifestEntry>, AppE
             })?
             .to_path_buf();
         let metadata = fs::symlink_metadata(entry.path())?;
-        let kind = if is_symlink_link(&metadata) {
+        let kind = if path_is_symlink_link(entry.path()) {
             ManifestEntryKind::Symlink {
                 target: fs::read_link(entry.path())?,
             }
@@ -85,7 +85,7 @@ pub(crate) fn copy_directory(source: &Path, target: &Path) -> Result<(), AppErro
             })?;
         let destination = target.join(relative);
         let metadata = fs::symlink_metadata(entry.path())?;
-        if is_symlink_link(&metadata) {
+        if path_is_symlink_link(entry.path()) {
             copy_symlink(entry.path(), &destination, &metadata)?;
         } else if metadata.is_dir() {
             fs::create_dir(&destination)?;
@@ -255,27 +255,145 @@ fn hex_digest(bytes: &[u8]) -> String {
 }
 
 /// 是否为应只删链接本身的符号链接/junction（不含普通目录/文件）。
+/// Windows：仅白名单 reparse tag（symlink / mount point·junction），排除 OneDrive 等云占位。
 pub(crate) fn is_symlink_link(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    // 无路径时无法读 reparse tag；保守为 false，调用方应优先用 path_is_symlink_link。
+    let _ = metadata;
+    false
+}
+
+pub(crate) fn path_is_symlink_link(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
     if metadata.file_type().is_symlink() {
         return true;
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-        // Junction / mount point：带 REPARSE_POINT，但 `is_symlink()` 为 false。
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+        is_windows_symlink_or_junction(path, &metadata)
     }
     #[cfg(not(windows))]
     {
+        let _ = metadata;
         false
     }
 }
 
-pub(crate) fn path_is_symlink_link(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .map(|metadata| is_symlink_link(&metadata))
-        .unwrap_or(false)
+#[cfg(windows)]
+fn is_windows_symlink_or_junction(path: &Path, metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+        return false;
+    }
+    match windows_reparse_tag(path) {
+        Some(tag) if is_whitelisted_reparse_tag(tag) => true,
+        // 读 tag 失败时：仅当 Rust 已识别为 symlink_file/dir 才放行（不含纯云 reparse）
+        None => {
+            use std::os::windows::fs::FileTypeExt;
+            let ft = metadata.file_type();
+            ft.is_symlink_file() || ft.is_symlink_dir()
+        }
+        Some(_) => false,
+    }
+}
+
+/// IO_REPARSE_TAG_MOUNT_POINT（junction）与 IO_REPARSE_TAG_SYMLINK。
+#[cfg(windows)]
+fn is_whitelisted_reparse_tag(tag: u32) -> bool {
+    const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
+    const IO_REPARSE_TAG_SYMLINK: u32 = 0xA000_000C;
+    tag == IO_REPARSE_TAG_MOUNT_POINT || tag == IO_REPARSE_TAG_SYMLINK
+}
+
+#[cfg(windows)]
+fn windows_reparse_tag(path: &Path) -> Option<u32> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[repr(C)]
+    struct ReparseDataBufferHeader {
+        reparse_tag: u32,
+        reparse_data_length: u16,
+        reserved: u16,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateFileW(
+            lp_file_name: *const u16,
+            dw_desired_access: u32,
+            dw_share_mode: u32,
+            lp_security_attributes: *mut core::ffi::c_void,
+            dw_creation_disposition: u32,
+            dw_flags_and_attributes: u32,
+            h_template_file: *mut core::ffi::c_void,
+        ) -> *mut core::ffi::c_void;
+        fn DeviceIoControl(
+            h_device: *mut core::ffi::c_void,
+            dw_io_control_code: u32,
+            lp_in_buffer: *mut core::ffi::c_void,
+            n_in_buffer_size: u32,
+            lp_out_buffer: *mut core::ffi::c_void,
+            n_out_buffer_size: u32,
+            lp_bytes_returned: *mut u32,
+            lp_overlapped: *mut core::ffi::c_void,
+        ) -> i32;
+        fn CloseHandle(h_object: *mut core::ffi::c_void) -> i32;
+    }
+
+    const INVALID_HANDLE_VALUE: isize = -1;
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    const FILE_SHARE_DELETE: u32 = 0x4;
+    const OPEN_EXISTING: u32 = 3;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FSCTL_GET_REPARSE_POINT: u32 = 0x0009_0068;
+    const MAXIMUM_REPARSE_DATA_BUFFER_SIZE: usize = 16 * 1024;
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let handle = CreateFileW(
+            wide.as_ptr(),
+            GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null_mut(),
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+            std::ptr::null_mut(),
+        );
+        if handle.is_null() || handle as isize == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut buffer = vec![0u8; MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
+        let mut returned = 0u32;
+        let ok = DeviceIoControl(
+            handle,
+            FSCTL_GET_REPARSE_POINT,
+            std::ptr::null_mut(),
+            0,
+            buffer.as_mut_ptr().cast(),
+            buffer.len() as u32,
+            &mut returned,
+            std::ptr::null_mut(),
+        );
+        CloseHandle(handle);
+        if ok == 0 || (returned as usize) < std::mem::size_of::<ReparseDataBufferHeader>() {
+            return None;
+        }
+        let header = &*(buffer.as_ptr() as *const ReparseDataBufferHeader);
+        Some(header.reparse_tag)
+    }
 }
 
 /// 创建目录安装链接：Unix symlink；Windows 先 symlink_dir，特权不足时回退 junction。
@@ -373,7 +491,7 @@ fn strip_verbatim_prefix(path: &Path) -> String {
 /// Windows 上目录链接必须用 `remove_dir`；误用 `remove_file` 会报拒绝访问 (os error 5)。
 pub(crate) fn remove_directory_symlink(path: &Path) -> Result<(), AppError> {
     let metadata = fs::symlink_metadata(path)?;
-    if !is_symlink_link(&metadata) {
+    if !path_is_symlink_link(path) {
         return Err(AppError::TargetConflict {
             path: path.display().to_string(),
         });
@@ -573,7 +691,7 @@ mod tests {
             .expect("spawn mklink");
         assert!(status.success(), "mklink /J failed: {status}");
         assert!(
-            super::is_symlink_link(&fs::symlink_metadata(&link).unwrap()),
+            super::path_is_symlink_link(&link),
             "junction should be treated as a directory link"
         );
 

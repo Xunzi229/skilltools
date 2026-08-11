@@ -9,7 +9,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::error::AppError;
-use crate::fs_ops::{create_directory_link, is_symlink_link, path_is_symlink_link};
+use crate::fs_ops::{create_directory_link, path_is_symlink_link};
 use crate::git_ops::{
     browse_url_from_git_url, clone_repository, latest_commit_time, project_name_from_git_url,
     pull_fast_forward, read_origin_url, source_repo_from_git_url, validate_git_url,
@@ -621,7 +621,7 @@ fn collect_child_skill_directories(
 
 fn is_plain_directory(path: &Path) -> bool {
     fs::symlink_metadata(path)
-        .map(|metadata| metadata.is_dir() && !is_symlink_link(&metadata))
+        .map(|metadata| metadata.is_dir() && !path_is_symlink_link(path))
         .unwrap_or(false)
 }
 
@@ -642,9 +642,7 @@ fn parent_skill_relative(relative_path: &Path, all: &[PathBuf]) -> Option<PathBu
 }
 
 fn is_skill_directory(path: &Path) -> bool {
-    fs::symlink_metadata(path.join("SKILL.md"))
-        .map(|metadata| metadata.file_type().is_file())
-        .unwrap_or(false)
+    crate::skill_detect::dir_has_skill_md(path)
 }
 
 fn stable_id(value: &str) -> String {

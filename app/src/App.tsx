@@ -21,6 +21,22 @@ import {
   skillProviders,
   type Provider,
 } from "./model/skill";
+import {
+  EMPTY_LIBRARY_QUERY,
+  TEMPLATE_GROUPS,
+  TEMPLATE_TAGS,
+  buildPathTaxonomyIndex,
+  isLibraryQueryActive,
+  joinSkillTaxonomy,
+  libraryQueryChips,
+  libraryQueryTitle,
+  matchesLibraryTaxonomy,
+  removeDeletedGroupFromQuery,
+  removeDeletedTagFromQuery,
+  removeGroupScope,
+  removeTagFromQuery,
+  type LibraryTaxonomyQuery,
+} from "./model/taxonomy";
 import { applyPreviewTypography } from "./utils/previewTypography";
 import { matchesLibrarySkillSearch } from "./utils/skillDisplay";
 import "./styles.css";
@@ -44,6 +60,8 @@ const filterTitles: Record<string, string> = {
 
 function App({ api = tauriSkillApi }: AppProps) {
   const [filter, setFilter] = useState<SkillFilter>("library");
+  const [libraryQuery, setLibraryQuery] =
+    useState<LibraryTaxonomyQuery>(EMPTY_LIBRARY_QUERY);
   const [search, setSearch] = useState("");
   const [skillSelectedIds, setSkillSelectedIds] = useState<Set<string>>(new Set());
   const [librarySelectedIds, setLibrarySelectedIds] = useState<Set<string>>(
@@ -70,6 +88,8 @@ function App({ api = tauriSkillApi }: AppProps) {
     batchSetSkillGroup,
     batchApplySkillGroups,
     batchAddSkillTags,
+    batchRemoveSkillTags,
+    batchSetSkillTags,
     batchMigrateProviderSkills,
   } = useBatchActions(api);
   const {
@@ -123,12 +143,24 @@ function App({ api = tauriSkillApi }: AppProps) {
       });
   }, [api]);
 
+  const pathTaxonomyIndex = useMemo(
+    () =>
+      buildPathTaxonomyIndex(
+        library.librarySkills,
+        installations.overview?.managed ?? [],
+      ),
+    [installations.overview?.managed, library.librarySkills],
+  );
+
+  const taxonomyActive = isLibraryQueryActive(libraryQuery);
+
   const visibleSkills = useMemo(() => {
     if (
       filter === "backups" ||
       filter === "settings" ||
       filter === "projects" ||
-      filter === "installations"
+      filter === "installations" ||
+      filter === "library"
     ) {
       return [];
     }
@@ -140,33 +172,54 @@ function App({ api = tauriSkillApi }: AppProps) {
         (filter === "paused" && skill.status === "paused") ||
         ((filter === "cursor" || filter === "claude" || filter === "codex") &&
           skillProviders(skill).includes(filter));
+      if (!matchesFilter) return false;
       const matchesSearch =
         !query ||
         skill.name.toLocaleLowerCase().includes(query) ||
         skill.description.toLocaleLowerCase().includes(query);
-      return matchesFilter && matchesSearch;
+      if (!matchesSearch) return false;
+      if (!taxonomyActive) return true;
+      const joined = joinSkillTaxonomy(skill, pathTaxonomyIndex);
+      if (!joined) return false;
+      return matchesLibraryTaxonomy(joined, libraryQuery);
     });
-  }, [filter, search, skills]);
+  }, [
+    filter,
+    libraryQuery,
+    pathTaxonomyIndex,
+    search,
+    skills,
+    taxonomyActive,
+  ]);
 
   const visibleLibrarySkills = useMemo(() => {
     return library.librarySkills.filter((skill) => {
-      const matchesFilter =
-        filter === "library" ||
-        (filter.startsWith("group:") && skill.groupId === filter.slice(6)) ||
-        (filter.startsWith("tag:") && skill.tagIds.includes(filter.slice(4)));
-      return matchesFilter && matchesLibrarySkillSearch(skill, search);
+      if (!matchesLibraryTaxonomy(skill, libraryQuery)) return false;
+      return matchesLibrarySkillSearch(skill, search, {
+        groups: library.groups,
+        tags: library.tags,
+      });
     });
-  }, [filter, library.librarySkills, search]);
+  }, [
+    library.groups,
+    library.librarySkills,
+    library.tags,
+    libraryQuery,
+    search,
+  ]);
 
-  const libraryMode =
-    filter === "library" || filter.startsWith("group:") || filter.startsWith("tag:");
+  const libraryMode = filter === "library";
 
-  const libraryTitle =
-    filter.startsWith("group:")
-      ? library.groups.find((group) => group.id === filter.slice(6))?.name ?? "分组"
-      : filter.startsWith("tag:")
-        ? library.tags.find((tag) => tag.id === filter.slice(4))?.name ?? "标签"
-        : "Skill 库";
+  const libraryTitle = libraryQueryTitle(
+    libraryQuery,
+    library.groups,
+    library.tags,
+  );
+  const queryChips = libraryQueryChips(
+    libraryQuery,
+    library.groups,
+    library.tags,
+  );
 
   // 当前筛选列表变化时：选中项不在列表中则改选第一项；列表为空则清空详情
   useEffect(() => {
@@ -287,6 +340,7 @@ function App({ api = tauriSkillApi }: AppProps) {
         backupCount={backups.length}
         installationCount={installations.installationCount}
         activeFilter={filter}
+        libraryQuery={libraryQuery}
         loading={listLoading || library.loading}
         busy={library.pendingAction !== null}
         collapsed={sidebarCollapsed}
@@ -301,6 +355,7 @@ function App({ api = tauriSkillApi }: AppProps) {
           }
           clearBatchResult();
         }}
+        onLibraryQueryChange={setLibraryQuery}
         onRefresh={() => {
           void refresh();
           void library.refresh();
@@ -314,7 +369,7 @@ function App({ api = tauriSkillApi }: AppProps) {
         }}
         onDeleteGroup={async (id) => {
           await library.deleteGroup(id);
-          if (filter === `group:${id}`) setFilter("library");
+          setLibraryQuery((q) => removeDeletedGroupFromQuery(q, id));
         }}
         onMoveGroup={async (id, order) => {
           await library.updateGroupOrder(id, order);
@@ -327,7 +382,25 @@ function App({ api = tauriSkillApi }: AppProps) {
         }}
         onDeleteTag={async (id) => {
           await library.deleteTag(id);
-          if (filter === `tag:${id}`) setFilter("library");
+          setLibraryQuery((q) => removeDeletedTagFromQuery(q, id));
+        }}
+        onApplyTaxonomyTemplate={async () => {
+          const existingGroupNames = new Set(
+            library.groups.map((g) => g.name.toLocaleLowerCase()),
+          );
+          const existingTagNames = new Set(
+            library.tags.map((t) => t.name.toLocaleLowerCase()),
+          );
+          for (const name of TEMPLATE_GROUPS) {
+            if (!existingGroupNames.has(name.toLocaleLowerCase())) {
+              await library.createGroup(name);
+            }
+          }
+          for (const name of TEMPLATE_TAGS) {
+            if (!existingTagNames.has(name.toLocaleLowerCase())) {
+              await library.createTag(name);
+            }
+          }
         }}
       />
 
@@ -401,6 +474,7 @@ function App({ api = tauriSkillApi }: AppProps) {
             skills={visibleLibrarySkills}
             groups={library.groups}
             tags={library.tags}
+            queryChips={queryChips}
             selectedId={library.selectedLibrarySkillId}
             selectedIds={librarySelectedIds}
             search={search}
@@ -416,6 +490,16 @@ function App({ api = tauriSkillApi }: AppProps) {
             onSetSelection={(ids) => setLibrarySelectedIds(new Set(ids))}
             onInvertSelection={(ids) => invertSet(setLibrarySelectedIds, ids)}
             onClearSelection={() => setLibrarySelectedIds(new Set())}
+            onRemoveQueryChip={(chip) => {
+              if (chip.kind === "group" || chip.kind === "ungrouped") {
+                setLibraryQuery((q) => removeGroupScope(q));
+              } else if (chip.kind === "untagged") {
+                setLibraryQuery((q) => ({ ...q, untaggedOnly: false }));
+              } else if (chip.kind === "tag" && chip.key.startsWith("tag:")) {
+                setLibraryQuery((q) => removeTagFromQuery(q, chip.key.slice(4)));
+              }
+            }}
+            onClearQuery={() => setLibraryQuery(EMPTY_LIBRARY_QUERY)}
             onBatchInstall={(provider: Provider) => {
               const ids = [...librarySelectedIds];
               if (batchBusy || ids.length === 0) return;
@@ -437,15 +521,68 @@ function App({ api = tauriSkillApi }: AppProps) {
                 void library.refresh({ silent: true }),
               );
             }}
-            onApplyAiGroups={async (assignments) => {
-              if (batchBusy || assignments.length === 0) return;
+            onApplyAiGroups={async (items) => {
+              if (batchBusy || items.length === 0) return;
+              const groupNameToId = new Map(
+                library.groups.map((g) => [g.name, g.id]),
+              );
+              const tagNameToId = new Map(
+                library.tags.map((t) => [t.name, t.id]),
+              );
+              for (const item of items) {
+                const name = item.newGroupName?.trim();
+                if (name && !groupNameToId.has(name)) {
+                  const created = await library.createGroup(name);
+                  if (created) groupNameToId.set(created.name, created.id);
+                }
+                for (const tagName of item.newTagNames) {
+                  const trimmed = tagName.trim();
+                  if (trimmed && !tagNameToId.has(trimmed)) {
+                    const created = await library.createTag(trimmed);
+                    if (created) tagNameToId.set(created.name, created.id);
+                  }
+                }
+              }
+              const assignments = items.map((item) => {
+                let groupId = item.groupId;
+                const newName = item.newGroupName?.trim();
+                if (!groupId && newName) {
+                  groupId = groupNameToId.get(newName) ?? null;
+                }
+                return { skillId: item.skillId, groupId };
+              });
               await batchApplySkillGroups(assignments);
+              for (const item of items) {
+                const tagIds = [
+                  ...item.tagIds,
+                  ...item.newTagNames
+                    .map((n) => tagNameToId.get(n.trim()))
+                    .filter((id): id is string => Boolean(id)),
+                ];
+                for (const tagId of tagIds) {
+                  await api.batchAddSkillTags([item.skillId], tagId);
+                }
+              }
               await library.refresh({ silent: true });
             }}
             onBatchAddTag={(tagId) => {
               const ids = [...librarySelectedIds];
               if (batchBusy || ids.length === 0) return;
               void batchAddSkillTags(ids, tagId).then(() =>
+                void library.refresh({ silent: true }),
+              );
+            }}
+            onBatchRemoveTag={(tagId) => {
+              const ids = [...librarySelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchRemoveSkillTags(ids, tagId).then(() =>
+                void library.refresh({ silent: true }),
+              );
+            }}
+            onBatchClearTags={() => {
+              const ids = [...librarySelectedIds];
+              if (batchBusy || ids.length === 0) return;
+              void batchSetSkillTags(ids, []).then(() =>
                 void library.refresh({ silent: true }),
               );
             }}
@@ -458,6 +595,7 @@ function App({ api = tauriSkillApi }: AppProps) {
             onGoToProjects={() => {
               setFilter("projects");
               setSearch("");
+              setLibraryQuery(EMPTY_LIBRARY_QUERY);
               setSkillSelectedIds(new Set());
               setLibrarySelectedIds(new Set());
               clearBatchResult();
@@ -525,6 +663,25 @@ function App({ api = tauriSkillApi }: AppProps) {
             batchBusy={batchBusy}
             batchResult={batchResult}
             collapsed={listCollapsed}
+            taxonomyActive={taxonomyActive}
+            queryChips={queryChips}
+            resolveTaxonomy={(skill) => {
+              const joined = joinSkillTaxonomy(skill, pathTaxonomyIndex);
+              if (!joined) return null;
+              const groupLabel =
+                joined.groupId == null
+                  ? null
+                  : (library.groups.find((g) => g.id === joined.groupId)?.name ??
+                    null);
+              const tagLabels = joined.tagIds
+                .map((id) => library.tags.find((t) => t.id === id)?.name)
+                .filter((name): name is string => Boolean(name));
+              return {
+                librarySkillId: joined.librarySkillId,
+                groupLabel,
+                tagLabels,
+              };
+            }}
             onToggleCollapse={() => setListCollapsed((value) => !value)}
             onSearchChange={setSearch}
             onSelect={(id) => {
@@ -537,6 +694,21 @@ function App({ api = tauriSkillApi }: AppProps) {
             onSetSelection={(ids) => setSkillSelectedIds(new Set(ids))}
             onInvertSelection={(ids) => invertSet(setSkillSelectedIds, ids)}
             onClearSelection={() => setSkillSelectedIds(new Set())}
+            onRemoveQueryChip={(chip) => {
+              if (chip.kind === "group" || chip.kind === "ungrouped") {
+                setLibraryQuery((q) => removeGroupScope(q));
+              } else if (chip.kind === "untagged") {
+                setLibraryQuery((q) => ({ ...q, untaggedOnly: false }));
+              } else if (chip.kind === "tag" && chip.key.startsWith("tag:")) {
+                setLibraryQuery((q) => removeTagFromQuery(q, chip.key.slice(4)));
+              }
+            }}
+            onClearQuery={() => setLibraryQuery(EMPTY_LIBRARY_QUERY)}
+            onOpenLibrarySkill={(librarySkillId) => {
+              setLibraryQuery(EMPTY_LIBRARY_QUERY);
+              setFilter("library");
+              library.selectLibrarySkill(librarySkillId);
+            }}
             onBatchPause={() => {
               const ids = [...skillSelectedIds];
               if (batchBusy || ids.length === 0) return;

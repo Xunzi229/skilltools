@@ -44,11 +44,16 @@ export function skillProviders(skill: Pick<SkillSummary, "provider" | "providers
   return [skill.provider];
 }
 
-/** 去重键：resolvedPath（symlink 目标）优先，否则 currentPath；剥离 Windows verbatim 前缀 */
+/** 去重/ join 键：与 Rust `path_norm::normalize_path_key` 对齐（verbatim、`\`→`/`、折叠 `//`、ascii 小写、去尾 `/`） */
 export function skillCanonicalKey(
   skill: Pick<SkillSummary, "resolvedPath" | "currentPath">,
 ): string {
-  let raw = (skill.resolvedPath ?? skill.currentPath).trim();
+  return normalizePathKey(skill.resolvedPath ?? skill.currentPath);
+}
+
+/** 与后端 normalize_path_key_str 同规则，供 taxonomy join / 列表去重共用 */
+export function normalizePathKey(input: string | null | undefined): string {
+  let raw = (input ?? "").trim();
   if (raw.startsWith("\\\\?\\UNC\\")) {
     raw = `\\\\${raw.slice("\\\\?\\UNC\\".length)}`;
   } else if (raw.startsWith("\\\\?\\")) {
@@ -58,7 +63,30 @@ export function skillCanonicalKey(
   } else if (raw.startsWith("//?/")) {
     raw = raw.slice("//?/".length);
   }
-  return raw.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+
+  const lowered = raw.replace(/\\/g, "/").toLowerCase();
+  let prefix = "";
+  let rest = lowered;
+  if (lowered.startsWith("//")) {
+    prefix = "//";
+    rest = lowered.slice(2);
+  }
+  let key = prefix;
+  let prevSlash = false;
+  for (const ch of rest) {
+    if (ch === "/") {
+      if (prevSlash) continue;
+      prevSlash = true;
+      key += "/";
+      continue;
+    }
+    prevSlash = false;
+    key += ch;
+  }
+  while (key.length > 1 && key.endsWith("/")) {
+    key = key.slice(0, -1);
+  }
+  return key;
 }
 
 export function skillMemberIds(skill: SkillSummary): string[] {
@@ -229,10 +257,20 @@ export interface TranslatePreview {
   fromCache?: boolean;
 }
 
-/** AI 智能分组建议（groupName 为现有分组名，null 表示未分组） */
+/** AI 智能分组/标签建议（可为新建名；null 表示未分组） */
 export interface GroupSuggestion {
   skillId: string;
   groupName: string | null;
+  tagNames?: string[];
+}
+
+export interface AiTaxonomyApplyItem {
+  skillId: string;
+  groupId: string | null;
+  /** 若无 groupId 且有此名，应用前先创建分组 */
+  newGroupName?: string | null;
+  tagIds: string[];
+  newTagNames: string[];
 }
 
 export interface SkillGroupAssignment {

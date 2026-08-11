@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
 import type { TranslatePreview, TranslateSkillSource } from "../model/skill";
+import { useModelServiceConfigured } from "../hooks/useModelServiceConfigured";
 import { errorMessage } from "../utils/errors";
-import { isTranslateConfigured } from "../utils/translateSettings";
 import { MarkdownViewer } from "./MarkdownViewer";
 
 interface TranslatePreviewButtonProps {
@@ -58,27 +58,12 @@ export function TranslatePreviewButton({
   relativePath,
   disabled = false,
 }: TranslatePreviewButtonProps) {
-  const [configured, setConfigured] = useState(false);
+  const configured = useModelServiceConfigured(api);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TranslatePreview | null>(null);
   const requestIdRef = useRef(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .getSettings()
-      .then((settings) => {
-        if (!cancelled) setConfigured(isTranslateConfigured(settings));
-      })
-      .catch(() => {
-        if (!cancelled) setConfigured(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
 
   const closePreview = () => {
     requestIdRef.current += 1;

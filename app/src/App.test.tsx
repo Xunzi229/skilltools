@@ -413,6 +413,20 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
       skipped: 0,
       items: skillIds.map((id) => ({ id, status: "success" as const })),
     }),
+    batchRemoveSkillTags: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
+    batchSetSkillTags: async (skillIds) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+    }),
     batchMigrateProviderSkills: async (skillIds) => ({
       total: skillIds.length,
       success: skillIds.length,

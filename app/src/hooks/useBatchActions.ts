@@ -67,6 +67,10 @@ export function useBatchActions(api: SkillApi) {
       }),
     batchAddSkillTags: (skillIds: string[], tagId: string) =>
       run(() => api.batchAddSkillTags(skillIds, tagId)),
+    batchRemoveSkillTags: (skillIds: string[], tagId: string) =>
+      run(() => api.batchRemoveSkillTags(skillIds, tagId)),
+    batchSetSkillTags: (skillIds: string[], tagIds: string[]) =>
+      run(() => api.batchSetSkillTags(skillIds, tagIds)),
     batchMigrateProviderSkills: (skillIds: string[], replaceWithLink: boolean) =>
       run(() => api.batchMigrateProviderSkills(skillIds, replaceWithLink)),
   };

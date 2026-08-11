@@ -26,6 +26,11 @@ jobs:
             # MSI/WiX 要求 pre-release 标识为纯数字（<=65535），如 0.8.0-1。
             # 含 preview/rc 字母时仅打 NSIS，避免整 job 失败。
             args: ""
+            portable_arch: x64
+          # Windows ARM64：原生构建（MSI 不支持 ARM64，仅 NSIS + portable）
+          - platform: windows-11-arm
+            args: --target aarch64-pc-windows-msvc --bundles nsis
+            portable_arch: arm64
 
     runs-on: ${{ matrix.platform }}
 
@@ -48,7 +53,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ startsWith(matrix.platform, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ startsWith(matrix.platform, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || (matrix.platform == 'windows-11-arm' && 'aarch64-pc-windows-msvc') || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -74,9 +79,10 @@ jobs:
             Preview / 预览版：含尚未正式发布的功能，仅供测试。
             多平台安装包（Windows / macOS / Linux）：
             - Windows：
-              - `..._windows-x64-setup.exe`：NSIS 安装包（正式版另有 `.msi`；支持应用内更新）
-              - `..._windows-x64.exe`：免安装单文件主程序（需系统已安装 WebView2）
+              - `..._windows-x64-setup.exe` / `..._windows-arm64-setup.exe`：NSIS 安装包（x64 正式版另有 `.msi`；支持应用内更新）
+              - `..._windows-x64.exe` / `..._windows-arm64.exe`：免安装单文件主程序（需系统已安装 WebView2）
               - preview/rc（非数字 pre-release）跳过 MSI，仅 NSIS + 单文件 exe
+              - Windows ARM64 runner：`windows-11-arm`（公开仓库可用；MSI 不支持 ARM64）
             - macOS：`.dmg` / `.app`（未签名，首次打开需在「隐私与安全性」中允许；自动更新可能受 Gatekeeper 限制）
             - Linux：`.AppImage` / `.deb`
 
@@ -89,7 +95,7 @@ jobs:
           # 资源名带平台/架构，例如 Skill.Manager_*_windows-x64-setup.exe
           releaseAssetNamePattern: "[name]_[version]_[platform]-[arch][setup][ext]"
 
-      # uploadPlainBinary 会把 [name] 固定为 binary，故改为手动上传以匹配 Skill.Manager_*_windows-x64.exe
+      # uploadPlainBinary 会把 [name] 固定为 binary，故改为手动上传以匹配 Skill.Manager_*_windows-{arch}.exe
       - name: Upload Windows portable exe
         if: startsWith(matrix.platform, 'windows')
         env:
@@ -98,16 +104,23 @@ jobs:
         run: |
           $version = (Get-Content app/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $tag = if ('${{ github.ref_type }}' -eq 'tag') { '${{ github.ref_name }}' } else { "v$version" }
+          $arch = '${{ matrix.portable_arch }}'
+          if (-not $arch) { $arch = 'x64' }
+          $targetDir = if ($arch -eq 'arm64') {
+            'app/src-tauri/target/aarch64-pc-windows-msvc/release'
+          } else {
+            'app/src-tauri/target/release'
+          }
           $candidates = @(
-            'app/src-tauri/target/release/app.exe',
-            'app/src-tauri/target/release/Skill Manager.exe'
+            (Join-Path $targetDir 'app.exe'),
+            (Join-Path $targetDir 'Skill Manager.exe')
           )
           $src = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $src) {
-            Get-ChildItem 'app/src-tauri/target/release' -Filter '*.exe' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
-            throw 'Windows portable exe not found in target/release'
+            Get-ChildItem $targetDir -Filter '*.exe' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw "Windows portable exe not found in $targetDir"
           }
-          $asset = "Skill.Manager_${version}_windows-x64.exe"
+          $asset = "Skill.Manager_${version}_windows-$arch.exe"
           Copy-Item -LiteralPath $src -Destination $asset -Force
           gh release upload $tag $asset --clobber
           Write-Host "Uploaded $asset from $src"

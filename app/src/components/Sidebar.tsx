@@ -7,6 +7,13 @@ import type {
   Tag,
 } from "../model/skill";
 import { skillProviders } from "../model/skill";
+import {
+  EMPTY_LIBRARY_QUERY,
+  TEMPLATE_GROUPS,
+  TEMPLATE_TAGS,
+  type LibraryTaxonomyQuery,
+  isLibraryQueryActive,
+} from "../model/taxonomy";
 import { countUniqueSkills } from "../utils/skillDisplay";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NameDialog } from "./NameDialog";
@@ -21,9 +28,7 @@ export type SkillFilter =
   | "installations"
   | "projects"
   | "backups"
-  | "settings"
-  | `group:${string}`
-  | `tag:${string}`;
+  | "settings";
 
 interface SidebarProps {
   skills: SkillSummary[];
@@ -34,11 +39,13 @@ interface SidebarProps {
   backupCount: number;
   installationCount: number;
   activeFilter: SkillFilter;
+  libraryQuery: LibraryTaxonomyQuery;
   loading: boolean;
   busy?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   onFilterChange: (filter: SkillFilter) => void;
+  onLibraryQueryChange: (query: LibraryTaxonomyQuery) => void;
   onRefresh: () => void;
   onCreateGroup: (name: string, color: string | null) => Promise<void>;
   onRenameGroup: (id: string, name: string, color: string | null) => Promise<void>;
@@ -47,6 +54,7 @@ interface SidebarProps {
   onCreateTag: (name: string, color: string | null) => Promise<void>;
   onRenameTag: (id: string, name: string, color: string | null) => Promise<void>;
   onDeleteTag: (id: string) => Promise<void>;
+  onApplyTaxonomyTemplate?: () => Promise<void>;
 }
 
 const providers: Array<{ id: Provider; label: string }> = [
@@ -73,6 +81,16 @@ const rowIdle =
   "text-[var(--sidebar-ink)] hover:bg-[var(--sidebar-hover)]";
 const countClass = "shrink-0 text-[11px] text-[var(--sidebar-muted)] tabular-nums";
 
+function isProviderLikeFilter(filter: SkillFilter): boolean {
+  return (
+    filter === "all" ||
+    filter === "paused" ||
+    filter === "cursor" ||
+    filter === "claude" ||
+    filter === "codex"
+  );
+}
+
 export function Sidebar({
   skills,
   librarySkills,
@@ -82,11 +100,13 @@ export function Sidebar({
   backupCount,
   installationCount,
   activeFilter,
+  libraryQuery,
   loading,
   busy = false,
   collapsed = false,
   onToggleCollapse,
   onFilterChange,
+  onLibraryQueryChange,
   onRefresh,
   onCreateGroup,
   onRenameGroup,
@@ -95,12 +115,24 @@ export function Sidebar({
   onCreateTag,
   onRenameTag,
   onDeleteTag,
+  onApplyTaxonomyTemplate,
 }: SidebarProps) {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [menuKey, setMenuKey] = useState<string | null>(null);
+  const [templateBusy, setTemplateBusy] = useState(false);
 
   const sortedGroups = [...groups].sort((left, right) => left.order - right.order);
+
+  const ensureLibraryOrKeepProvider = () => {
+    if (isProviderLikeFilter(activeFilter)) return;
+    if (activeFilter !== "library") onFilterChange("library");
+  };
+
+  const selectLibraryHome = () => {
+    onLibraryQueryChange(EMPTY_LIBRARY_QUERY);
+    onFilterChange("library");
+  };
 
   if (collapsed) {
     const railItem = (id: SkillFilter, label: string, title: string) => (
@@ -109,12 +141,20 @@ export function Sidebar({
         type="button"
         className={[
           "flex w-full flex-col items-center rounded-[8px] px-1 py-2 text-[11px] leading-tight transition-colors",
-          activeFilter === id ? rowActive : rowIdle,
+          activeFilter === id && !isLibraryQueryActive(libraryQuery)
+            ? rowActive
+            : rowIdle,
         ].join(" ")}
         aria-pressed={activeFilter === id}
         aria-label={title}
         title={title}
-        onClick={() => onFilterChange(id)}
+        onClick={() => {
+          if (id === "library") selectLibraryHome();
+          else {
+            onLibraryQueryChange(EMPTY_LIBRARY_QUERY);
+            onFilterChange(id);
+          }
+        }}
       >
         <span className="font-medium">{label}</span>
       </button>
@@ -155,11 +195,23 @@ export function Sidebar({
       key={id}
       className={[
         "flex w-full items-center justify-between rounded-[8px] px-3 py-[7px] text-[13px] transition-colors",
-        activeFilter === id ? rowActive : rowIdle,
+        activeFilter === id &&
+        (id !== "library" || !isLibraryQueryActive(libraryQuery))
+          ? rowActive
+          : rowIdle,
       ].join(" ")}
       type="button"
-      aria-pressed={activeFilter === id}
-      onClick={() => onFilterChange(id)}
+      aria-pressed={
+        activeFilter === id &&
+        (id !== "library" || !isLibraryQueryActive(libraryQuery))
+      }
+      onClick={() => {
+        if (id === "library") selectLibraryHome();
+        else {
+          onLibraryQueryChange(EMPTY_LIBRARY_QUERY);
+          onFilterChange(id);
+        }
+      }}
     >
       <span className="truncate">{label}</span>
       <span className={countClass}>{count}</span>
@@ -185,11 +237,41 @@ export function Sidebar({
     </div>
   );
 
-  const taxonomyRow = (
+  const simpleTaxonomyRow = (
     key: string,
-    filter: SkillFilter,
     label: string,
     count: number,
+    active: boolean,
+    onClick: () => void,
+    leading?: ReactNode,
+  ) => (
+    <button
+      key={key}
+      type="button"
+      className={[
+        "flex w-full items-center justify-between rounded-[8px] px-3 py-[7px] text-[13px] transition-colors",
+        active ? rowActive : rowIdle,
+      ].join(" ")}
+      aria-pressed={active}
+      onClick={() => {
+        setMenuKey(null);
+        onClick();
+      }}
+    >
+      <span className="flex min-w-0 items-center gap-2.5">
+        {leading}
+        <span className="truncate">{label}</span>
+      </span>
+      <span className={countClass}>{count}</span>
+    </button>
+  );
+
+  const taxonomyRow = (
+    key: string,
+    label: string,
+    count: number,
+    active: boolean,
+    onSelect: () => void,
     actions: {
       onRename: () => void;
       onDelete: () => void;
@@ -198,7 +280,6 @@ export function Sidebar({
     },
     leading?: ReactNode,
   ) => {
-    const active = activeFilter === filter;
     const open = menuKey === key;
     return (
       <div
@@ -219,7 +300,7 @@ export function Sidebar({
           aria-pressed={active}
           onClick={() => {
             setMenuKey(null);
-            onFilterChange(filter);
+            onSelect();
           }}
         >
           <span className="flex min-w-0 items-center gap-2.5">
@@ -301,6 +382,9 @@ export function Sidebar({
     );
   };
 
+  const ungroupedCount = librarySkills.filter((s) => s.groupId == null).length;
+  const untaggedCount = librarySkills.filter((s) => s.tagIds.length === 0).length;
+
   return (
     <aside
       className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-r border-line bg-sidebar px-3 pb-4 pt-5"
@@ -341,17 +425,54 @@ export function Sidebar({
         {navItem("library", "Skill 库", librarySkills.length)}
 
         {sectionLabel("分组", () => setDialog({ kind: "create-group" }), "新建分组")}
+        {simpleTaxonomyRow(
+          "ungrouped",
+          "未分组",
+          ungroupedCount,
+          libraryQuery.groupScope === "ungrouped",
+          () => {
+            ensureLibraryOrKeepProvider();
+            onLibraryQueryChange({
+              ...libraryQuery,
+              groupScope: "ungrouped",
+            });
+          },
+        )}
         {sortedGroups.length === 0 ? (
-          <p className="px-3 py-1 text-[11px] text-[var(--sidebar-muted)]">
-            暂无分组，点 + 创建
-          </p>
+          <div className="px-3 py-1">
+            <p className="m-0 text-[11px] text-[var(--sidebar-muted)]">
+              暂无分组。可点 + 创建，或应用推荐模板
+              （{TEMPLATE_GROUPS.slice(0, 3).join("、")}…）。
+            </p>
+            {onApplyTaxonomyTemplate && (
+              <button
+                type="button"
+                className="macos-link mt-1 text-[11px]"
+                disabled={busy || templateBusy}
+                onClick={() => {
+                  setTemplateBusy(true);
+                  void onApplyTaxonomyTemplate().finally(() => setTemplateBusy(false));
+                }}
+              >
+                应用推荐模板
+              </button>
+            )}
+          </div>
         ) : (
           sortedGroups.map((group, index) =>
             taxonomyRow(
               `group:${group.id}`,
-              `group:${group.id}`,
               group.name,
               librarySkills.filter((skill) => skill.groupId === group.id).length,
+              typeof libraryQuery.groupScope === "object" &&
+                libraryQuery.groupScope.groupId === group.id,
+              () => {
+                ensureLibraryOrKeepProvider();
+                onLibraryQueryChange({
+                  ...libraryQuery,
+                  groupScope: { groupId: group.id },
+                });
+              },
               {
                 onRename: () =>
                   setDialog({
@@ -377,17 +498,61 @@ export function Sidebar({
         )}
 
         {sectionLabel("标签", () => setDialog({ kind: "create-tag" }), "新建标签")}
+        <p className="mb-1 px-3 text-[10px] leading-snug text-[var(--sidebar-muted)]">
+          仅用于应用内筛选，不写入 SKILL.md
+        </p>
+        {simpleTaxonomyRow(
+          "untagged",
+          "无标签",
+          untaggedCount,
+          libraryQuery.untaggedOnly,
+          () => {
+            ensureLibraryOrKeepProvider();
+            onLibraryQueryChange({
+              ...libraryQuery,
+              untaggedOnly: true,
+              tagIds: [],
+            });
+          },
+        )}
         {tags.length === 0 ? (
-          <p className="px-3 py-1 text-[11px] text-[var(--sidebar-muted)]">
-            暂无标签，点 + 创建
-          </p>
+          <div className="px-3 py-1">
+            <p className="m-0 text-[11px] text-[var(--sidebar-muted)]">
+              暂无标签。可点 + 创建，或应用推荐模板（{TEMPLATE_TAGS.slice(0, 3).join("、")}…）。
+            </p>
+            {onApplyTaxonomyTemplate && groups.length > 0 && (
+              <button
+                type="button"
+                className="macos-link mt-1 text-[11px]"
+                disabled={busy || templateBusy}
+                onClick={() => {
+                  setTemplateBusy(true);
+                  void onApplyTaxonomyTemplate().finally(() => setTemplateBusy(false));
+                }}
+              >
+                应用推荐标签模板
+              </button>
+            )}
+          </div>
         ) : (
           tags.map((tag) =>
             taxonomyRow(
               `tag:${tag.id}`,
-              `tag:${tag.id}`,
               tag.name,
               librarySkills.filter((skill) => skill.tagIds.includes(tag.id)).length,
+              !libraryQuery.untaggedOnly && libraryQuery.tagIds.includes(tag.id),
+              () => {
+                ensureLibraryOrKeepProvider();
+                const has = libraryQuery.tagIds.includes(tag.id);
+                const tagIds = has
+                  ? libraryQuery.tagIds.filter((id) => id !== tag.id)
+                  : [...libraryQuery.tagIds, tag.id];
+                onLibraryQueryChange({
+                  ...libraryQuery,
+                  tagIds,
+                  untaggedOnly: false,
+                });
+              },
               {
                 onRename: () =>
                   setDialog({
@@ -446,7 +611,10 @@ export function Sidebar({
             activeFilter === "settings" ? rowActive : rowIdle,
           ].join(" ")}
           type="button"
-          onClick={() => onFilterChange("settings")}
+          onClick={() => {
+            onLibraryQueryChange(EMPTY_LIBRARY_QUERY);
+            onFilterChange("settings");
+          }}
         >
           设置
         </button>

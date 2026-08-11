@@ -120,10 +120,7 @@ impl AppPaths {
     }
 
     fn is_provider_skill_symlink(&self, path: &Path) -> bool {
-        let Ok(metadata) = fs::symlink_metadata(path) else {
-            return false;
-        };
-        if !crate::fs_ops::is_symlink_link(&metadata) {
+        if !crate::fs_ops::path_is_symlink_link(path) {
             return false;
         }
         let Some(parent) = path.parent() else {
@@ -196,7 +193,7 @@ fn resolve_path(path: &Path) -> Result<PathBuf, AppError> {
     };
 
     let mut resolved = existing.canonicalize().map_err(|error| {
-        if crate::fs_ops::is_symlink_link(&metadata) && error.kind() == std::io::ErrorKind::NotFound
+        if crate::fs_ops::path_is_symlink_link(path) && error.kind() == std::io::ErrorKind::NotFound
         {
             AppError::PathOutsideManagedRoots {
                 path: path.display().to_string(),

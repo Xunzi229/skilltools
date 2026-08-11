@@ -253,7 +253,7 @@ export function LibraryDetail({
           </div>
           <fieldset className="min-w-0 border-0 p-0">
             <legend className="mb-1.5 flex w-full items-center justify-between px-0 text-[12px] text-ink-2">
-              <span>标签</span>
+              <span>应用内标签</span>
               <button
                 type="button"
                 className="macos-link"
@@ -263,6 +263,9 @@ export function LibraryDetail({
                 新建标签
               </button>
             </legend>
+            <p className="mb-1.5 text-[11px] text-ink-3">
+              用于侧栏筛选，不写入 SKILL.md（与文件内 tags 不同）
+            </p>
             {tags.length === 0 ? (
               <span className="text-[12px] text-ink-3">暂无标签，可点「新建标签」创建</span>
             ) : (

@@ -228,13 +228,54 @@ fn spawn_command_for(app: &Path) -> Command {
 
 #[cfg(windows)]
 fn open_with_default(path: &Path) -> Result<(), AppError> {
-    Command::new("cmd")
-        .args(["/C", "start", "", &path.display().to_string()])
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| AppError::Io {
-            message: format!("打开失败：{error}"),
+    windows_shell_execute(path, "open")
+}
+
+#[cfg(windows)]
+fn windows_shell_execute(path: &Path, operation: &str) -> Result<(), AppError> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut core::ffi::c_void,
+            lp_operation: *const u16,
+            lp_file: *const u16,
+            lp_parameters: *const u16,
+            lp_directory: *const u16,
+            n_show_cmd: i32,
+        ) -> isize;
+    }
+
+    const SW_SHOWNORMAL: i32 = 1;
+
+    let op: Vec<u16> = std::ffi::OsStr::new(operation)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let file: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            op.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // 返回值 > 32 表示成功
+    if result > 32 {
+        Ok(())
+    } else {
+        Err(AppError::Io {
+            message: format!("打开失败（ShellExecuteW={result}）：{}", path.display()),
         })
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -283,13 +324,33 @@ pub fn reveal_path(path: &Path) -> Result<(), AppError> {
 
 #[cfg(windows)]
 fn reveal_in_file_manager(path: &Path) -> Result<(), AppError> {
+    use std::os::windows::process::CommandExt;
+
+    // explorer `/select,"C:\path with spaces\file"` 必须作为单个 raw 参数，避免空格拆参。
+    let absolute = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf());
+    let display = strip_windows_verbatim_for_explorer(&absolute);
+    let select_arg = format!("/select,\"{display}\"");
     Command::new("explorer")
-        .arg(format!("/select,{}", path.display()))
+        .raw_arg(select_arg)
         .spawn()
         .map(|_| ())
         .map_err(|error| AppError::Io {
             message: format!("打开资源管理器失败：{error}"),
         })
+}
+
+#[cfg(windows)]
+fn strip_windows_verbatim_for_explorer(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        text.into_owned()
+    }
 }
 
 #[cfg(target_os = "macos")]

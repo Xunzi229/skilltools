@@ -128,6 +128,52 @@ pub fn batch_add_skill_tags(
     collect(items)
 }
 
+pub fn batch_remove_skill_tags(
+    library: &LibraryRepository,
+    skill_ids: Vec<String>,
+    tag_id: String,
+) -> BatchResult {
+    let index_skills = match library.list_library_skills() {
+        Ok(skills) => skills,
+        Err(error) => {
+            return collect(
+                skill_ids
+                    .into_iter()
+                    .map(|id| map_item::<(), _>(id, Err(error.to_string())))
+                    .collect(),
+            );
+        }
+    };
+    let items = skill_ids
+        .into_iter()
+        .map(|id| {
+            let current = index_skills
+                .iter()
+                .find(|skill| skill.id == id)
+                .map(|skill| skill.tag_ids.clone())
+                .unwrap_or_default();
+            if !current.iter().any(|t| t == &tag_id) {
+                return skipped(id, "未包含该标签，已跳过");
+            }
+            let next: Vec<String> = current.into_iter().filter(|t| t != &tag_id).collect();
+            map_item(id.clone(), library.set_skill_tags(&id, next))
+        })
+        .collect();
+    collect(items)
+}
+
+pub fn batch_set_skill_tags(
+    library: &LibraryRepository,
+    skill_ids: Vec<String>,
+    tag_ids: Vec<String>,
+) -> BatchResult {
+    let items = skill_ids
+        .into_iter()
+        .map(|id| map_item(id.clone(), library.set_skill_tags(&id, tag_ids.clone())))
+        .collect();
+    collect(items)
+}
+
 pub fn batch_migrate_provider_skills(
     skills: &SkillRepository,
     library: &LibraryRepository,
@@ -170,4 +216,30 @@ pub fn apply_install_preset(
         }
     }
     collect(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library_repository::LibraryRepository;
+    use crate::model::BatchItemStatus;
+    use crate::paths::AppPaths;
+    use tempfile::tempdir;
+
+    #[test]
+    fn batch_remove_and_set_tags_on_missing_skill() {
+        let dir = tempdir().unwrap();
+        let library = LibraryRepository::new(AppPaths::for_test(dir.path()));
+        let tag = library.create_tag("cursor".into(), None).unwrap();
+        // 索引中无该 skill：remove 视为未包含标签 → skipped
+        let removed = batch_remove_skill_tags(&library, vec!["missing".into()], tag.id.clone());
+        assert_eq!(removed.total, 1);
+        assert_eq!(removed.skipped, 1);
+        assert_eq!(removed.items[0].status, BatchItemStatus::Skipped);
+
+        // set 会因 skill 不存在而 failed
+        let set = batch_set_skill_tags(&library, vec!["missing".into()], vec![]);
+        assert_eq!(set.total, 1);
+        assert_eq!(set.items[0].status, BatchItemStatus::Failed);
+    }
 }

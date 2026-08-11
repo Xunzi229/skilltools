@@ -50,7 +50,7 @@ pub fn export_directory_to_zip(source_dir: &Path, dest_zip: &Path) -> Result<(),
         let metadata = fs::symlink_metadata(path).map_err(|error| AppError::Zip {
             message: format!("读取元数据失败：{error}"),
         })?;
-        if crate::fs_ops::is_symlink_link(&metadata) {
+        if crate::fs_ops::path_is_symlink_link(path) {
             continue;
         }
         let relative = path.strip_prefix(source_dir).map_err(|_| AppError::Zip {

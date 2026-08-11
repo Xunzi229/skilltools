@@ -9,8 +9,7 @@ use walkdir::WalkDir;
 
 use crate::error::AppError;
 use crate::fs_ops::{
-    copy_directory, is_symlink_link, path_is_symlink_link, rename_directory_no_replace,
-    verify_directory_copy,
+    copy_directory, path_is_symlink_link, rename_directory_no_replace, verify_directory_copy,
 };
 use crate::json_store::{read_json, write_json};
 use crate::model::{
@@ -93,8 +92,8 @@ impl SkillRepository {
                     }
                     Ok(_) => {}
                     Err(error) => {
-                        if let Ok(metadata) = fs::symlink_metadata(&skill_path) {
-                            if is_symlink_link(&metadata) {
+                        if let Ok(_metadata) = fs::symlink_metadata(&skill_path) {
+                            if path_is_symlink_link(&skill_path) {
                                 if skill_path.parent() == Some(root.path.as_path())
                                     && is_skill_directory(&skill_path)
                                 {
@@ -636,9 +635,7 @@ fn is_skill_directory(path: &Path) -> bool {
         return false;
     }
 
-    fs::symlink_metadata(path.join("SKILL.md"))
-        .map(|metadata| metadata.file_type().is_file())
-        .unwrap_or(false)
+    crate::skill_detect::dir_has_skill_md(path)
 }
 
 fn append_incomplete_file_list_warning(warnings: &mut Vec<String>, error: impl AsRef<str>) {
@@ -677,10 +674,11 @@ fn summary_with_warnings(
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let current_path = skill_path.to_path_buf();
-    let resolved_path = fs::symlink_metadata(skill_path)
-        .ok()
-        .filter(|metadata| is_symlink_link(metadata))
-        .and_then(|_| skill_path.canonicalize().ok());
+    let resolved_path = if path_is_symlink_link(skill_path) {
+        skill_path.canonicalize().ok()
+    } else {
+        None
+    };
 
     SkillSummary {
         id,

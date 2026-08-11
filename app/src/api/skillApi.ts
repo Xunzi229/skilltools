@@ -135,7 +135,10 @@ export interface SkillApi {
     skillId: string,
     relativePath: string,
   ): Promise<TranslatePreview>;
-  suggestSkillGroups(skillIds: string[]): Promise<GroupSuggestion[]>;
+  suggestSkillGroups(
+    skillIds: string[],
+    options?: { allowNewGroups?: boolean; allowNewTags?: boolean },
+  ): Promise<GroupSuggestion[]>;
   getAppPaths(): Promise<AppPathsInfo>;
   revealPath(path: string): Promise<void>;
   exportLibrarySkillZip(id: string, destPath: string): Promise<void>;
@@ -155,6 +158,8 @@ export interface SkillApi {
     groupId: string | null,
   ): Promise<BatchResult>;
   batchAddSkillTags(skillIds: string[], tagId: string): Promise<BatchResult>;
+  batchRemoveSkillTags(skillIds: string[], tagId: string): Promise<BatchResult>;
+  batchSetSkillTags(skillIds: string[], tagIds: string[]): Promise<BatchResult>;
   batchMigrateProviderSkills(
     skillIds: string[],
     replaceWithLink: boolean,
@@ -265,8 +270,12 @@ export const tauriSkillApi: SkillApi = {
   saveSettings: (settings) => call("save_settings", { next: settings }),
   previewTranslateSkill: (source, skillId, relativePath) =>
     call("preview_translate_skill", { source, skillId, relativePath }),
-  suggestSkillGroups: (skillIds) =>
-    call("suggest_skill_groups", { skillIds }),
+  suggestSkillGroups: (skillIds, options) =>
+    call("suggest_skill_groups", {
+      skillIds,
+      allowNewGroups: options?.allowNewGroups ?? false,
+      allowNewTags: options?.allowNewTags ?? false,
+    }),
   getAppPaths: () => call("get_app_paths"),
   revealPath: (path) => call("reveal_path", { path }),
   exportLibrarySkillZip: (id, destPath) =>
@@ -286,6 +295,10 @@ export const tauriSkillApi: SkillApi = {
     call("batch_set_skill_group", { skillIds, groupId }),
   batchAddSkillTags: (skillIds, tagId) =>
     call("batch_add_skill_tags", { skillIds, tagId }),
+  batchRemoveSkillTags: (skillIds, tagId) =>
+    call("batch_remove_skill_tags", { skillIds, tagId }),
+  batchSetSkillTags: (skillIds, tagIds) =>
+    call("batch_set_skill_tags", { skillIds, tagIds }),
   batchMigrateProviderSkills: (skillIds, replaceWithLink) =>
     call("batch_migrate_provider_skills", { skillIds, replaceWithLink }),
 };

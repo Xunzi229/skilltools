@@ -23,7 +23,7 @@ import {
 import {
   DEFAULT_TRANSLATE_SETTINGS,
   TRANSLATE_LANG_OPTIONS,
-  isTranslateConfigured,
+  isModelServiceConfigured,
   normalizeTranslateSettings,
 } from "../utils/translateSettings";
 
@@ -209,7 +209,7 @@ export function SettingsPanel({
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         <h2 className="macos-page-title">设置</h2>
         <p className="macos-page-sub">
-          主题、预览字体、翻译接口、路径、备份策略与更新（v{APP_VERSION}）。安装健康见「安装」页。
+          主题、预览字体、模型功能服务、路径、备份策略与更新（v{APP_VERSION}）。安装健康见「安装」页。
         </p>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
@@ -291,10 +291,9 @@ export function SettingsPanel({
               </p>
             </section>
             <section className="macos-card mb-6 p-4">
-              <h3 className="macos-section-title">Skill 翻译预览</h3>
+              <h3 className="macos-section-title">模型功能服务</h3>
               <p className="mt-2 text-[12px] text-ink-3">
-                OpenAI 兼容接口（chat/completions）。配置完整后，Skill
-                详情页显示「翻译」按钮；仅预览，不修改原文件。翻译当前选中文件（超大将截断）。
+                OpenAI 兼容接口（chat/completions）。配置完整后启用所有依赖模型的功能（翻译预览、智能分组等）；未配置时这些入口全部隐藏。翻译仅预览不改原文件。
               </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2 sm:col-span-2">
@@ -401,12 +400,12 @@ export function SettingsPanel({
                     });
                   }}
                 >
-                  保存翻译设置
+                  保存模型服务
                 </button>
                 <span className="text-[12px] text-ink-3">
-                  {settings && isTranslateConfigured(settings)
-                    ? "已配置，详情页可显示「翻译」"
-                    : "未完整配置，不显示翻译按钮"}
+                  {settings && isModelServiceConfigured(settings)
+                    ? "已配置：翻译、智能分组等入口可见"
+                    : "未完整配置：依赖模型的功能全部隐藏"}
                 </span>
               </div>
             </section>

@@ -77,27 +77,46 @@ export function displayDescription(description: string, maxLength = 160): string
   return `${normalized.slice(0, maxLength).trimEnd()}…`;
 }
 
-/** 库 Skill 搜索：名称、描述、来源 owner / repo / owner/repo。 */
+/** 库 Skill 搜索：名称、描述、来源、分组名、标签名。 */
 export function matchesLibrarySkillSearch(
   skill: {
     name: string;
     description: string;
     sourceRepo?: string | null;
+    groupId?: string | null;
+    tagIds?: string[];
   },
   query: string,
+  taxonomy?: {
+    groups?: Array<{ id: string; name: string }>;
+    tags?: Array<{ id: string; name: string }>;
+  },
 ): boolean {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return true;
   if (skill.name.toLocaleLowerCase().includes(normalized)) return true;
   if (skill.description.toLocaleLowerCase().includes(normalized)) return true;
   const source = (skill.sourceRepo ?? "").trim().toLocaleLowerCase();
-  if (!source) return false;
-  if (source.includes(normalized)) return true;
-  const slash = source.indexOf("/");
-  if (slash <= 0) return false;
-  const owner = source.slice(0, slash);
-  const repo = source.slice(slash + 1);
-  return owner.includes(normalized) || repo.includes(normalized);
+  if (source) {
+    if (source.includes(normalized)) return true;
+    const slash = source.indexOf("/");
+    if (slash > 0) {
+      const owner = source.slice(0, slash);
+      const repo = source.slice(slash + 1);
+      if (owner.includes(normalized) || repo.includes(normalized)) return true;
+    }
+  }
+  if (taxonomy?.groups && skill.groupId) {
+    const groupName = taxonomy.groups.find((g) => g.id === skill.groupId)?.name;
+    if (groupName?.toLocaleLowerCase().includes(normalized)) return true;
+  }
+  if (taxonomy?.tags && skill.tagIds?.length) {
+    for (const tagId of skill.tagIds) {
+      const tagName = taxonomy.tags.find((t) => t.id === tagId)?.name;
+      if (tagName?.toLocaleLowerCase().includes(normalized)) return true;
+    }
+  }
+  return false;
 }
 
 /** 无来源时显示「本地」；有 `owner/repo` 则原样返回。 */

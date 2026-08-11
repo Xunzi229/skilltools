@@ -2,14 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { SkillApi } from "../api/skillApi";
 import type {
+  AiTaxonomyApplyItem,
   GroupSuggestion,
   LibrarySkillSummary,
   SkillGroup,
-  SkillGroupAssignment,
+  Tag,
 } from "../model/skill";
 import { errorMessage } from "../utils/errors";
 import { displayDescription } from "../utils/skillDisplay";
-import { isTranslateConfigured } from "../utils/translateSettings";
+import { useModelServiceConfigured } from "../hooks/useModelServiceConfigured";
 
 /** 与后端 group_suggest::MAX_SKILLS_PER_REQUEST 保持一致 */
 const SUGGEST_BATCH_SIZE = 40;
@@ -18,16 +19,20 @@ interface AiGroupButtonProps {
   api: SkillApi;
   skills: LibrarySkillSummary[];
   groups: SkillGroup[];
+  tags: Tag[];
   selectedIds: Set<string>;
   disabled?: boolean;
-  onApply: (assignments: SkillGroupAssignment[]) => Promise<void>;
+  onApply: (items: AiTaxonomyApplyItem[]) => Promise<void>;
 }
 
 type DraftRow = {
   skillId: string;
   name: string;
   description: string;
-  groupId: string | null;
+  /** 已有分组 id，或 `__new__:${name}` */
+  groupKey: string;
+  tagIds: string[];
+  newTagNames: string[];
 };
 
 type BatchProgress = {
@@ -70,7 +75,7 @@ function RecognizingPanel({ progress }: { progress: BatchProgress | null }) {
         <p className="mt-1.5 m-0 text-[12px] leading-5 text-ink-3">
           {progress && progress.total > 1
             ? `批次 ${progress.done}/${progress.total}，剩余 ${remaining} 批`
-            : "根据描述匹配现有分组；不明显归属的会保持未分组"}
+            : "根据描述匹配分组与标签；不明显归属的会保持未分组"}
         </p>
       </div>
       <div className="translate-loading-skeleton w-full max-w-md" aria-hidden="true">
@@ -87,18 +92,29 @@ function suggestionsToDrafts(
   suggestions: GroupSuggestion[],
   skillById: Map<string, LibrarySkillSummary>,
   groupsByName: Map<string, SkillGroup>,
+  tagsByName: Map<string, Tag>,
 ): DraftRow[] {
   return suggestions.map((item) => {
     const skill = skillById.get(item.skillId);
-    const groupId =
-      item.groupName != null
-        ? (groupsByName.get(item.groupName)?.id ?? null)
-        : null;
+    let groupKey = "";
+    if (item.groupName != null) {
+      const existing = groupsByName.get(item.groupName);
+      groupKey = existing ? existing.id : `__new__:${item.groupName}`;
+    }
+    const tagIds: string[] = [];
+    const newTagNames: string[] = [];
+    for (const name of item.tagNames ?? []) {
+      const existing = tagsByName.get(name);
+      if (existing) tagIds.push(existing.id);
+      else if (!newTagNames.includes(name)) newTagNames.push(name);
+    }
     return {
       skillId: item.skillId,
       name: skill?.name ?? item.skillId,
       description: skill?.description ?? "",
-      groupId,
+      groupKey,
+      tagIds,
+      newTagNames,
     };
   });
 }
@@ -107,17 +123,19 @@ export function AiGroupButton({
   api,
   skills,
   groups,
+  tags,
   selectedIds,
   disabled = false,
   onApply,
 }: AiGroupButtonProps) {
-  const [configured, setConfigured] = useState(false);
+  const configured = useModelServiceConfigured(api);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
+  const [allowNew, setAllowNew] = useState(false);
   const requestIdRef = useRef(0);
 
   const orderedGroups = useMemo(
@@ -125,20 +143,15 @@ export function AiGroupButton({
     [groups],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .getSettings()
-      .then((settings) => {
-        if (!cancelled) setConfigured(isTranslateConfigured(settings));
-      })
-      .catch(() => {
-        if (!cancelled) setConfigured(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
+  const extraNewGroups = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of rows) {
+      if (row.groupKey.startsWith("__new__:")) {
+        names.add(row.groupKey.slice("__new__:".length));
+      }
+    }
+    return [...names];
+  }, [rows]);
 
   const closeSheet = () => {
     if (applying) return;
@@ -165,13 +178,17 @@ export function AiGroupButton({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, applying]);
 
-  if (!configured || groups.length === 0) {
+  if (!configured) {
     return null;
   }
 
   const runSuggest = () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
+    if (groups.length === 0 && !allowNew) {
+      setError("请先创建分组或开启「允许新建」");
+      return;
+    }
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     const batches = chunkIds(ids, SUGGEST_BATCH_SIZE);
@@ -184,6 +201,7 @@ export function AiGroupButton({
 
     const skillById = new Map(skills.map((skill) => [skill.id, skill]));
     const groupsByName = new Map(groups.map((group) => [group.name, group]));
+    const tagsByName = new Map(tags.map((tag) => [tag.name, tag]));
 
     window.setTimeout(() => {
       void (async () => {
@@ -192,14 +210,17 @@ export function AiGroupButton({
           if (requestIdRef.current !== requestId) return;
           const batch = batches[index]!;
           try {
-            const suggestions = await api.suggestSkillGroups(batch);
+            const suggestions = await api.suggestSkillGroups(batch, {
+              allowNewGroups: allowNew,
+              allowNewTags: allowNew,
+            });
             if (requestIdRef.current !== requestId) return;
             const drafts = suggestionsToDrafts(
               suggestions,
               skillById,
               groupsByName,
+              tagsByName,
             );
-            // 每批完成立刻同步刷到 DOM，再开下一批
             flushSync(() => {
               setRows((prev) => [...prev, ...drafts]);
               setProgress({ done: index + 1, total: batches.length });
@@ -231,11 +252,25 @@ export function AiGroupButton({
     setApplying(true);
     setError(null);
     try {
-      const assignments: SkillGroupAssignment[] = rows.map((row) => ({
-        skillId: row.skillId,
-        groupId: row.groupId,
-      }));
-      await onApply(assignments);
+      const items: AiTaxonomyApplyItem[] = rows.map((row) => {
+        if (row.groupKey.startsWith("__new__:")) {
+          return {
+            skillId: row.skillId,
+            groupId: null,
+            newGroupName: row.groupKey.slice("__new__:".length),
+            tagIds: row.tagIds,
+            newTagNames: row.newTagNames,
+          };
+        }
+        return {
+          skillId: row.skillId,
+          groupId: row.groupKey === "" ? null : row.groupKey,
+          newGroupName: null,
+          tagIds: row.tagIds,
+          newTagNames: row.newTagNames,
+        };
+      });
+      await onApply(items);
       requestIdRef.current += 1;
       setOpen(false);
       setRows([]);
@@ -254,11 +289,26 @@ export function AiGroupButton({
 
   return (
     <>
+      <label className="inline-flex items-center gap-1 text-[11px] text-ink-2">
+        <input
+          type="checkbox"
+          checked={allowNew}
+          disabled={disabled || loading || applying}
+          onChange={(event) => setAllowNew(event.target.checked)}
+        />
+        允许新建
+      </label>
       <button
         type="button"
         className="macos-btn-ghost"
-        disabled={disabled || selectedIds.size === 0 || loading || applying}
-        title="根据描述用模型匹配现有分组（可调整后应用）"
+        disabled={
+          disabled ||
+          selectedIds.size === 0 ||
+          loading ||
+          applying ||
+          (groups.length === 0 && !allowNew)
+        }
+        title="根据描述用模型匹配分组与标签（可调整后应用）"
         onClick={runSuggest}
       >
         智能分组
@@ -266,7 +316,7 @@ export function AiGroupButton({
       {open ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-[2px]">
           <div
-            className="macos-sheet flex h-[min(85vh,640px)] w-full max-w-2xl flex-col overflow-hidden p-0"
+            className="macos-sheet flex h-[min(85vh,640px)] w-full max-w-3xl flex-col overflow-hidden p-0"
             role="dialog"
             aria-modal="true"
             aria-labelledby="ai-group-title"
@@ -284,7 +334,7 @@ export function AiGroupButton({
                     ? progress.total > 1
                       ? `正在分批识别：已完成 ${progress.done}/${progress.total}，剩余 ${remainingBatches} 批`
                       : `正在识别 ${selectedIds.size} 个 Skill…`
-                    : "仅在明显匹配时归入分组，不确定则为「未分组」；确认前可调整"}
+                    : "确认前可调整分组与标签；新建项将在应用时创建"}
                 </p>
               </div>
               <button
@@ -321,7 +371,8 @@ export function AiGroupButton({
                           <tr className="border-b border-line">
                             <th className="px-2 py-2 font-medium">Skill</th>
                             <th className="px-2 py-2 font-medium">描述</th>
-                            <th className="w-[160px] px-2 py-2 font-medium">分组</th>
+                            <th className="w-[150px] px-2 py-2 font-medium">分组</th>
+                            <th className="w-[180px] px-2 py-2 font-medium">标签</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -341,16 +392,13 @@ export function AiGroupButton({
                                   className="macos-select macos-select-sm w-full"
                                   aria-label={`${row.name} 分组`}
                                   disabled={applying}
-                                  value={row.groupId ?? ""}
+                                  value={row.groupKey}
                                   onChange={(event) => {
                                     const value = event.target.value;
                                     setRows((prev) =>
                                       prev.map((item, i) =>
                                         i === index
-                                          ? {
-                                              ...item,
-                                              groupId: value === "" ? null : value,
-                                            }
+                                          ? { ...item, groupKey: value }
                                           : item,
                                       ),
                                     );
@@ -362,7 +410,70 @@ export function AiGroupButton({
                                       {group.name}
                                     </option>
                                   ))}
+                                  {extraNewGroups.map((name) => (
+                                    <option key={`new-${name}`} value={`__new__:${name}`}>
+                                      新建：{name}
+                                    </option>
+                                  ))}
                                 </select>
+                              </td>
+                              <td className="px-2 py-2">
+                                <div className="flex flex-col gap-1">
+                                  {tags.map((tag) => {
+                                    const checked = row.tagIds.includes(tag.id);
+                                    return (
+                                      <label
+                                        key={tag.id}
+                                        className="inline-flex items-center gap-1 text-[11px] text-ink-2"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          disabled={applying}
+                                          checked={checked}
+                                          onChange={() => {
+                                            setRows((prev) =>
+                                              prev.map((item, i) => {
+                                                if (i !== index) return item;
+                                                const tagIds = checked
+                                                  ? item.tagIds.filter((id) => id !== tag.id)
+                                                  : [...item.tagIds, tag.id];
+                                                return { ...item, tagIds };
+                                              }),
+                                            );
+                                          }}
+                                        />
+                                        {tag.name}
+                                      </label>
+                                    );
+                                  })}
+                                  {row.newTagNames.map((name) => (
+                                    <label
+                                      key={`new-tag-${name}`}
+                                      className="inline-flex items-center gap-1 text-[11px] text-brand"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        disabled={applying}
+                                        checked
+                                        onChange={() => {
+                                          setRows((prev) =>
+                                            prev.map((item, i) =>
+                                              i === index
+                                                ? {
+                                                    ...item,
+                                                    newTagNames: item.newTagNames.filter(
+                                                      (n) => n !== name,
+                                                    ),
+                                                  }
+                                                : item,
+                                            ),
+                                          );
+                                        }}
+                                      />
+                                      新建：{name}
+                                    </label>
+                                  ))}
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -393,7 +504,7 @@ export function AiGroupButton({
                 disabled={loading || applying || rows.length === 0}
                 onClick={() => void apply()}
               >
-                {applying ? "应用中…" : "应用分组"}
+                {applying ? "应用中…" : "应用"}
               </button>
             </footer>
           </div>
