@@ -4,6 +4,7 @@ import type { TranslatePreview, TranslateSkillSource } from "../model/skill";
 import { useModelServiceConfigured } from "../hooks/useModelServiceConfigured";
 import { errorMessage } from "../utils/errors";
 import { MarkdownViewer } from "./MarkdownViewer";
+import { useI18n } from "../i18n";
 
 interface TranslatePreviewButtonProps {
   api: SkillApi;
@@ -15,6 +16,7 @@ interface TranslatePreviewButtonProps {
 }
 
 function TranslatingPanel() {
+  const { t } = useI18n();
   return (
     <div
       className="translate-loading flex h-full min-h-0 flex-col items-center justify-center gap-5 px-6 py-10"
@@ -27,7 +29,7 @@ function TranslatingPanel() {
       </div>
       <div className="text-center">
         <p className="m-0 text-[14px] font-medium tracking-tight text-ink">
-          翻译中
+          {t("translate.translating")}
           <span className="translate-loading-dots" aria-hidden="true">
             <i />
             <i />
@@ -55,6 +57,7 @@ export function TranslatePreviewButton({
   relativePath,
   disabled = false,
 }: TranslatePreviewButtonProps) {
+  const { t } = useI18n();
   const configured = useModelServiceConfigured(api);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -106,7 +109,7 @@ export function TranslatePreviewButton({
           setResult(preview);
         } catch (err: unknown) {
           if (requestIdRef.current !== requestId) return;
-          setError(errorMessage(err, "翻译失败"));
+          setError(errorMessage(err, t("translate.failed")));
         } finally {
           if (requestIdRef.current === requestId) {
             setLoading(false);
@@ -126,12 +129,12 @@ export function TranslatePreviewButton({
         disabled={disabled || loading || !hasSelection}
         title={
           hasSelection
-            ? `翻译当前选中文件：${relativePath}（仅预览，不修改原文件）`
-            : "请先在左侧选择要翻译的文件"
+            ? t("translate.buttonTitle", { path: relativePath ?? "" })
+            : t("translate.buttonDisabled")
         }
         onClick={runTranslate}
       >
-        翻译
+        {t("translate.button")}
       </button>
       {open ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-[2px]">
@@ -147,17 +150,19 @@ export function TranslatePreviewButton({
                   id="translate-preview-title"
                   className="m-0 text-[15px] font-semibold tracking-tight text-ink"
                 >
-                  翻译预览
+                  {t("translate.previewTitle")}
                 </h2>
                 <p className="mt-1 text-[12px] leading-5 text-ink-3">
                   {loading
-                    ? `正在翻译 ${relativePath ?? "当前文件"}，请稍候…`
-                    : "仅预览，不写入原文件。翻译当前选中文件"}
+                    ? t("translate.translatingFile", {
+                        path: relativePath ?? t("translate.currentFile"),
+                      })
+                    : t("translate.previewHint")}
                   {!loading && result
                     ? ` · ${result.sourceFiles.join("、")} → ${result.targetLang}`
                     : null}
-                  {!loading && result?.fromCache ? " · 来自缓存" : null}
-                  {!loading && result?.truncated ? " · 源文本已截断" : null}
+                  {!loading && result?.fromCache ? t("translate.fromCache") : null}
+                  {!loading && result?.truncated ? t("translate.truncated") : null}
                 </p>
               </div>
               <button
@@ -165,7 +170,7 @@ export function TranslatePreviewButton({
                 className="macos-btn-ghost macos-btn-sm shrink-0"
                 onClick={closePreview}
               >
-                关闭
+                {t("common.close")}
               </button>
             </header>
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -178,7 +183,7 @@ export function TranslatePreviewButton({
                       result
                         ? {
                             // 保留原扩展名，避免「.md（译文）」被识别成 Text 且布局异常
-                            relativePath: result.sourceFiles[0] ?? "翻译预览.md",
+                            relativePath: result.sourceFiles[0] ?? t("translate.previewFilename"),
                             mediaType: "markdown",
                             content: result.markdown,
                             message: null,

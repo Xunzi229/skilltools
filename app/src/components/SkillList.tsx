@@ -17,6 +17,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { PanelToggle } from "./PanelToggle";
 import { SelectionModeButton } from "./SelectionModeButton";
 import { SkillCard } from "./SkillCard";
+import { useI18n } from "../i18n";
 
 export type InstalledSkillTaxonomy = {
   librarySkillId: string;
@@ -94,6 +95,7 @@ export function SkillList({
   onRetry,
   onClearBatchResult,
 }: SkillListProps) {
+  const { t } = useI18n();
   const selectableIds = useMemo(
     () => [...new Set(skills.flatMap((skill) => skillMemberIds(skill)))],
     [skills],
@@ -129,28 +131,28 @@ export function SkillList({
     }
     const total = linkCount + bodyCount;
     if (total === 0) {
-      return ["删除 Skill？", "", "删除"] as const;
+      return [t("skillList.deleteOneTitle"), "", t("skillList.deleteOneConfirm")] as const;
     }
     if (bodyCount === 0) {
       return [
-        `移除 ${linkCount} 个安装链接？`,
-        "仅移除软链，不删除库/原始目录中的文件。会写入「删除前」事件备份，之后可按原样恢复链接。",
-        "移除链接",
+        t("skillList.removeLinksTitle", { count: linkCount }),
+        t("skillList.removeLinksMessage"),
+        t("skillList.removeLinksConfirm"),
       ] as const;
     }
     if (linkCount === 0) {
       return [
-        `删除 ${bodyCount} 个 Skill？`,
-        "本体将逐项先备份再删除，写入「删除前」事件；单项失败不会中断其余项。",
-        "备份并删除",
+        t("skillList.deleteBodiesTitle", { count: bodyCount }),
+        t("skillList.deleteBodiesMessage"),
+        t("skillList.deleteBodiesConfirm"),
       ] as const;
     }
     return [
-      `删除 ${total} 项？`,
-      `其中软链 ${linkCount} 个仅移除链接，本体 ${bodyCount} 个先备份再删除；均写入「删除前」事件，单项失败不中断其余项。`,
-      "确认删除",
+      t("skillList.deleteMixedTitle", { total }),
+      t("skillList.deleteMixedMessage", { linkCount, bodyCount }),
+      t("skillList.deleteMixedConfirm"),
     ] as const;
-  }, [skills, selectedSelectableSet]);
+  }, [skills, selectedSelectableSet, t]);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [replaceWithLink, setReplaceWithLink] = useState(true);
@@ -163,12 +165,12 @@ export function SkillList({
     return (
       <section
         className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-3 overflow-hidden border-r border-line-strong bg-panel px-1.5 py-4"
-        aria-label="Skill 列表（已折叠）"
+        aria-label={t("skillList.regionCollapsed")}
       >
         <PanelToggle
           expanded={false}
-          labelExpand="展开列表"
-          labelCollapse="折叠列表"
+          labelExpand={t("common.expandList")}
+          labelCollapse={t("common.collapseList")}
           onToggle={onToggleCollapse}
         />
         <span
@@ -185,36 +187,36 @@ export function SkillList({
 
   if (loading) {
     content = (
-      <div className="px-3 py-8 text-center text-[13px] text-ink-3">正在扫描本地 Skill…</div>
+      <div className="px-3 py-8 text-center text-[13px] text-ink-3">{t("skillList.scanning")}</div>
     );
   } else if (errorMessage) {
     content = (
       <div className="px-3 py-8 text-center text-[13px]" role="alert">
-        <strong className="macos-alert-error block">扫描失败：{errorMessage}</strong>
+        <strong className="macos-alert-error block">{t("skillList.scanFailed", { message: errorMessage })}</strong>
         <button
           type="button"
           className="macos-btn-primary mt-3"
           onClick={onRetry}
         >
-          重试扫描
+          {t("skillList.retryScan")}
         </button>
       </div>
     );
   } else if (!hasScannedSkills) {
     content = (
       <div className="px-3 py-8 text-center text-[13px] text-ink-3">
-        <strong className="block text-ink">未扫描到 Skill</strong>
-        <span>请确认本地 Skill 目录中已有内容。</span>
+        <strong className="block text-ink">{t("skillList.emptyTitle")}</strong>
+        <span>{t("skillList.emptyHint")}</span>
       </div>
     );
   } else if (skills.length === 0) {
     content = (
       <div className="px-3 py-8 text-center text-[13px] text-ink-3">
-        <strong className="block text-ink">没有匹配结果</strong>
+        <strong className="block text-ink">{t("skillList.noMatchTitle")}</strong>
         <span>
           {taxonomyActive
-            ? "当前分组/标签筛选仅显示已关联中央库的安装。"
-            : "请调整筛选条件或搜索关键词。"}
+            ? t("skillList.noMatchTaxonomy")
+            : t("skillList.noMatchSearch")}
         </span>
       </div>
     );
@@ -232,7 +234,7 @@ export function SkillList({
                 className={rowCheckboxClass(selectionActive)}
                 checked={checked}
                 tabIndex={selectionActive ? 0 : -1}
-                aria-label={`选择 ${skill.name}`}
+                aria-label={t("common.selectItem", { name: skill.name })}
                 onChange={() => onToggleSelect(memberIds)}
               />
               <div className="min-w-0 flex-1">
@@ -241,7 +243,7 @@ export function SkillList({
                   description={displayDescription(skill.description, 96)}
                   statusLabel={
                     skill.status === "paused"
-                      ? "已暂停"
+                      ? t("skillList.paused")
                       : formatProviderLabels(skill)
                   }
                   selected={skillMatchesSelection(skill, selectedSkillId)}
@@ -260,7 +262,7 @@ export function SkillList({
   return (
     <section
       className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-r border-line-strong bg-panel"
-      aria-label="Skill 列表"
+      aria-label={t("skillList.region")}
     >
       <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
         <div className="flex items-start justify-between gap-2">
@@ -268,8 +270,8 @@ export function SkillList({
             <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">{title}</h2>
             <p className="mt-1 text-[12px] text-ink-2">
               {taxonomyActive
-                ? "仅显示已关联中央库且符合分组/标签条件的安装"
-                : "浏览本机已安装的 Skills"}
+                ? t("skillList.subtitleTaxonomy")
+                : t("skillList.subtitleBrowse")}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -281,8 +283,8 @@ export function SkillList({
             {onToggleCollapse && (
               <PanelToggle
                 expanded
-                labelExpand="展开列表"
-                labelCollapse="折叠列表"
+                labelExpand={t("common.expandList")}
+                labelCollapse={t("common.collapseList")}
                 onToggle={onToggleCollapse}
               />
             )}
@@ -294,20 +296,20 @@ export function SkillList({
           </span>
           <input
             type="search"
-            aria-label="搜索 Skill"
-            placeholder="搜索名称或描述"
+            aria-label={t("skillList.searchAria")}
+            placeholder={t("skillList.searchPlaceholder")}
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </label>
         {queryChips.length > 0 && (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="当前筛选条件">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label={t("skillList.filtersAria")}>
             {queryChips.map((chip) => (
               <button
                 key={chip.key}
                 type="button"
                 className="inline-flex items-center gap-1 rounded-full bg-hover px-2 py-0.5 text-[11px] text-ink-2 hover:bg-black/8"
-                title="移除该条件"
+                title={t("common.removeFilter")}
                 onClick={() => onRemoveQueryChip?.(chip)}
               >
                 <span>{chip.label}</span>
@@ -320,7 +322,7 @@ export function SkillList({
                 className="macos-link text-[11px]"
                 onClick={onClearQuery}
               >
-                清除筛选
+                {t("common.clearFilters")}
               </button>
             )}
           </div>
@@ -329,25 +331,25 @@ export function SkillList({
           <div className="mt-3 flex flex-col gap-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-ink-2">
-                已选 {selectedSelectableIds.length} 项
+                {t("common.selectedCount", { count: selectedSelectableIds.length })}
               </span>
               <button
                 type="button"
                 className="macos-btn-ghost macos-btn-sm"
                 disabled={batchBusy || selectableIds.length === 0}
-                title="选中当前列表中的全部 Skill"
+                title={t("skillList.selectAllTitle")}
                 onClick={() => onSetSelection(selectableIds)}
               >
-                全选
+                {t("common.selectAll")}
               </button>
               <button
                 type="button"
                 className="macos-btn-ghost macos-btn-sm"
                 disabled={batchBusy || selectableIds.length === 0}
-                title="反转当前列表中的勾选状态"
+                title={t("skillList.invertTitle")}
                 onClick={() => onInvertSelection(selectableIds)}
               >
-                反选
+                {t("common.invertSelection")}
               </button>
               {selectedSelectableIds.length > 0 ? (
                 <button
@@ -356,17 +358,17 @@ export function SkillList({
                   disabled={batchBusy}
                   onClick={onClearSelection}
                 >
-                  清除
+                  {t("common.clearSelection")}
                 </button>
               ) : null}
             </div>
             {selectedSelectableIds.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
-                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => onBatchPause(selectedSelectableIds)}>暂停</button>
-                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => onBatchResume(selectedSelectableIds)}>恢复</button>
-                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => onBatchBackup(selectedSelectableIds)}>备份</button>
-                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => setMigrateOpen(true)}>迁入库</button>
-                <button type="button" className="macos-btn-danger-soft macos-btn-sm" disabled={batchBusy} onClick={() => setDeleteOpen(true)}>删除</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => onBatchPause(selectedSelectableIds)}>{t("skillList.pause")}</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => onBatchResume(selectedSelectableIds)}>{t("skillList.resume")}</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => onBatchBackup(selectedSelectableIds)}>{t("skillList.backup")}</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => setMigrateOpen(true)}>{t("skillList.migrate")}</button>
+                <button type="button" className="macos-btn-danger-soft macos-btn-sm" disabled={batchBusy} onClick={() => setDeleteOpen(true)}>{t("skillList.delete")}</button>
               </div>
             ) : null}
           </div>
@@ -375,7 +377,7 @@ export function SkillList({
           <div className="macos-alert-ok mt-2 flex items-start justify-between gap-2 py-1.5 text-[11px]">
             <span>{formatBatchSummary(batchResult)}</span>
             <button type="button" className="macos-link shrink-0" onClick={onClearBatchResult}>
-              关闭
+              {t("common.close")}
             </button>
           </div>
         )}
@@ -383,16 +385,16 @@ export function SkillList({
           <div className="macos-alert-error mt-2 flex items-start justify-between gap-2 py-1.5 text-[11px]">
             <span>{batchError.message}</span>
             <button type="button" className="macos-link shrink-0" onClick={onClearBatchResult}>
-              关闭
+              {t("common.close")}
             </button>
           </div>
         )}
       </header>
       <ConfirmDialog
         open={migrateOpen}
-        title={`迁入 ${selectedSelectableIds.length} 个 Skill 到中央库？`}
-        message="将复制真实目录到库中登记为本地项目。冲突时不会覆盖现有内容。"
-        confirmLabel="开始迁入"
+        title={t("skillList.migrateTitle", { count: selectedSelectableIds.length })}
+        message={t("skillList.migrateMessage")}
+        confirmLabel={t("skillList.migrateConfirm")}
         busy={batchBusy}
         onCancel={() => setMigrateOpen(false)}
         onConfirm={() => {
@@ -406,7 +408,7 @@ export function SkillList({
             checked={replaceWithLink}
             onChange={(event) => setReplaceWithLink(event.target.checked)}
           />
-          迁移后替换为库链接安装
+          {t("skillList.replaceWithLibraryLink")}
         </label>
       </ConfirmDialog>
       <ConfirmDialog
@@ -425,9 +427,9 @@ export function SkillList({
       {warnings.length > 0 && (
         <aside
           className="macos-alert-warn mx-3 mt-3 max-h-32 shrink-0 overflow-auto"
-          aria-label="扫描目录警告"
+          aria-label={t("skillList.scanWarningAria")}
         >
-          <strong>部分目录未扫描</strong>
+          <strong>{t("skillList.partialScan")}</strong>
           <ul className="mt-1 mb-0 list-disc pl-4">
             {warnings.map((warning) => (
               <li key={warning}>{warning}</li>

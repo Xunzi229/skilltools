@@ -1,77 +1,101 @@
-/** SKILL.md 常见 frontmatter 字段（Agent Skills / Cursor / Claude / Codex）。 */
-export const STANDARD_FRONTMATTER_FIELDS = [
-  {
-    key: "name",
-    label: "name",
-    required: true,
-    multiline: false,
-    hint: "必填，建议小写字母/数字/连字符",
-  },
-  {
-    key: "description",
-    label: "description",
-    required: true,
-    multiline: true,
-    hint: "必填，说明用途与触发场景",
-  },
-  {
-    key: "license",
-    label: "license",
-    required: false,
-    multiline: false,
-    hint: "如 MIT、Apache-2.0",
-  },
-  {
-    key: "compatibility",
-    label: "compatibility",
-    required: false,
-    multiline: true,
-    hint: "环境要求（可选）",
-  },
-  {
-    key: "allowed-tools",
-    label: "allowed-tools",
-    required: false,
-    multiline: false,
-    hint: "空格分隔的预授权工具（实验性）",
-  },
-  {
-    key: "tags",
-    label: "tags（文件内，≠侧栏标签）",
-    required: false,
-    multiline: false,
-    hint: "逗号分隔，或 YAML 列表",
-  },
-  {
-    key: "version",
-    label: "version",
-    required: false,
-    multiline: false,
-  },
-  {
-    key: "author",
-    label: "author",
-    required: false,
-    multiline: false,
-  },
-  {
-    key: "homepage",
-    label: "homepage",
-    required: false,
-    multiline: false,
-  },
-  {
-    key: "metadata",
-    label: "metadata",
-    required: false,
-    multiline: true,
-    hint: "嵌套 YAML 映射（可选）",
-  },
-] as const;
+import { t } from "../i18n";
 
-export const STANDARD_FRONTMATTER_KEYS: Set<string> = new Set(
-  STANDARD_FRONTMATTER_FIELDS.map((field) => field.key),
-);
+type FrontmatterFieldDef = {
+  key: string;
+  label: string;
+  required: boolean;
+  multiline: boolean;
+  hint?: string;
+};
+
+/** SKILL.md 常见 frontmatter 字段（Agent Skills / Cursor / Claude / Codex）。 */
+export function getStandardFrontmatterFields(): FrontmatterFieldDef[] {
+  return [
+    {
+      key: "name",
+      label: "name",
+      required: true,
+      multiline: false,
+      hint: t("frontmatter.hintName"),
+    },
+    {
+      key: "description",
+      label: "description",
+      required: true,
+      multiline: true,
+      hint: t("frontmatter.hintDescription"),
+    },
+    {
+      key: "license",
+      label: "license",
+      required: false,
+      multiline: false,
+      hint: t("frontmatter.hintLicense"),
+    },
+    {
+      key: "compatibility",
+      label: "compatibility",
+      required: false,
+      multiline: true,
+      hint: t("frontmatter.hintCompatibility"),
+    },
+    {
+      key: "allowed-tools",
+      label: "allowed-tools",
+      required: false,
+      multiline: false,
+      hint: t("frontmatter.hintAllowedTools"),
+    },
+    {
+      key: "tags",
+      label: t("frontmatter.tagsLabel"),
+      required: false,
+      multiline: false,
+      hint: t("frontmatter.hintTags"),
+    },
+    {
+      key: "version",
+      label: "version",
+      required: false,
+      multiline: false,
+    },
+    {
+      key: "author",
+      label: "author",
+      required: false,
+      multiline: false,
+    },
+    {
+      key: "homepage",
+      label: "homepage",
+      required: false,
+      multiline: false,
+    },
+    {
+      key: "metadata",
+      label: "metadata",
+      required: false,
+      multiline: true,
+      hint: t("frontmatter.hintMetadata"),
+    },
+  ];
+}
+
+/** @deprecated Prefer getStandardFrontmatterFields() for translated labels/hints. */
+export const STANDARD_FRONTMATTER_FIELDS = getStandardFrontmatterFields();
+
+export const STANDARD_FRONTMATTER_KEYS: Set<string> = new Set([
+  "name",
+  "description",
+  "license",
+  "compatibility",
+  "allowed-tools",
+  "tags",
+  "version",
+  "author",
+  "homepage",
+  "metadata",
+]);
 
 /** 提取 --- ... --- 之间的 YAML 文本。 */
 export function extractFrontmatterYaml(markdown: string): string | null {

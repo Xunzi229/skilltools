@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n";
 import { TagColorPicker } from "./TagColorPicker";
 
 interface NameDialogProps {
@@ -24,6 +25,7 @@ export function NameDialog({
   onConfirm,
   onCancel,
 }: NameDialogProps) {
+  const { t } = useI18n();
   const [value, setValue] = useState(initialValue);
   const [color, setColor] = useState<string | null>(initialColor);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -63,7 +65,7 @@ export function NameDialog({
           {title}
         </h2>
         <label className="mt-4 block">
-          <span className="sr-only">名称</span>
+          <span className="sr-only">{t("nameDialog.name")}</span>
           <input
             ref={inputRef}
             className="macos-input h-10 w-full"
@@ -86,14 +88,14 @@ export function NameDialog({
             disabled={busy}
             onClick={onCancel}
           >
-            取消
+            {t("common.cancel")}
           </button>
           <button
             type="submit"
             className="macos-btn-primary h-8 px-3.5 text-[13px]"
             disabled={busy || !trimmed}
           >
-            {busy ? "处理中…" : confirmLabel}
+            {busy ? t("confirm.busy") : confirmLabel}
           </button>
         </div>
       </form>

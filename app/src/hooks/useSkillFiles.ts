@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
 import type { ExternalEditor, FileContent, FileNode } from "../model/skill";
+import { t } from "../i18n";
 import { errorMessage } from "../utils/errors";
 
 type FileSource =
@@ -50,7 +51,7 @@ export function useSkillFiles({ api, source, reloadToken }: UseSkillFilesOptions
       .catch((failure: unknown) => {
         if (requestId === previewRequest.current) {
           setPreview(null);
-          setPreviewError(errorMessage(failure, "文件加载失败，请重试"));
+          setPreviewError(errorMessage(failure, t("hooks.fileLoadFailed")));
         }
       })
       .finally(() => {
@@ -87,7 +88,7 @@ export function useSkillFiles({ api, source, reloadToken }: UseSkillFilesOptions
       })
       .catch((failure: unknown) => {
         if (requestId === treeRequest.current) {
-          setTreeError(errorMessage(failure, "目录加载失败，请重试"));
+          setTreeError(errorMessage(failure, t("hooks.treeLoadFailed")));
         }
       })
       .finally(() => {
@@ -115,7 +116,7 @@ export function useSkillFiles({ api, source, reloadToken }: UseSkillFilesOptions
       }
       loadPreview(source.skillId, preview.relativePath, source.kind);
     } catch (failure: unknown) {
-      setOpenError(errorMessage(failure, "保存失败，请重试"));
+      setOpenError(errorMessage(failure, t("hooks.saveFailed")));
       throw failure;
     } finally {
       setSaving(false);
@@ -132,7 +133,7 @@ export function useSkillFiles({ api, source, reloadToken }: UseSkillFilesOptions
         await api.openSkillFileExternal(source.skillId, relativePath, editorId);
       }
     } catch (failure: unknown) {
-      setOpenError(errorMessage(failure, "打开失败，请重试"));
+      setOpenError(errorMessage(failure, t("hooks.openFailed")));
     }
   };
 

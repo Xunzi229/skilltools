@@ -1,3 +1,5 @@
+import { useI18n } from "../i18n";
+
 interface SelectionModeButtonProps {
   selectionActive: boolean;
   disabled?: boolean;
@@ -9,6 +11,7 @@ export function SelectionModeButton({
   disabled,
   onToggle,
 }: SelectionModeButtonProps) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
@@ -17,7 +20,7 @@ export function SelectionModeButton({
       disabled={disabled}
       onClick={onToggle}
     >
-      {selectionActive ? "完成" : "选择"}
+      {selectionActive ? t("selection.done") : t("selection.select")}
     </button>
   );
 }

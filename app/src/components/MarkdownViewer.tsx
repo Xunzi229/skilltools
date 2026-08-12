@@ -12,6 +12,7 @@ import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { useI18n } from "../i18n";
 import type { FileContent } from "../model/skill";
 import {
   languageLabel,
@@ -87,6 +88,7 @@ export function MarkdownViewer({
   saving = false,
   onSave,
 }: MarkdownViewerProps) {
+  const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -130,7 +132,7 @@ export function MarkdownViewer({
               className="macos-btn-ghost macos-btn-sm"
               onClick={() => setMdSource((value) => !value)}
             >
-              {mdSource ? "渲染预览" : "查看源码"}
+              {mdSource ? t("markdown.renderPreview") : t("markdown.viewSource")}
             </button>
           )}
           {canEdit ? (
@@ -146,7 +148,7 @@ export function MarkdownViewer({
                     setSaveError(null);
                   }}
                 >
-                  取消
+                  {t("markdown.cancel")}
                 </button>
                 <button
                   type="button"
@@ -162,12 +164,12 @@ export function MarkdownViewer({
                         "message" in error &&
                         typeof (error as { message: unknown }).message === "string"
                           ? (error as { message: string }).message
-                          : "保存失败";
+                          : t("markdown.saveFailed");
                       setSaveError(message);
                     });
                   }}
                 >
-                  {saving ? "保存中…" : "保存"}
+                  {saving ? t("markdown.saving") : t("markdown.save")}
                 </button>
               </>
             ) : (
@@ -179,7 +181,7 @@ export function MarkdownViewer({
                   setEditing(true);
                 }}
               >
-                编辑
+                {t("markdown.edit")}
               </button>
             )
           ) : null}
@@ -187,25 +189,25 @@ export function MarkdownViewer({
       </div>
       <div className="file-preview-body min-h-0 flex-1 overflow-auto">
         {loading ? (
-          <p className="px-4 py-3 text-[13px] text-ink-3">正在加载文件…</p>
+          <p className="px-4 py-3 text-[13px] text-ink-3">{t("markdown.loading")}</p>
         ) : errorMessage ? (
           <p className="macos-alert-error m-3">{errorMessage}</p>
         ) : saveError ? (
           <p className="macos-alert-error m-3">{saveError}</p>
         ) : !file ? (
-          <p className="px-4 py-3 text-[13px] text-ink-3">选择文件以预览</p>
+          <p className="px-4 py-3 text-[13px] text-ink-3">{t("markdown.pickFile")}</p>
         ) : editing ? (
           <textarea
             className="file-preview-editor h-full min-h-[240px] w-full resize-none border-0 bg-panel px-4 py-3 text-ink outline-none"
             value={draft}
             disabled={saving}
             onChange={(event) => setDraft(event.target.value)}
-            aria-label="编辑文件内容"
+            aria-label={t("markdown.editAria")}
             spellCheck={kind === "markdown" || kind === "text"}
           />
         ) : file.mediaType === "unsupported" ? (
           <p className="px-4 py-3 text-[13px] text-ink-3">
-            {file.message ?? "不支持预览"}
+            {file.message ?? t("markdown.unsupported")}
           </p>
         ) : kind === "markdown" && !mdSource ? (
           <div className="markdown-body">

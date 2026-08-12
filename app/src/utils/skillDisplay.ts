@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import type { Provider, SkillSummary } from "../model/skill";
 import { skillCanonicalKey, skillProviders } from "../model/skill";
 
@@ -122,7 +123,7 @@ export function matchesLibrarySkillSearch(
 /** 无来源时显示「本地」；有 `owner/repo` 则原样返回。 */
 export function displaySourceLabel(sourceRepo?: string | null): string {
   const value = sourceRepo?.trim();
-  return value ? value : "本地";
+  return value ? value : t("common.local");
 }
 
 /** 预览 SKILL.md 时去掉 YAML frontmatter，避免把元数据渲成正文。 */

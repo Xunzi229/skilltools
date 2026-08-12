@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import {
   skillCanonicalKey,
   type LibrarySkillSummary,
@@ -179,10 +180,10 @@ export function libraryQueryChips(
 ): TaxonomyChip[] {
   const chips: TaxonomyChip[] = [];
   if (query.groupScope === "ungrouped") {
-    chips.push({ key: "ungrouped", label: "未分组", kind: "ungrouped" });
+    chips.push({ key: "ungrouped", label: t("taxonomy.ungrouped"), kind: "ungrouped" });
   } else if (typeof query.groupScope === "object") {
     const groupId = query.groupScope.groupId;
-    const name = groups.find((g) => g.id === groupId)?.name ?? "分组";
+    const name = groups.find((g) => g.id === groupId)?.name ?? t("taxonomy.groupFallback");
     chips.push({
       key: `group:${groupId}`,
       label: name,
@@ -190,10 +191,10 @@ export function libraryQueryChips(
     });
   }
   if (query.untaggedOnly) {
-    chips.push({ key: "untagged", label: "无标签", kind: "untagged" });
+    chips.push({ key: "untagged", label: t("taxonomy.untagged"), kind: "untagged" });
   }
   for (const tagId of query.tagIds) {
-    const name = tags.find((t) => t.id === tagId)?.name ?? "标签";
+    const name = tags.find((tItem) => tItem.id === tagId)?.name ?? t("taxonomy.tagFallback");
     chips.push({ key: `tag:${tagId}`, label: name, kind: "tag" });
   }
   return chips;
@@ -205,11 +206,23 @@ export function libraryQueryTitle(
   tags: Tag[],
 ): string {
   const chips = libraryQueryChips(query, groups, tags);
-  if (chips.length === 0) return "Skill 库";
+  if (chips.length === 0) return t("taxonomy.libraryTitle");
   return chips.map((c) => c.label).join(" · ");
 }
 
 /** 推荐分组模板（用途主轴） */
+export function getTemplateGroups(): string[] {
+  return [
+    t("templates.groupDevTools"),
+    t("templates.groupWriting"),
+    t("templates.groupOps"),
+    t("templates.groupTesting"),
+    t("templates.groupKnowledge"),
+    t("templates.groupOther"),
+  ];
+}
+
+/** @deprecated use getTemplateGroups() */
 export const TEMPLATE_GROUPS = [
   "开发工具",
   "写作内容",
@@ -220,6 +233,21 @@ export const TEMPLATE_GROUPS = [
 ] as const;
 
 /** 推荐标签模板 */
+export function getTemplateTags(): string[] {
+  return [
+    "cursor",
+    "claude",
+    "codex",
+    "macos",
+    "windows",
+    "linux",
+    t("templates.tagExperimental"),
+    t("templates.tagNeedsKey"),
+    t("templates.tagWritesDisk"),
+  ];
+}
+
+/** @deprecated use getTemplateTags() */
 export const TEMPLATE_TAGS = [
   "cursor",
   "claude",

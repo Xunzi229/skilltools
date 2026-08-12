@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "../i18n";
 import type { GitImportItem, Project } from "../model/skill";
 import { ProjectPanel } from "./ProjectPanel";
 
@@ -27,22 +28,24 @@ function renderPanel(overrides: {
   const onRetryGitImport = overrides.onRetryGitImport ?? vi.fn(async () => undefined);
   const onDismissGitImport = overrides.onDismissGitImport ?? vi.fn();
   render(
-    <ProjectPanel
-      projects={overrides.projects ?? []}
-      gitImports={overrides.gitImports ?? []}
-      loading={false}
-      error={null}
-      pendingAction={null}
-      onAddLocal={vi.fn(async () => undefined)}
-      onAddGit={onAddGit}
-      onRetryGitImport={onRetryGitImport}
-      onDismissGitImport={onDismissGitImport}
-      onPull={vi.fn(async () => undefined)}
-      onRemove={vi.fn(async () => undefined)}
-      onImportZip={vi.fn(async () => undefined)}
-      onExportZip={vi.fn(async () => undefined)}
-      onClearError={vi.fn()}
-    />,
+    <I18nProvider>
+      <ProjectPanel
+        projects={overrides.projects ?? []}
+        gitImports={overrides.gitImports ?? []}
+        loading={false}
+        error={null}
+        pendingAction={null}
+        onAddLocal={vi.fn(async () => undefined)}
+        onAddGit={onAddGit}
+        onRetryGitImport={onRetryGitImport}
+        onDismissGitImport={onDismissGitImport}
+        onPull={vi.fn(async () => undefined)}
+        onRemove={vi.fn(async () => undefined)}
+        onImportZip={vi.fn(async () => undefined)}
+        onExportZip={vi.fn(async () => undefined)}
+        onClearError={vi.fn()}
+      />
+    </I18nProvider>,
   );
   return { onAddGit, onRetryGitImport, onDismissGitImport };
 }

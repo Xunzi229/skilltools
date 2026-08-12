@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { useInstallations } from "../hooks/useInstallations";
 import type { LibrarySkillSummary, Provider } from "../model/skill";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { useI18n } from "../i18n";
 
 type InstallationsState = ReturnType<typeof useInstallations>;
 
@@ -18,14 +19,17 @@ const providerLabels: Record<Provider, string> = {
   codex: "Codex",
 };
 
-const healthKindLabel: Record<string, string> = {
-  missingTarget: "目标缺失",
-  notSymlink: "非符号链接",
-  brokenLink: "断链",
-  sourceMismatch: "源不匹配",
-  indexOrphan: "索引孤儿",
-  diskOrphan: "磁盘孤儿",
-};
+function healthKindLabel(t: (k: string) => string, kind: string): string {
+  const map: Record<string, string> = {
+    missingTarget: t("installations.issueMissingTarget"),
+    notSymlink: t("installations.issueNotSymlink"),
+    brokenLink: t("installations.issueBrokenLink"),
+    sourceMismatch: t("installations.issueSourceMismatch"),
+    indexOrphan: t("installations.issueIndexOrphan"),
+    diskOrphan: t("installations.issueDiskOrphan"),
+  };
+  return map[kind] ?? kind;
+}
 
 export function InstallationsPanel({
   installations,
@@ -33,6 +37,7 @@ export function InstallationsPanel({
   selectedSkillIds = [],
   onChanged,
 }: InstallationsPanelProps) {
+  const { t } = useI18n();
   const {
     overview,
     presets,
@@ -75,13 +80,11 @@ export function InstallationsPanel({
     <>
     <section
       className="col-span-2 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel"
-      aria-label="安装总览"
+      aria-label={t("installations.region")}
     >
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
-        <h2 className="macos-page-title">安装</h2>
-        <p className="macos-page-sub">
-          受管链接、未托管 Skill、同名冲突与健康检查；支持安装预设。
-        </p>
+        <h2 className="macos-page-title">{t("installations.title")}</h2>
+        <p className="macos-page-sub">{t("installations.subtitle")}</p>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {error && (
@@ -90,14 +93,14 @@ export function InstallationsPanel({
 
         <section className="mb-8">
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <h3 className="m-0 text-[15px] font-semibold text-ink">健康</h3>
+            <h3 className="m-0 text-[15px] font-semibold text-ink">{t("installations.health")}</h3>
             <button
               type="button"
               className="macos-btn-ghost"
               disabled={anyBusy}
               onClick={() => void scanHealth()}
             >
-              {healthBusy ? "扫描中…" : "扫描"}
+              {healthBusy ? t("installations.scanning") : t("installations.scan")}
             </button>
             <button
               type="button"
@@ -109,23 +112,23 @@ export function InstallationsPanel({
                 })
               }
             >
-              安全修复（{repairableCount}）
+              {t("installations.safeRepair", { count: repairableCount })}
             </button>
           </div>
           {overview && (
             <div className="macos-card px-3 py-3 text-[12px] text-ink-2">
-              共 {overview.health.issues.length} 项问题
+              {t("installations.issueCount", { count: overview.health.issues.length })}
               {overview.health.repaired > 0
-                ? `，本次已修复 ${overview.health.repaired}`
+                ? t("installations.repairedSuffix", { count: overview.health.repaired })
                 : ""}
               {overview.health.issues.length === 0 ? (
-                <p className="mt-2 mb-0 text-ink-3">未发现问题</p>
+                <p className="mt-2 mb-0 text-ink-3">{t("installations.noIssues")}</p>
               ) : (
                 <ul className="mt-2 mb-0 list-disc pl-5">
                   {overview.health.issues.map((issue) => (
                     <li key={`${issue.kind}:${issue.targetPath}`}>
                       [{providerLabels[issue.provider]}]{" "}
-                      {healthKindLabel[issue.kind] ?? issue.kind}：{issue.message}
+                      {healthKindLabel(t, issue.kind)}：{issue.message}
                     </li>
                   ))}
                 </ul>
@@ -135,15 +138,15 @@ export function InstallationsPanel({
         </section>
 
         <section className="mb-8">
-          <h3 className="m-0 mb-3 text-[15px] font-semibold text-ink">安装预设</h3>
+          <h3 className="m-0 mb-3 text-[15px] font-semibold text-ink">{t("installations.presets")}</h3>
           <div className="mb-3 flex flex-wrap items-end gap-2">
             <label className="text-[12px] text-ink-3">
-              名称
+              {t("installations.name")}
               <input
                 className="macos-input mt-1 block w-full"
                 value={presetName}
                 onChange={(event) => setPresetName(event.target.value)}
-                placeholder="例如：日常三端"
+                placeholder={t("installations.namePlaceholder")}
               />
             </label>
             {(["cursor", "claude", "codex"] as Provider[]).map((provider) => (
@@ -168,8 +171,8 @@ export function InstallationsPanel({
               }
               title={
                 selectedSkillIds.length === 0
-                  ? "请先在 Skill 库勾选要保存的 Skill"
-                  : `将保存已选 ${selectedSkillIds.length} 个库 Skill`
+                  ? t("installations.saveNeedSelection")
+                  : t("installations.saveWillSave", { count: selectedSkillIds.length })
               }
               onClick={() =>
                 void savePreset(presetName.trim(), selectedSkillIds, presetProviders).then(
@@ -179,16 +182,16 @@ export function InstallationsPanel({
                 )
               }
             >
-              用库勾选保存
+              {t("installations.saveFromLibrary")}
             </button>
             <span className="text-[12px] text-ink-3">
               {selectedSkillIds.length > 0
-                ? `已选 ${selectedSkillIds.length} 个库 Skill`
-                : "未勾选库 Skill（可先到库列表勾选后再回来）"}
+                ? t("installations.selectedCount", { count: selectedSkillIds.length })
+                : t("installations.noneSelected")}
             </span>
           </div>
           {presets.length === 0 ? (
-            <p className="text-[12px] text-ink-3">暂无预设。先在库列表勾选 Skill 再保存。</p>
+            <p className="text-[12px] text-ink-3">{t("installations.noPresets")}</p>
           ) : (
             <ul className="m-0 list-none space-y-2 p-0">
               {presets.map((preset) => (
@@ -199,7 +202,7 @@ export function InstallationsPanel({
                   <div className="text-[13px] text-ink">
                     <strong>{preset.name}</strong>
                     <span className="ml-2 text-[12px] text-ink-3">
-                      {preset.skillIds.length} 个 Skill ·{" "}
+                      {t("installations.presetSkillCount", { count: preset.skillIds.length })}
                       {preset.providers.map((p) => providerLabels[p]).join(" / ")}
                     </span>
                   </div>
@@ -217,7 +220,7 @@ export function InstallationsPanel({
                         })
                       }
                     >
-                      应用
+                      {t("installations.apply")}
                     </button>
                     <button
                       type="button"
@@ -225,7 +228,7 @@ export function InstallationsPanel({
                       disabled={anyBusy}
                       onClick={() => void deletePreset(preset.id)}
                     >
-                      删除
+                      {t("installations.delete")}
                     </button>
                   </div>
                 </li>
@@ -235,15 +238,15 @@ export function InstallationsPanel({
         </section>
 
         {loading || !overview ? (
-          <p className="text-[13px] text-ink-3">加载中…</p>
+          <p className="text-[13px] text-ink-3">{t("installations.loading")}</p>
         ) : (
           <>
             <section className="mb-8">
               <h3 className="m-0 mb-3 text-[15px] font-semibold text-ink">
-                受管安装（{overview.managed.length}）
+                {t("installations.managed", { count: overview.managed.length })}
               </h3>
               {overview.managed.length === 0 ? (
-                <p className="text-[12px] text-ink-3">暂无受管安装</p>
+                <p className="text-[12px] text-ink-3">{t("installations.noManaged")}</p>
               ) : (
                 <ul className="m-0 list-none space-y-2 p-0">
                   {overview.managed.map((item) => {
@@ -271,7 +274,7 @@ export function InstallationsPanel({
                             })
                           }
                         >
-                          卸载
+                          {t("installations.uninstall")}
                         </button>
                       </li>
                     );
@@ -282,10 +285,10 @@ export function InstallationsPanel({
 
             <section className="mb-8">
               <h3 className="m-0 mb-3 text-[15px] font-semibold text-ink">
-                未托管（{overview.unmanaged.length}）
+                {t("installations.unmanaged", { count: overview.unmanaged.length })}
               </h3>
               {overview.unmanaged.length === 0 ? (
-                <p className="text-[12px] text-ink-3">本机无未托管 Skill</p>
+                <p className="text-[12px] text-ink-3">{t("installations.noUnmanaged")}</p>
               ) : (
                 <ul className="m-0 list-none space-y-2 p-0">
                   {overview.unmanaged.map((item) => (
@@ -312,7 +315,7 @@ export function InstallationsPanel({
                             })
                           }
                         >
-                          迁入库
+                          {t("installations.migrate")}
                         </button>
                         <button
                           type="button"
@@ -322,7 +325,7 @@ export function InstallationsPanel({
                             setConfirm({ kind: "replace", skillId: item.skillId })
                           }
                         >
-                          替换为库链接
+                          {t("installations.replaceLink")}
                         </button>
                       </div>
                     </li>
@@ -333,10 +336,10 @@ export function InstallationsPanel({
 
             <section>
               <h3 className="m-0 mb-3 text-[15px] font-semibold text-ink">
-                同名冲突（{overview.duplicates.length}）
+                {t("installations.duplicates", { count: overview.duplicates.length })}
               </h3>
               {overview.duplicates.length === 0 ? (
-                <p className="text-[12px] text-ink-3">未发现同名冲突</p>
+                <p className="text-[12px] text-ink-3">{t("installations.noDuplicates")}</p>
               ) : (
                 <ul className="m-0 list-none space-y-2 p-0">
                   {overview.duplicates.map((group) => (
@@ -348,8 +351,10 @@ export function InstallationsPanel({
                       <div className="mt-1">
                         Provider:{" "}
                         {group.providers.map((p) => providerLabels[p]).join(" / ") || "—"}
-                        {" · "}库内 {group.librarySkillIds.length} · 未托管{" "}
-                        {group.unmanagedSkillIds.length}
+                        {t("installations.duplicateStats", {
+                          library: group.librarySkillIds.length,
+                          unmanaged: group.unmanagedSkillIds.length,
+                        })}
                       </div>
                     </li>
                   ))}
@@ -362,13 +367,13 @@ export function InstallationsPanel({
     </section>
     <ConfirmDialog
       open={confirm?.kind === "apply"}
-      title={confirm?.kind === "apply" ? `应用预设「${confirm.name}」？` : ""}
+      title={confirm?.kind === "apply" ? t("installations.applyPresetTitle", { name: confirm.name }) : ""}
       message={
         confirm?.kind === "apply"
-          ? `将安装到 ${confirm.providerCount} 个 Provider。已有冲突不会覆盖。`
+          ? t("installations.applyPresetMessage", { count: confirm.providerCount })
           : ""
       }
-      confirmLabel="应用"
+      confirmLabel={t("installations.apply")}
       busy={anyBusy}
       onCancel={() => setConfirm(null)}
       onConfirm={() => {
@@ -383,9 +388,9 @@ export function InstallationsPanel({
     />
     <ConfirmDialog
       open={confirm?.kind === "replace"}
-      title="替换为库链接？"
-      message="将删除本机真实目录并替换为库链接。冲突的真实目录不会被覆盖。"
-      confirmLabel="替换"
+      title={t("installations.replaceTitle")}
+      message={t("installations.replaceMessage")}
+      confirmLabel={t("installations.replaceConfirm")}
       tone="danger"
       busy={anyBusy}
       onCancel={() => setConfirm(null)}

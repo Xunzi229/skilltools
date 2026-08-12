@@ -1,14 +1,24 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "../i18n";
 import type { Provider } from "../model/skill";
 import { TargetSelector } from "./TargetSelector";
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return <I18nProvider>{children}</I18nProvider>;
+}
+
+function renderSelector(ui: Parameters<typeof render>[0]) {
+  return render(ui, { wrapper: I18nWrapper });
+}
 
 describe("TargetSelector", () => {
   it("dirty 时显示取消与应用；取消只重置本地草稿", async () => {
     const onApply = vi.fn(async () => undefined);
     const user = userEvent.setup();
-    render(<TargetSelector installedProviders={[]} onApply={onApply} />);
+    renderSelector(<TargetSelector installedProviders={[]} onApply={onApply} />);
 
     await user.click(screen.getByRole("checkbox", { name: "安装到 Cursor" }));
     expect(screen.getByRole("button", { name: "取消" })).toBeInTheDocument();
@@ -24,7 +34,7 @@ describe("TargetSelector", () => {
     const onApply = vi.fn(async () => undefined);
     const user = userEvent.setup();
     const installed: Provider[] = ["claude"];
-    const { rerender } = render(
+    const { rerender } = renderSelector(
       <TargetSelector installedProviders={installed} onApply={onApply} />,
     );
 
@@ -52,7 +62,7 @@ describe("TargetSelector", () => {
         }),
     );
     const user = userEvent.setup();
-    render(<TargetSelector installedProviders={["cursor"]} onApply={onApply} />);
+    renderSelector(<TargetSelector installedProviders={["cursor"]} onApply={onApply} />);
 
     await user.click(screen.getByRole("checkbox", { name: "安装到 Cursor" }));
     await user.click(screen.getByRole("button", { name: "应用" }));

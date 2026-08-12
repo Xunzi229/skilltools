@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 interface SkillCardProps {
   name: string;
   description: string;
@@ -30,6 +31,7 @@ export function SkillCard({
   tagLabels = [],
   onToggleExpand,
 }: SkillCardProps) {
+  const { t } = useI18n();
   const hasMeta = Boolean(groupLabel) || tagLabels.length > 0;
 
   return (
@@ -54,7 +56,7 @@ export function SkillCard({
               type="button"
               className="grid size-6 shrink-0 place-items-center rounded-[6px] text-[14px] leading-none text-ink-3 hover:bg-black/6 hover:text-ink"
               aria-expanded={expanded}
-              aria-label={`${expanded ? "收起" : "展开"} ${name} 的子 Skill`}
+              aria-label={expanded ? t("fileTree.collapseNode", { name }) : t("fileTree.expandNode", { name })}
               onClick={(event) => {
                 event.stopPropagation();
                 onToggleExpand?.();
@@ -65,7 +67,7 @@ export function SkillCard({
           )}
           {subSkill && (
             <span className="shrink-0 rounded-full bg-hover px-1.5 py-0.5 text-[10px] font-medium text-ink-2">
-              子 Skill
+              {t("libraryDetail.childSkill")}
             </span>
           )}
           <strong className="truncate text-[14px] font-semibold tracking-tight text-ink">
@@ -100,7 +102,7 @@ export function SkillCard({
         </span>
       )}
       <span className="line-clamp-2 text-[12px] leading-4 text-ink-2">
-        {description || "暂无描述"}
+        {description || t("common.noDescription")}
       </span>
     </div>
   );

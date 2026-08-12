@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useI18n } from "../i18n";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -23,6 +24,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const { t } = useI18n();
   const confirmRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
@@ -69,7 +71,7 @@ export function ConfirmDialog({
             disabled={busy}
             onClick={onCancel}
           >
-            取消
+            {t("common.cancel")}
           </button>
           <button
             ref={confirmRef}
@@ -82,7 +84,7 @@ export function ConfirmDialog({
             disabled={busy}
             onClick={onConfirm}
           >
-            {busy ? "处理中…" : confirmLabel}
+            {busy ? t("confirm.busy") : confirmLabel}
           </button>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useI18n } from "../i18n";
 import type { Provider } from "../model/skill";
 
 interface TargetSelectorProps {
@@ -48,6 +49,7 @@ export function TargetSelector({
   disabled = false,
   onApply,
 }: TargetSelectorProps) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<Provider[]>(installedProviders);
   const [applying, setApplying] = useState(false);
   const installedKey = useMemo(
@@ -74,11 +76,11 @@ export function TargetSelector({
   };
 
   return (
-    <section aria-label="安装目标">
+    <section aria-label={t("targetSelector.region")}>
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <h3 className="text-[13px] font-semibold text-ink">安装目标</h3>
-          <p className="mt-0.5 text-[12px] text-ink-2">选择要安装此 Skill 的工具目录</p>
+          <h3 className="text-[13px] font-semibold text-ink">{t("targetSelector.title")}</h3>
+          <p className="mt-0.5 text-[12px] text-ink-2">{t("targetSelector.subtitle")}</p>
         </div>
         {dirty && (
           <div className="flex shrink-0 items-center gap-2">
@@ -88,7 +90,7 @@ export function TargetSelector({
               disabled={disabled}
               onClick={resetDraft}
             >
-              取消
+              {t("targetSelector.cancel")}
             </button>
             <button
               type="button"
@@ -101,7 +103,7 @@ export function TargetSelector({
                   .finally(() => setApplying(false));
               }}
             >
-              {applying ? "应用中…" : "应用"}
+              {applying ? t("targetSelector.applying") : t("targetSelector.apply")}
             </button>
           </div>
         )}
@@ -122,7 +124,7 @@ export function TargetSelector({
               <input
                 type="checkbox"
                 className="size-3.5 accent-[var(--color-brand)]"
-                aria-label={`安装到 ${label}`}
+                aria-label={t("targetSelector.installAria", { label })}
                 checked={selected}
                 disabled={busy}
                 onChange={() => {
@@ -142,7 +144,9 @@ export function TargetSelector({
               <span className="min-w-0 leading-tight">
                 <strong className="block text-[13px] font-semibold text-ink">{label}</strong>
                 <em className="block text-[11px] not-italic text-ink-3">
-                  {committed ? "已安装" : "未安装"}
+                  {committed
+                    ? t("targetSelector.installed")
+                    : t("targetSelector.uninstalled")}
                 </em>
               </span>
             </label>

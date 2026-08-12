@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useI18n } from "../i18n";
 import type {
   LibrarySkillSummary,
   Provider,
@@ -9,8 +10,8 @@ import type {
 import { skillProviders } from "../model/skill";
 import {
   EMPTY_LIBRARY_QUERY,
-  TEMPLATE_GROUPS,
-  TEMPLATE_TAGS,
+  getTemplateGroups,
+  getTemplateTags,
   type LibraryTaxonomyQuery,
   isLibraryQueryActive,
 } from "../model/taxonomy";
@@ -117,6 +118,7 @@ export function Sidebar({
   onDeleteTag,
   onApplyTaxonomyTemplate,
 }: SidebarProps) {
+  const { t, locale } = useI18n();
   const [dialog, setDialog] = useState<DialogState>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [menuKey, setMenuKey] = useState<string | null>(null);
@@ -163,7 +165,7 @@ export function Sidebar({
     return (
       <aside
         className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-1 overflow-hidden border-r border-line bg-sidebar px-1 py-3"
-        aria-label="导航栏（已折叠）"
+        aria-label={t("sidebar.railCollapsed")}
       >
         <div
           className="mb-1 grid size-8 place-items-center rounded-[9px] bg-brand text-[13px] font-bold text-white"
@@ -172,17 +174,17 @@ export function Sidebar({
           S
         </div>
         <nav className="flex w-full min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-          {railItem("library", "库", "Skill 库")}
-          {railItem("all", "本机", "已安装")}
-          {railItem("installations", "安装", "安装总览")}
-          {railItem("projects", "项目", "项目")}
-          {railItem("backups", "备份", "备份记录")}
-          {railItem("settings", "设置", "设置")}
+          {railItem("library", t("nav.libraryShort"), t("nav.libraryTitle"))}
+          {railItem("all", t("nav.localShort"), t("nav.installedTitle"))}
+          {railItem("installations", t("nav.installShort"), t("nav.installationsTitle"))}
+          {railItem("projects", t("nav.projects"), t("nav.projects"))}
+          {railItem("backups", t("nav.backupShort"), t("nav.backups"))}
+          {railItem("settings", t("nav.settings"), t("nav.settings"))}
         </nav>
         <PanelToggle
           expanded={false}
-          labelExpand="展开侧边栏"
-          labelCollapse="折叠侧边栏"
+          labelExpand={t("sidebar.expandSidebar")}
+          labelCollapse={t("sidebar.collapseSidebar")}
           onToggle={onToggleCollapse}
           className="mt-1"
         />
@@ -312,7 +314,7 @@ export function Sidebar({
         <button
           type="button"
           className="mr-1 shrink-0 rounded-[6px] px-1.5 py-1 text-[12px] text-[var(--sidebar-muted)] opacity-0 hover:bg-black/5 group-hover:opacity-100"
-          aria-label={`管理 ${label}`}
+          aria-label={t("sidebar.manageItem", { label })}
           aria-expanded={open}
           disabled={busy}
           onClick={(event) => {
@@ -336,7 +338,7 @@ export function Sidebar({
                 actions.onRename();
               }}
             >
-              编辑
+              {t("sidebar.edit")}
             </button>
             {actions.onMoveUp && (
               <button
@@ -348,7 +350,7 @@ export function Sidebar({
                   actions.onMoveUp?.();
                 }}
               >
-                上移
+                {t("sidebar.moveUp")}
               </button>
             )}
             {actions.onMoveDown && (
@@ -361,7 +363,7 @@ export function Sidebar({
                   actions.onMoveDown?.();
                 }}
               >
-                下移
+                {t("sidebar.moveDown")}
               </button>
             )}
             <div className="my-1 border-t border-line" />
@@ -374,7 +376,7 @@ export function Sidebar({
                 actions.onDelete();
               }}
             >
-              删除
+              {t("common.delete")}
             </button>
           </div>
         )}
@@ -388,7 +390,7 @@ export function Sidebar({
   return (
     <aside
       className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-r border-line bg-sidebar px-3 pb-4 pt-5"
-      aria-label="导航栏"
+      aria-label={t("sidebar.navLabel")}
     >
       <header className="mb-3 flex items-start gap-2.5 px-2">
         <div
@@ -402,14 +404,14 @@ export function Sidebar({
             Skill Manager
           </h1>
           <p className="m-0 mt-0.5 text-[11px] text-[var(--sidebar-muted)]">
-            本地 Skill 管理工具
+            {t("sidebar.subtitle")}
           </p>
         </div>
         {onToggleCollapse && (
           <PanelToggle
             expanded
-            labelExpand="展开侧边栏"
-            labelCollapse="折叠侧边栏"
+            labelExpand={t("sidebar.expandSidebar")}
+            labelCollapse={t("sidebar.collapseSidebar")}
             onToggle={onToggleCollapse}
             className="mt-0.5"
           />
@@ -418,16 +420,16 @@ export function Sidebar({
 
       <nav
         className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-auto"
-        aria-label="Skill 分类"
+        aria-label={t("sidebar.categories")}
         onClick={() => setMenuKey(null)}
       >
-        {sectionLabel("技能库")}
-        {navItem("library", "Skill 库", librarySkills.length)}
+        {sectionLabel(t("sidebar.sectionLibrary"))}
+        {navItem("library", t("nav.library"), librarySkills.length)}
 
-        {sectionLabel("分组", () => setDialog({ kind: "create-group" }), "新建分组")}
+        {sectionLabel(t("sidebar.sectionGroups"), () => setDialog({ kind: "create-group" }), t("sidebar.newGroup"))}
         {simpleTaxonomyRow(
           "ungrouped",
-          "未分组",
+          t("sidebar.ungrouped"),
           ungroupedCount,
           libraryQuery.groupScope === "ungrouped",
           () => {
@@ -441,8 +443,11 @@ export function Sidebar({
         {sortedGroups.length === 0 ? (
           <div className="px-3 py-1">
             <p className="m-0 text-[11px] text-[var(--sidebar-muted)]">
-              暂无分组。可点 + 创建，或应用推荐模板
-              （{TEMPLATE_GROUPS.slice(0, 3).join("、")}…）。
+              {t("sidebar.noGroupsHint", {
+                examples: getTemplateGroups()
+                  .slice(0, 3)
+                  .join(locale === "en" ? ", " : "、"),
+              })}
             </p>
             {onApplyTaxonomyTemplate && (
               <button
@@ -454,7 +459,7 @@ export function Sidebar({
                   void onApplyTaxonomyTemplate().finally(() => setTemplateBusy(false));
                 }}
               >
-                应用推荐模板
+                {t("sidebar.applyGroupTemplate")}
               </button>
             )}
           </div>
@@ -497,13 +502,13 @@ export function Sidebar({
           )
         )}
 
-        {sectionLabel("标签", () => setDialog({ kind: "create-tag" }), "新建标签")}
+        {sectionLabel(t("sidebar.sectionTags"), () => setDialog({ kind: "create-tag" }), t("sidebar.newTag"))}
         <p className="mb-1 px-3 text-[10px] leading-snug text-[var(--sidebar-muted)]">
-          仅用于应用内筛选，不写入 SKILL.md
+          {t("sidebar.tagsHint")}
         </p>
         {simpleTaxonomyRow(
           "untagged",
-          "无标签",
+          t("sidebar.noTags"),
           untaggedCount,
           libraryQuery.untaggedOnly,
           () => {
@@ -518,7 +523,11 @@ export function Sidebar({
         {tags.length === 0 ? (
           <div className="px-3 py-1">
             <p className="m-0 text-[11px] text-[var(--sidebar-muted)]">
-              暂无标签。可点 + 创建，或应用推荐模板（{TEMPLATE_TAGS.slice(0, 3).join("、")}…）。
+              {t("sidebar.noTagsHint", {
+                examples: getTemplateTags()
+                  .slice(0, 3)
+                  .join(locale === "en" ? ", " : "、"),
+              })}
             </p>
             {onApplyTaxonomyTemplate && groups.length > 0 && (
               <button
@@ -530,7 +539,7 @@ export function Sidebar({
                   void onApplyTaxonomyTemplate().finally(() => setTemplateBusy(false));
                 }}
               >
-                应用推荐标签模板
+                {t("sidebar.applyTagTemplate")}
               </button>
             )}
           </div>
@@ -568,10 +577,10 @@ export function Sidebar({
           )
         )}
 
-        {sectionLabel("本机")}
+        {sectionLabel(t("sidebar.sectionLocal"))}
         {navItem(
           "all",
-          "已安装",
+          t("nav.installed"),
           countUniqueSkills(skills, (skill) => skill.status === "active"),
         )}
         {providers.map(({ id, label }) =>
@@ -585,14 +594,14 @@ export function Sidebar({
         )}
         {navItem(
           "paused",
-          "已暂停",
+          t("nav.paused"),
           countUniqueSkills(skills, (skill) => skill.status === "paused"),
         )}
 
-        {sectionLabel("数据")}
-        {navItem("installations", "安装", installationCount)}
-        {navItem("projects", "项目", projectCount)}
-        {navItem("backups", "备份记录", backupCount)}
+        {sectionLabel(t("sidebar.sectionData"))}
+        {navItem("installations", t("nav.installations"), installationCount)}
+        {navItem("projects", t("nav.projects"), projectCount)}
+        {navItem("backups", t("nav.backups"), backupCount)}
       </nav>
 
       <div className="mt-auto flex flex-col gap-1.5 border-t border-line pt-3">
@@ -603,7 +612,7 @@ export function Sidebar({
           disabled={loading}
         >
           <span aria-hidden="true">↻</span>
-          {loading ? "正在扫描…" : "刷新扫描"}
+          {loading ? t("sidebar.scanning") : t("sidebar.refreshScan")}
         </button>
         <button
           className={[
@@ -616,7 +625,7 @@ export function Sidebar({
             onFilterChange("settings");
           }}
         >
-          设置
+          {t("nav.settings")}
         </button>
       </div>
 
@@ -624,13 +633,13 @@ export function Sidebar({
         open={dialog !== null}
         title={
           dialog?.kind === "create-group"
-            ? "新建分组"
+            ? t("sidebar.newGroup")
             : dialog?.kind === "rename-group"
-              ? "编辑分组"
+              ? t("sidebar.editGroup")
               : dialog?.kind === "create-tag"
-                ? "新建标签"
+                ? t("sidebar.newTag")
                 : dialog?.kind === "rename-tag"
-                  ? "编辑标签"
+                  ? t("sidebar.editTag")
                   : ""
         }
         initialValue={
@@ -653,8 +662,8 @@ export function Sidebar({
         }
         confirmLabel={
           dialog?.kind === "create-group" || dialog?.kind === "create-tag"
-            ? "创建"
-            : "保存"
+            ? t("common.create")
+            : t("common.save")
         }
         busy={busy}
         onCancel={() => setDialog(null)}
@@ -675,13 +684,13 @@ export function Sidebar({
         open={confirm !== null}
         title={
           confirm?.kind === "group"
-            ? `删除分组「${confirm.name}」？`
+            ? t("sidebar.deleteGroupTitle", { name: confirm.name })
             : confirm
-              ? `删除标签「${confirm.name}」？`
+              ? t("sidebar.deleteTagTitle", { name: confirm.name })
               : ""
         }
-        message="删除后仅清除引用，不会修改 Skill 文件内容。"
-        confirmLabel="删除"
+        message={t("sidebar.deleteTaxonomyMessage")}
+        confirmLabel={t("common.delete")}
         tone="danger"
         busy={busy}
         onCancel={() => setConfirm(null)}

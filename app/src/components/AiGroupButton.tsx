@@ -11,6 +11,7 @@ import type {
 import { errorMessage } from "../utils/errors";
 import { displayDescription } from "../utils/skillDisplay";
 import { useModelServiceConfigured } from "../hooks/useModelServiceConfigured";
+import { useI18n } from "../i18n";
 
 /** 与后端 group_suggest::MAX_SKILLS_PER_REQUEST 保持一致 */
 const SUGGEST_BATCH_SIZE = 40;
@@ -49,6 +50,7 @@ function chunkIds(ids: string[], size: number): string[][] {
 }
 
 function RecognizingPanel({ progress }: { progress: BatchProgress | null }) {
+  const { t } = useI18n();
   const remaining =
     progress && progress.total > 0
       ? Math.max(progress.total - progress.done, 0)
@@ -65,7 +67,7 @@ function RecognizingPanel({ progress }: { progress: BatchProgress | null }) {
       </div>
       <div className="text-center">
         <p className="m-0 text-[14px] font-medium tracking-tight text-ink">
-          识别中
+          {t("aiGroup.recognizing")}
           <span className="translate-loading-dots" aria-hidden="true">
             <i />
             <i />
@@ -74,8 +76,12 @@ function RecognizingPanel({ progress }: { progress: BatchProgress | null }) {
         </p>
         <p className="mt-1.5 m-0 text-[12px] leading-5 text-ink-3">
           {progress && progress.total > 1
-            ? `批次 ${progress.done}/${progress.total}，剩余 ${remaining} 批`
-            : "根据描述匹配分组与标签；不明显归属的会保持未分组"}
+            ? t("aiGroup.batchProgress", {
+                done: progress.done,
+                total: progress.total,
+                remaining: remaining ?? 0,
+              })
+            : t("aiGroup.hint")}
         </p>
       </div>
       <div className="translate-loading-skeleton w-full max-w-md" aria-hidden="true">
@@ -131,6 +137,7 @@ export function AiGroupButton({
   disabled = false,
   onApply,
 }: AiGroupButtonProps) {
+  const { t } = useI18n();
   const configured = useModelServiceConfigured(api);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -189,7 +196,7 @@ export function AiGroupButton({
     const ids = [...selectedIds];
     if (ids.length === 0) return;
     if (groups.length === 0 && !allowNew) {
-      setError("请先创建分组或开启「允许新建」");
+      setError(t("aiGroup.needGroups"));
       return;
     }
     const requestId = requestIdRef.current + 1;
@@ -234,7 +241,11 @@ export function AiGroupButton({
           } catch (err: unknown) {
             if (requestIdRef.current !== requestId) return;
             batchErrors.push(
-              `第 ${index + 1}/${batches.length} 批：${errorMessage(err, "识别失败")}`,
+              t("aiGroup.batchFailed", {
+                index: index + 1,
+                total: batches.length,
+                message: errorMessage(err, t("aiGroup.recognizeFailed")),
+              }),
             );
             flushSync(() => {
               setProgress({ done: index + 1, total: batches.length });
@@ -279,7 +290,7 @@ export function AiGroupButton({
       setRows([]);
       setProgress(null);
     } catch (err: unknown) {
-      setError(errorMessage(err, "应用分组失败"));
+      setError(errorMessage(err, t("aiGroup.applyFailed")));
     } finally {
       setApplying(false);
     }
@@ -299,7 +310,7 @@ export function AiGroupButton({
           disabled={disabled || loading || applying}
           onChange={(event) => setAllowNew(event.target.checked)}
         />
-        允许新建
+        {t("aiGroup.allowCreate")}
       </label>
       <button
         type="button"
@@ -311,10 +322,10 @@ export function AiGroupButton({
           applying ||
           (groups.length === 0 && !allowNew)
         }
-        title="根据描述用模型匹配分组与标签（可调整后应用）"
+        title={t("aiGroup.buttonTitle")}
         onClick={runSuggest}
       >
-        智能分组
+        {t("aiGroup.button")}
       </button>
       {open ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-[2px]">
@@ -330,14 +341,18 @@ export function AiGroupButton({
                   id="ai-group-title"
                   className="m-0 text-[15px] font-semibold tracking-tight text-ink"
                 >
-                  智能分组
+                  {t("aiGroup.dialogTitle")}
                 </h2>
                 <p className="mt-1 text-[12px] leading-5 text-ink-3">
                   {loading && progress
                     ? progress.total > 1
-                      ? `正在分批识别：已完成 ${progress.done}/${progress.total}，剩余 ${remainingBatches} 批`
-                      : `正在识别 ${selectedIds.size} 个 Skill…`
-                    : "确认前可调整分组与标签；新建项将在应用时创建"}
+                      ? t("aiGroup.recognizingBatches", {
+                          done: progress.done,
+                          total: progress.total,
+                          remaining: remainingBatches,
+                        })
+                      : t("aiGroup.recognizingCount", { count: selectedIds.size })
+                    : t("aiGroup.dialogHint")}
                 </p>
               </div>
               <button
@@ -346,7 +361,7 @@ export function AiGroupButton({
                 disabled={applying}
                 onClick={closeSheet}
               >
-                关闭
+                {t("common.close")}
               </button>
             </header>
 
@@ -360,8 +375,12 @@ export function AiGroupButton({
                       className="shrink-0 border-b border-line bg-hover px-4 py-2 text-[12px] text-ink-2"
                       aria-live="polite"
                     >
-                      批次进度 {progress.done}/{progress.total}
-                      ，剩余 {remainingBatches} 批 · 已出结果 {rows.length} 项
+                      {t("aiGroup.progressLine", {
+                        done: progress.done,
+                        total: progress.total,
+                        remaining: remainingBatches,
+                        rows: rows.length,
+                      })}
                     </div>
                   ) : null}
                   {error ? (
@@ -373,10 +392,10 @@ export function AiGroupButton({
                         <thead className="sticky top-0 bg-panel text-[11px] text-ink-3">
                           <tr className="border-b border-line">
                             <th className="px-2 py-2 font-medium">Skill</th>
-                            <th className="px-2 py-2 font-medium">描述</th>
-                            <th className="w-[150px] px-2 py-2 font-medium">分组</th>
+                            <th className="px-2 py-2 font-medium">{t("aiGroup.colDescription")}</th>
+                            <th className="w-[150px] px-2 py-2 font-medium">{t("aiGroup.colGroup")}</th>
                             <th className="w-[180px] px-2 py-2 font-medium">
-                              应用后的最终标签
+                              {t("aiGroup.colTags")}
                             </th>
                           </tr>
                         </thead>
@@ -395,7 +414,7 @@ export function AiGroupButton({
                               <td className="px-2 py-2">
                                 <select
                                   className="macos-select macos-select-sm w-full"
-                                  aria-label={`${row.name} 分组`}
+                                  aria-label={t("aiGroup.rowGroupAria", { name: row.name })}
                                   disabled={applying}
                                   value={row.groupKey}
                                   onChange={(event) => {
@@ -409,7 +428,7 @@ export function AiGroupButton({
                                     );
                                   }}
                                 >
-                                  <option value="">未分组</option>
+                                  <option value="">{t("aiGroup.ungrouped")}</option>
                                   {orderedGroups.map((group) => (
                                     <option key={group.id} value={group.id}>
                                       {group.name}
@@ -417,7 +436,7 @@ export function AiGroupButton({
                                   ))}
                                   {extraNewGroups.map((name) => (
                                     <option key={`new-${name}`} value={`__new__:${name}`}>
-                                      新建：{name}
+                                      {t("aiGroup.newItem", { name })}
                                     </option>
                                   ))}
                                 </select>
@@ -475,7 +494,7 @@ export function AiGroupButton({
                                           );
                                         }}
                                       />
-                                      新建：{name}
+                                      {t("aiGroup.newItem", { name })}
                                     </label>
                                   ))}
                                 </div>
@@ -487,7 +506,7 @@ export function AiGroupButton({
                     </div>
                   ) : !error && !loading ? (
                     <p className="px-5 py-8 text-center text-[13px] text-ink-3">
-                      没有可展示的识别结果
+                      {t("aiGroup.noResults")}
                     </p>
                   ) : null}
                 </div>
@@ -501,7 +520,7 @@ export function AiGroupButton({
                 disabled={applying}
                 onClick={closeSheet}
               >
-                取消
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -509,7 +528,7 @@ export function AiGroupButton({
                 disabled={loading || applying || rows.length === 0}
                 onClick={() => void apply()}
               >
-                {applying ? "应用中…" : "应用"}
+                {applying ? t("aiGroup.applying") : t("aiGroup.apply")}
               </button>
             </footer>
           </div>

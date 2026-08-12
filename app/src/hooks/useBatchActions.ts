@@ -6,6 +6,7 @@ import type {
   Provider,
   SkillGroupAssignment,
 } from "../model/skill";
+import { t } from "../i18n";
 import { normalizeCommandError } from "../utils/errors";
 
 export function useBatchActions(api: SkillApi) {
@@ -33,7 +34,7 @@ export function useBatchActions(api: SkillApi) {
       setBatchResult(result);
       return result;
     } catch (error: unknown) {
-      setBatchError(normalizeCommandError(error, "批量操作失败"));
+      setBatchError(normalizeCommandError(error, t("batch.failed")));
       return null;
     } finally {
       if (operationRef.current === operation) {
@@ -103,8 +104,11 @@ export function useBatchActions(api: SkillApi) {
 export function formatBatchSummary(result: BatchResult): string {
   const firstError = result.items.find((item) => item.status === "failed")?.message;
   const skipped =
-    result.skipped > 0 ? `，跳过 ${result.skipped}` : "";
-  return `批量完成：成功 ${result.success}，失败 ${result.failed}${skipped}${
-    firstError ? `；${firstError}` : ""
-  }`;
+    result.skipped > 0 ? t("batch.skipped", { count: result.skipped }) : "";
+  return t("batch.summary", {
+    success: result.success,
+    failed: result.failed,
+    skipped,
+    error: firstError ? `；${firstError}` : "",
+  });
 }

@@ -8,6 +8,7 @@ import {
   type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
+import { useI18n } from "../i18n";
 import {
   filterFontOptions,
   type PreviewFontOption,
@@ -30,6 +31,7 @@ export function FontFamilyPicker({
   disabled = false,
   onChange,
 }: FontFamilyPickerProps) {
+  const { t } = useI18n();
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -133,12 +135,12 @@ export function FontFamilyPicker({
         ref={listRef}
         id={listId}
         role="listbox"
-        aria-label="字体搜索结果"
+        aria-label={t("fontPicker.resultsAria")}
         className="overflow-auto rounded-[8px] border border-line bg-panel py-1 shadow-sm"
         style={dropdownStyle}
       >
         {filtered.length === 0 ? (
-          <li className="px-3 py-2 text-[12px] text-ink-3">无匹配字体</li>
+          <li className="px-3 py-2 text-[12px] text-ink-3">{t("fontPicker.noMatch")}</li>
         ) : (
           filtered.map((font, index) => (
             <li key={font.family} role="presentation">
@@ -173,10 +175,10 @@ export function FontFamilyPicker({
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
-        aria-label="字体类型"
+        aria-label={t("fontPicker.familyAria")}
         className="macos-input w-full min-w-[240px]"
         disabled={disabled}
-        placeholder="搜索字体…"
+        placeholder={t("fontPicker.searchPlaceholder")}
         value={open ? query : value}
         style={{ fontFamily: `"${value}"` }}
         onFocus={() => {

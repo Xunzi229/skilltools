@@ -21,6 +21,7 @@ import { NameDialog } from "./NameDialog";
 import { PanelToggle } from "./PanelToggle";
 import { SelectionModeButton } from "./SelectionModeButton";
 import { SkillCard } from "./SkillCard";
+import { useI18n } from "../i18n";
 
 type StatusTab = "all" | "uninstalled" | "installed" | "custom";
 
@@ -99,6 +100,7 @@ export function LibraryList({
   onClearBatchResult,
   onGoToProjects,
 }: LibraryListProps) {
+  const { t } = useI18n();
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [createOpen, setCreateOpen] = useState(false);
@@ -223,10 +225,10 @@ export function LibraryList({
   ]);
 
   const tabs: Array<{ id: StatusTab; label: string }> = [
-    { id: "all", label: "全部" },
-    { id: "uninstalled", label: "未安装" },
-    { id: "installed", label: "已安装" },
-    { id: "custom", label: "自定义" },
+    { id: "all", label: t("libraryList.tabAll") },
+    { id: "uninstalled", label: t("libraryList.tabUninstalled") },
+    { id: "installed", label: t("libraryList.tabInstalled") },
+    { id: "custom", label: t("libraryList.tabCustom") },
   ];
 
   const toggleParent = (parentId: string) => {
@@ -245,12 +247,12 @@ export function LibraryList({
     return (
       <section
         className="flex h-full min-h-0 w-full min-w-0 flex-col items-center gap-3 overflow-hidden border-r border-line-strong bg-panel px-1.5 py-4"
-        aria-label="库 Skill 列表（已折叠）"
+        aria-label={t("libraryList.regionCollapsed")}
       >
         <PanelToggle
           expanded={false}
-          labelExpand="展开列表"
-          labelCollapse="折叠列表"
+          labelExpand={t("common.expandList")}
+          labelCollapse={t("common.collapseList")}
           onToggle={onToggleCollapse}
         />
         <span
@@ -266,13 +268,13 @@ export function LibraryList({
   return (
     <section
       className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-r border-line-strong bg-panel"
-      aria-label="库 Skill 列表"
+      aria-label={t("libraryList.region")}
     >
       <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">{title}</h2>
-            <p className="mt-1 text-[12px] text-ink-2">浏览和管理可用的 Skills</p>
+            <p className="mt-1 text-[12px] text-ink-2">{t("libraryList.subtitle")}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <SelectionModeButton
@@ -286,13 +288,13 @@ export function LibraryList({
               disabled={batchBusy || createBusy}
               onClick={() => setCreateOpen(true)}
             >
-              新建
+              {t("libraryList.createNew")}
             </button>
             {onToggleCollapse && (
               <PanelToggle
                 expanded
-                labelExpand="展开列表"
-                labelCollapse="折叠列表"
+                labelExpand={t("common.expandList")}
+                labelCollapse={t("common.collapseList")}
                 onToggle={onToggleCollapse}
               />
             )}
@@ -304,20 +306,20 @@ export function LibraryList({
           </span>
           <input
             type="search"
-            aria-label="搜索库 Skill"
-            placeholder="搜索名称、描述、来源、分组或标签"
+            aria-label={t("libraryList.searchAria")}
+            placeholder={t("libraryList.searchPlaceholder")}
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </label>
         {queryChips.length > 0 && (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="当前筛选条件">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label={t("libraryList.filtersAria")}>
             {queryChips.map((chip) => (
               <button
                 key={chip.key}
                 type="button"
                 className="inline-flex items-center gap-1 rounded-full bg-hover px-2 py-0.5 text-[11px] text-ink-2 hover:bg-black/8"
-                title="移除该条件"
+                title={t("common.removeFilter")}
                 onClick={() => onRemoveQueryChip?.(chip)}
               >
                 <span>{chip.label}</span>
@@ -330,7 +332,7 @@ export function LibraryList({
                 className="macos-link text-[11px]"
                 onClick={onClearQuery}
               >
-                清除筛选
+                {t("common.clearFilters")}
               </button>
             )}
           </div>
@@ -338,7 +340,7 @@ export function LibraryList({
         <div
           className="macos-seg mt-3 w-full"
           role="tablist"
-          aria-label="安装状态过滤"
+          aria-label={t("libraryList.installFilterAria")}
         >
           {tabs.map((tab) => {
             const active = statusTab === tab.id;
@@ -359,28 +361,28 @@ export function LibraryList({
         </div>
         {selectionActive && (
           <div className="library-batch mt-3">
-            <section className="library-batch-block" aria-label="选择">
+            <section className="library-batch-block" aria-label={t("libraryList.selectionAria")}>
               <div className="library-batch-actions">
                 <span className="library-batch-count">
-                  已选 {selectedSelectableIds.length} 项
+                  {t("common.selectedCount", { count: selectedSelectableIds.length })}
                 </span>
                 <button
                   type="button"
                   className="macos-btn-ghost"
                   disabled={batchBusy || selectableIds.length === 0}
-                  title="选中当前列表中的全部 Skill"
+                  title={t("libraryList.selectAllTitle")}
                   onClick={() => onSetSelection(selectableIds)}
                 >
-                  全选
+                  {t("common.selectAll")}
                 </button>
                 <button
                   type="button"
                   className="macos-btn-ghost"
                   disabled={batchBusy || selectableIds.length === 0}
-                  title="反转当前列表中的勾选状态"
+                  title={t("libraryList.invertTitle")}
                   onClick={() => onInvertSelection(selectableIds)}
                 >
-                  反选
+                  {t("common.invertSelection")}
                 </button>
                 {selectedSelectableIds.length > 0 ? (
                   <button
@@ -389,14 +391,14 @@ export function LibraryList({
                     disabled={batchBusy}
                     onClick={onClearSelection}
                   >
-                    清除
+                    {t("common.clearSelection")}
                   </button>
                 ) : null}
               </div>
             </section>
             {selectedSelectableIds.length > 0 ? (
               <>
-                <section className="library-batch-block" aria-label="安装">
+                <section className="library-batch-block" aria-label={t("libraryList.installAria")}>
                   <div className="library-batch-actions">
                     {(["cursor", "claude", "codex"] as const).map((provider) => (
                       <button
@@ -406,7 +408,7 @@ export function LibraryList({
                         disabled={batchBusy}
                         onClick={() => onBatchInstall(selectedSelectableIds, provider)}
                       >
-                        安装 {provider}
+                        {t("libraryList.installProvider", { provider })}
                       </button>
                     ))}
                     {(["cursor", "claude", "codex"] as const).map((provider) => (
@@ -417,16 +419,16 @@ export function LibraryList({
                         disabled={batchBusy}
                         onClick={() => onBatchUninstall(selectedSelectableIds, provider)}
                       >
-                        卸载 {provider}
+                        {t("libraryList.uninstallProvider", { provider })}
                       </button>
                     ))}
                   </div>
                 </section>
-                <section className="library-batch-block" aria-label="分组">
+                <section className="library-batch-block" aria-label={t("libraryList.groupAria")}>
                   <div className="library-batch-actions">
                     <select
                       className="macos-select"
-                      aria-label="批量设置分组"
+                      aria-label={t("libraryList.setGroupAria")}
                       disabled={batchBusy}
                       defaultValue=""
                       onChange={(event) => {
@@ -438,8 +440,8 @@ export function LibraryList({
                         event.target.value = "";
                       }}
                     >
-                      <option value="">设置分组…</option>
-                      <option value="__none__">未分组</option>
+                      <option value="">{t("libraryList.setGroupPlaceholder")}</option>
+                      <option value="__none__">{t("libraryList.ungrouped")}</option>
                       {[...groups]
                         .sort((a, b) => a.order - b.order)
                         .map((group) => (
@@ -459,7 +461,7 @@ export function LibraryList({
                     />
                     <select
                       className="macos-select"
-                      aria-label="批量追加标签"
+                      aria-label={t("libraryList.addTagAria")}
                       disabled={batchBusy || tags.length === 0}
                       defaultValue=""
                       onChange={(event) => {
@@ -469,7 +471,7 @@ export function LibraryList({
                         event.target.value = "";
                       }}
                     >
-                      <option value="">追加标签…</option>
+                      <option value="">{t("libraryList.addTagPlaceholder")}</option>
                       {tags.map((tag) => (
                         <option key={tag.id} value={tag.id}>
                           {tag.name}
@@ -478,7 +480,7 @@ export function LibraryList({
                     </select>
                     <select
                       className="macos-select"
-                      aria-label="批量移除标签"
+                      aria-label={t("libraryList.removeTagAria")}
                       disabled={batchBusy || tags.length === 0}
                       defaultValue=""
                       onChange={(event) => {
@@ -488,7 +490,7 @@ export function LibraryList({
                         event.target.value = "";
                       }}
                     >
-                      <option value="">移除标签…</option>
+                      <option value="">{t("libraryList.removeTagPlaceholder")}</option>
                       {tags.map((tag) => (
                         <option key={tag.id} value={tag.id}>
                           {tag.name}
@@ -501,7 +503,7 @@ export function LibraryList({
                       disabled={batchBusy}
                       onClick={() => onBatchClearTags(selectedSelectableIds)}
                     >
-                      清空标签
+                      {t("libraryList.clearTags")}
                     </button>
                   </div>
                 </section>
@@ -513,7 +515,7 @@ export function LibraryList({
           <div className="macos-alert-ok mt-2 flex items-start justify-between gap-2 py-1.5 text-[11px]">
             <span>{formatBatchSummary(batchResult)}</span>
             <button type="button" className="macos-link shrink-0" onClick={onClearBatchResult}>
-              关闭
+              {t("common.close")}
             </button>
           </div>
         )}
@@ -521,7 +523,7 @@ export function LibraryList({
           <div className="macos-alert-error mt-2 flex items-start justify-between gap-2 py-1.5 text-[11px]">
             <span>{batchError.message}</span>
             <button type="button" className="macos-link shrink-0" onClick={onClearBatchResult}>
-              关闭
+              {t("common.close")}
             </button>
           </div>
         )}
@@ -529,7 +531,7 @@ export function LibraryList({
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2">
         {loading ? (
-          <div className="px-3 py-8 text-center text-[13px] text-ink-3">正在加载 Skill 库…</div>
+          <div className="px-3 py-8 text-center text-[13px] text-ink-3">{t("libraryList.loading")}</div>
         ) : errorMessage ? (
           <div className="px-3 py-8 text-center text-[13px]" role="alert">
             <strong className="macos-alert-error block">{errorMessage}</strong>
@@ -538,16 +540,16 @@ export function LibraryList({
               className="macos-btn-primary mt-3"
               onClick={onRetry}
             >
-              重试
+              {t("common.retry")}
             </button>
           </div>
         ) : visible.length === 0 ? (
           <div className="px-3 py-8 text-center text-[13px] text-ink-3">
-            <strong className="block text-ink">暂无库 Skill</strong>
+            <strong className="block text-ink">{t("libraryList.emptyTitle")}</strong>
             <span className="block">
               {skills.length === 0
-                ? "请添加包含 SKILL.md 的项目。"
-                : "没有符合当前过滤条件的 Skill。"}
+                ? t("libraryList.emptyHintAdd")
+                : t("libraryList.emptyHintFilter")}
             </span>
             {skills.length === 0 && onGoToProjects && (
               <button
@@ -555,7 +557,7 @@ export function LibraryList({
                 className="macos-btn-primary mt-3"
                 onClick={onGoToProjects}
               >
-                去项目管理
+                {t("libraryList.goProjects")}
               </button>
             )}
           </div>
@@ -572,7 +574,7 @@ export function LibraryList({
                     className={rowCheckboxClass(selectionActive)}
                     checked={selectedSelectableSet.has(skill.id)}
                     tabIndex={selectionActive ? 0 : -1}
-                    aria-label={`选择 ${skill.name}`}
+                    aria-label={t("common.selectItem", { name: skill.name })}
                     onChange={() => onToggleSelect(skill.id)}
                   />
                   <div className="min-w-0 flex-1">
@@ -580,7 +582,7 @@ export function LibraryList({
                       name={skill.name}
                       description={displayDescription(skill.description, 96)}
                       statusLabel={
-                        skill.installedProviders.length > 0 ? "已安装" : "未安装"
+                        skill.installedProviders.length > 0 ? t("libraryList.installed") : t("libraryList.uninstalled")
                       }
                       selected={selectedId === skill.id}
                       onSelect={() => onSelect(skill.id)}
@@ -608,8 +610,8 @@ export function LibraryList({
       </div>
       <NameDialog
         open={createOpen}
-        title="新建库 Skill"
-        confirmLabel="创建"
+        title={t("libraryList.createTitle")}
+        confirmLabel={t("libraryList.createConfirm")}
         busy={createBusy}
         onCancel={() => setCreateOpen(false)}
         onConfirm={(name) => {

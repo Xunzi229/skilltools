@@ -1,8 +1,9 @@
+import { t } from "../i18n";
 import type { CommandError } from "../model/skill";
 
 export function normalizeCommandError(
   error: unknown,
-  fallback = "操作失败，请重试",
+  fallback = t("common.operationFailed"),
 ): CommandError {
   if (typeof error === "string" && error.trim()) {
     return { code: "UNKNOWN", message: error };
@@ -22,20 +23,23 @@ export function normalizeCommandError(
   return { code: "UNKNOWN", message: fallback };
 }
 
-export function errorMessage(error: unknown, fallback = "操作失败，请重试"): string {
+export function errorMessage(
+  error: unknown,
+  fallback = t("common.operationFailed"),
+): string {
   return normalizeCommandError(error, fallback).message;
 }
 
-/** 将常见 updater / 网络错误转成更易读的中文提示。 */
+/** Map common updater / network errors to readable messages. */
 export function formatUpdaterError(error: unknown): string {
-  const raw = errorMessage(error, "检查更新失败");
+  const raw = errorMessage(error, t("errors.checkUpdateFailed"));
   const lower = raw.toLowerCase();
 
   if (
     lower.includes("could not fetch a valid release json") ||
     lower.includes("release not found")
   ) {
-    return "检查失败：无法获取更新清单（latest.json）。请确认能访问 GitHub Releases。";
+    return t("errors.updaterManifest");
   }
   if (
     lower.includes("error sending request") ||
@@ -43,16 +47,16 @@ export function formatUpdaterError(error: unknown): string {
     lower.includes("dns error") ||
     lower.includes("connection")
   ) {
-    return `检查失败：网络请求失败（${raw}）。若在国内网络，可能需代理后重试。`;
+    return t("errors.updaterNetwork", { raw });
   }
   if (lower.includes("platform") && lower.includes("not found")) {
-    return `检查失败：当前平台在更新清单中无对应安装包（${raw}）。`;
+    return t("errors.updaterPlatform", { raw });
   }
   if (lower.includes("permission") || lower.includes("not allowed")) {
-    return `检查失败：缺少 updater 权限（${raw}）。`;
+    return t("errors.updaterPermission", { raw });
   }
-  if (raw === "检查更新失败") {
+  if (raw === t("errors.checkUpdateFailed")) {
     return raw;
   }
-  return `检查失败：${raw}`;
+  return t("errors.updaterGeneric", { raw });
 }

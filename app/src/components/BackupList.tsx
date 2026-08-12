@@ -7,6 +7,7 @@ import {
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SelectionModeButton } from "./SelectionModeButton";
 import { SkillCard } from "./SkillCard";
+import { getLocale, useI18n } from "../i18n";
 
 interface BackupListProps {
   backups: BackupRecord[];
@@ -26,13 +27,15 @@ const providerNames = {
   codex: "Codex",
 };
 
-const reasonNames = {
-  manual: "手动",
-  beforeDelete: "删除前",
-};
+function reasonLabel(t: (k: string) => string, reason: string) {
+  if (reason === "manual") return t("backups.reasonManual");
+  if (reason === "beforeDelete") return t("backups.reasonBeforeDelete");
+  return reason;
+}
 
 function formatTime(createdAt: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
+  const locale = getLocale() === "en" ? "en-US" : "zh-CN";
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(createdAt));
@@ -49,6 +52,7 @@ export function BackupList({
   onDelete,
   onClearActionError,
 }: BackupListProps) {
+  const { t } = useI18n();
   const orderedBackups = useMemo(
     () =>
       [...backups].sort(
@@ -94,13 +98,13 @@ export function BackupList({
     <>
       <section
         className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden border-r border-line-strong bg-panel"
-        aria-label="备份列表"
+        aria-label={t("backups.region")}
       >
         <header className="shrink-0 border-b border-line-strong px-4 pt-5 pb-3">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">备份记录</h2>
-              <p className="mt-1 text-[12px] text-ink-2">{orderedBackups.length} 条记录</p>
+              <h2 className="m-0 text-[17px] font-semibold tracking-tight text-ink">{t("backups.title")}</h2>
+              <p className="mt-1 text-[12px] text-ink-2">{t("backups.count", { count: orderedBackups.length })}</p>
             </div>
             <SelectionModeButton
               selectionActive={selectionActive}
@@ -115,29 +119,29 @@ export function BackupList({
               disabled={pendingAction !== null || batchDeleting}
               onClick={() => setBatchDeleteOpen(true)}
             >
-              删除选中（{checked.size}）
+              {t("backups.deleteSelected", { count: checked.size })}
             </button>
           )}
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2">
           {loading ? (
-            <div className="px-3 py-8 text-center text-[13px] text-ink-3">正在加载备份记录…</div>
+            <div className="px-3 py-8 text-center text-[13px] text-ink-3">{t("backups.loading")}</div>
           ) : error ? (
             <div className="px-3 py-8 text-center text-[13px]" role="alert">
-              <strong className="macos-alert-error block">备份加载失败</strong>
+              <strong className="macos-alert-error block">{t("backups.loadFailed")}</strong>
               <span className="text-ink-3">{error.message}</span>
               <button
                 type="button"
                 className="macos-btn-primary mt-3"
                 onClick={onRetry}
               >
-                重试
+                {t("backups.retry")}
               </button>
             </div>
           ) : orderedBackups.length === 0 ? (
             <div className="px-3 py-8 text-center text-[13px] text-ink-3">
-              <strong className="block text-ink">暂无备份记录</strong>
-              <span>手动备份或删除 Skill 后，记录会显示在这里。</span>
+              <strong className="block text-ink">{t("backups.emptyTitle")}</strong>
+              <span>{t("backups.emptyHint")}</span>
             </div>
           ) : (
             <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
@@ -148,7 +152,7 @@ export function BackupList({
                     className={rowCheckboxClass(selectionActive)}
                     checked={checked.has(backup.id)}
                     tabIndex={selectionActive ? 0 : -1}
-                    aria-label={`选择备份 ${backup.skillName}`}
+                    aria-label={t("backups.selectAria", { name: backup.skillName })}
                     onChange={(event) => {
                       setChecked((current) => {
                         const next = new Set(current);
@@ -161,7 +165,7 @@ export function BackupList({
                   <div className="min-w-0 flex-1">
                     <SkillCard
                       name={backup.skillName}
-                      description={`原因：${reasonNames[backup.reason]} · ${formatTime(backup.createdAt)}`}
+                      description={t("backups.reasonLine", { reason: reasonLabel(t, backup.reason), time: formatTime(backup.createdAt) })}
                       statusLabel={providerNames[backup.provider]}
                       selected={backup.id === selected?.id}
                       onSelect={() => {
@@ -180,7 +184,7 @@ export function BackupList({
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         {!selected ? (
           <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">
-            <strong className="text-ink">选择一条备份查看详情</strong>
+            <strong className="text-ink">{t("backups.pickOne")}</strong>
           </div>
         ) : (
           <>
@@ -194,7 +198,7 @@ export function BackupList({
                     {selected.skillName}
                   </h2>
                   <p className="mt-2 text-[14px] text-ink-2">
-                    创建于 {formatTime(selected.createdAt)}
+                    {t("backups.createdAt", { time: formatTime(selected.createdAt) })}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -204,7 +208,7 @@ export function BackupList({
                     disabled={pendingAction !== null}
                     onClick={() => setDeleteOpen(true)}
                   >
-                    {deleteBusy ? "删除中…" : "删除备份"}
+                    {deleteBusy ? t("backups.deleting") : t("backups.deleteBackup")}
                   </button>
                   <button
                     type="button"
@@ -212,7 +216,7 @@ export function BackupList({
                     disabled={pendingAction !== null}
                     onClick={() => setRestoreOpen(true)}
                   >
-                    {restoreBusy ? "处理中…" : "恢复备份"}
+                    {restoreBusy ? t("backups.restoring") : t("backups.restore")}
                   </button>
                 </div>
               </div>
@@ -229,35 +233,35 @@ export function BackupList({
                     className="macos-btn-ghost macos-btn-sm"
                     onClick={onClearActionError}
                   >
-                    关闭
+                    {t("common.close")}
                   </button>
                 </div>
               )}
               <dl className="m-0 grid gap-3 text-[13px]">
                 <div>
-                  <dt className="text-ink-3">原因</dt>
-                  <dd className="m-0 mt-0.5 text-ink">{reasonNames[selected.reason]}</dd>
+                  <dt className="text-ink-3">{t("backups.reason")}</dt>
+                  <dd className="m-0 mt-0.5 text-ink">{reasonLabel(t, selected.reason)}</dd>
                 </div>
                 <div>
-                  <dt className="text-ink-3">来源</dt>
+                  <dt className="text-ink-3">{t("backups.source")}</dt>
                   <dd className="m-0 mt-0.5 text-ink">
                     {providerNames[selected.provider]}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-ink-3">原路径</dt>
+                  <dt className="text-ink-3">{t("backups.originalPath")}</dt>
                   <dd className="m-0 mt-0.5 font-mono text-[12px] text-ink">
                     {selected.originalPath}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-ink-3">归档路径</dt>
+                  <dt className="text-ink-3">{t("backups.archivePath")}</dt>
                   <dd className="m-0 mt-0.5 font-mono text-[12px] text-ink">
                     {selected.archivePath}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-ink-3">校验值</dt>
+                  <dt className="text-ink-3">{t("backups.checksum")}</dt>
                   <dd className="m-0 mt-0.5 font-mono text-[12px] text-ink">
                     {selected.checksum}
                   </dd>
@@ -270,9 +274,9 @@ export function BackupList({
 
       <ConfirmDialog
         open={restoreOpen && selected !== null}
-        title={`恢复 ${selected?.skillName ?? ""}？`}
-        message="将恢复到原路径；目标已存在时不会覆盖，现有目录会保持不变。"
-        confirmLabel="确认恢复"
+        title={t("backups.restoreTitle", { name: selected?.skillName ?? "" })}
+        message={t("backups.restoreMessage")}
+        confirmLabel={t("backups.restoreConfirm")}
         busy={restoreBusy}
         onCancel={() => setRestoreOpen(false)}
         onConfirm={() => {
@@ -283,9 +287,9 @@ export function BackupList({
       />
       <ConfirmDialog
         open={deleteOpen && selected !== null}
-        title={`删除备份 ${selected?.skillName ?? ""}？`}
-        message="将删除归档文件与索引记录，此操作不可撤销。"
-        confirmLabel="确认删除"
+        title={t("backups.deleteTitle", { name: selected?.skillName ?? "" })}
+        message={t("backups.deleteMessage")}
+        confirmLabel={t("backups.deleteConfirm")}
         tone="danger"
         busy={deleteBusy}
         onCancel={() => setDeleteOpen(false)}
@@ -297,9 +301,9 @@ export function BackupList({
       />
       <ConfirmDialog
         open={batchDeleteOpen && checked.size > 0}
-        title={`删除选中的 ${checked.size} 条备份？`}
-        message="将删除归档文件与索引记录，此操作不可撤销。"
-        confirmLabel="确认删除"
+        title={t("backups.deleteSelectedTitle", { count: checked.size })}
+        message={t("backups.deleteMessage")}
+        confirmLabel={t("backups.deleteConfirm")}
         tone="danger"
         busy={batchDeleting || pendingAction !== null}
         onCancel={() => {

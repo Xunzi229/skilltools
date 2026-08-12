@@ -10,6 +10,7 @@ import type {
   SkillGroup,
   Tag,
 } from "../model/skill";
+import { t } from "../i18n";
 import { normalizeCommandError } from "../utils/errors";
 import { projectNameFromGitUrl } from "../utils/skillDisplay";
 
@@ -50,7 +51,7 @@ export function useLibrary(api: SkillApi) {
       } catch (error: unknown) {
         if (requestId === detailRequest.current) {
           setSelectedLibrarySkill(null);
-          setDetailError(normalizeCommandError(error, "加载库 Skill 详情失败"));
+          setDetailError(normalizeCommandError(error, t("hooks.loadLibraryDetailFailed")));
         }
       } finally {
         if (requestId === detailRequest.current && !options?.silent) {
@@ -159,7 +160,7 @@ export function useLibrary(api: SkillApi) {
       if (projects.some((project) => project.remoteUrl === trimmed)) {
         setActionError({
           code: "PROJECT_ALREADY_EXISTS",
-          message: `项目已存在：${trimmed}`,
+          message: t("hooks.projectExists", { name: trimmed }),
         });
         return;
       }

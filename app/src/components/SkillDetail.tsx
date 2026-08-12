@@ -9,6 +9,7 @@ import { FileTree } from "./FileTree";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { SkillMetaForm } from "./SkillMetaForm";
 import { TranslatePreviewButton } from "./TranslatePreviewButton";
+import { useI18n } from "../i18n";
 
 interface SkillDetailProps {
   api: SkillApi;
@@ -60,6 +61,7 @@ export function SkillDetail({
   onClearActionError,
   onMetadataSaved,
 }: SkillDetailProps) {
+  const { t } = useI18n();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [replaceWithLink, setReplaceWithLink] = useState(true);
@@ -76,7 +78,7 @@ export function SkillDetail({
     return (
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">
-          正在加载 Skill 详情…
+          {t("skillDetail.loading")}
         </div>
       </section>
     );
@@ -86,7 +88,7 @@ export function SkillDetail({
     return (
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         <div className="flex flex-1 flex-col items-center justify-center gap-1 text-[13px]" role="alert">
-          <strong className="macos-alert-error block">详情加载失败</strong>
+          <strong className="macos-alert-error block">{t("skillDetail.loadFailed")}</strong>
           <span className="text-ink-3">{error.message}</span>
         </div>
       </section>
@@ -97,8 +99,8 @@ export function SkillDetail({
     return (
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         <div className="flex flex-1 flex-col items-center justify-center gap-1 text-[13px] text-ink-3">
-          <strong className="text-ink">选择一个 Skill 查看详情</strong>
-          <span>可在左侧筛选，再从列表中选择。</span>
+          <strong className="text-ink">{t("skillDetail.pickTitle")}</strong>
+          <span>{t("skillDetail.pickHint")}</span>
         </div>
       </section>
     );
@@ -126,15 +128,15 @@ export function SkillDetail({
                 </span>
               ))}
               <span className="text-ink-3">
-                {skill.status === "active" ? "已启用" : "已暂停"}
+                {skill.status === "active" ? t("skillDetail.active") : t("skillDetail.paused")}
               </span>
             </div>
             <h2 className="macos-page-title leading-tight">{skill.name}</h2>
             <p className="macos-page-sub max-w-3xl leading-6">
-              {displayDescription(skill.description) || "暂无描述"}
+              {displayDescription(skill.description) || t("common.noDescription")}
             </p>
           </div>
-          <div className="flex shrink-0 gap-1.5" role="group" aria-label="Skill 操作">
+          <div className="flex shrink-0 gap-1.5" role="group" aria-label={t("skillDetail.actionsAria")}>
             <TranslatePreviewButton
               api={api}
               source="provider"
@@ -152,10 +154,10 @@ export function SkillDetail({
             >
               {pendingAction === `pause:${skill.id}` ||
               pendingAction === `resume:${skill.id}`
-                ? "处理中…"
+                ? t("common.processing")
                 : skill.status === "active"
-                  ? "暂停"
-                  : "恢复"}
+                  ? t("skillDetail.pause")
+                  : t("skillDetail.resume")}
             </button>
             <button
               type="button"
@@ -163,7 +165,7 @@ export function SkillDetail({
               disabled={busy}
               onClick={() => void onBackup(skill.id)}
             >
-              {pendingAction === `backup:${skill.id}` ? "处理中…" : "备份"}
+              {pendingAction === `backup:${skill.id}` ? t("common.processing") : t("skillDetail.backup")}
             </button>
             {skill.status === "active" && !skill.resolvedPath && (
               <button
@@ -175,7 +177,7 @@ export function SkillDetail({
                   setMigrateOpen(true);
                 }}
               >
-                迁入库
+                {t("skillDetail.migrate")}
               </button>
             )}
             <button
@@ -184,7 +186,7 @@ export function SkillDetail({
               disabled={busy}
               onClick={() => setDeleteOpen(true)}
             >
-              {deleteBusy ? "处理中…" : "删除"}
+              {deleteBusy ? t("common.processing") : t("skillDetail.delete")}
             </button>
           </div>
         </div>
@@ -196,7 +198,7 @@ export function SkillDetail({
             <button
               type="button"
               className="macos-btn-ghost macos-btn-sm"
-              aria-label="复制路径"
+              aria-label={t("skillDetail.copyPathAria")}
               onClick={() => {
                 void copyText(skill.resolvedPath ?? skill.originalPath).then(() => {
                   setCopied(true);
@@ -204,17 +206,17 @@ export function SkillDetail({
                 });
               }}
             >
-              {copied ? "已复制" : "复制"}
+              {copied ? t("common.copied") : t("common.copy")}
             </button>
           </div>
           {skill.resolvedPath && (
             <p className="m-0 truncate font-mono text-[11px] text-ink-3">
-              链接位置：{skill.currentPath}
+              {t("skillDetail.linkLocation", { path: skill.currentPath })}
             </p>
           )}
           {!skill.resolvedPath && skill.currentPath !== skill.originalPath && (
             <p className="m-0 truncate font-mono text-[11px] text-ink-3">
-              当前位置：{skill.currentPath}
+              {t("skillDetail.currentLocation", { path: skill.currentPath })}
             </p>
           )}
         </div>
@@ -235,16 +237,16 @@ export function SkillDetail({
                 onClearActionError();
               }}
             >
-              关闭
+              {t("common.close")}
             </button>
           </div>
         )}
         {skill.warnings.length > 0 && (
           <aside
             className="macos-alert-warn shrink-0"
-            aria-label="扫描警告"
+            aria-label={t("skillDetail.warningsAria")}
           >
-            <strong>需要注意</strong>
+            <strong>{t("skillDetail.warningsTitle")}</strong>
             <ul className="mt-1 mb-0 list-disc pl-4">
               {skill.warnings.map((warning) => (
                 <li key={warning}>{warning}</li>
@@ -263,7 +265,7 @@ export function SkillDetail({
               className="macos-btn-ghost macos-btn-sm"
               onClick={files.clearOpenError}
             >
-              关闭
+              {t("common.close")}
             </button>
           </div>
         )}
@@ -301,13 +303,13 @@ export function SkillDetail({
       </div>
       <ConfirmDialog
         open={deleteOpen}
-        title={`删除 ${skill.name}？`}
+        title={t("skillDetail.deleteTitle", { name: skill.name })}
         message={
           skill.resolvedPath
-            ? "该 Skill 是符号链接：只会移除链接，不删除原始目录。会写入「删除前」事件备份，之后可按原样恢复链接。"
-            : "此操作会先自动备份再删除 Skill（「删除前」事件），删除后可从备份记录恢复。"
+            ? t("skillDetail.deleteLinkMessage")
+            : t("skillDetail.deleteBodyMessage")
         }
-        confirmLabel={skill.resolvedPath ? "移除链接" : "备份并删除"}
+        confirmLabel={skill.resolvedPath ? t("skillDetail.removeLink") : t("skillDetail.backupAndDelete")}
         tone="danger"
         busy={deleteBusy}
         onCancel={() => setDeleteOpen(false)}
@@ -317,9 +319,9 @@ export function SkillDetail({
       />
       <ConfirmDialog
         open={migrateOpen}
-        title={`迁入 ${skill.name} 到中央库？`}
-        message="将复制该 Skill 目录到库中并登记为本地项目。冲突时不会覆盖。"
-        confirmLabel="开始迁入"
+        title={t("skillDetail.migrateTitle", { name: skill.name })}
+        message={t("skillDetail.migrateMessage")}
+        confirmLabel={t("skillDetail.migrateConfirm")}
         busy={migrateBusy}
         onCancel={() => setMigrateOpen(false)}
         onConfirm={() => {
@@ -343,7 +345,7 @@ export function SkillDetail({
             checked={replaceWithLink}
             onChange={(event) => setReplaceWithLink(event.target.checked)}
           />
-          迁移后替换为库链接安装
+          {t("skillDetail.replaceWithLibraryLink")}
         </label>
       </ConfirmDialog>
     </section>

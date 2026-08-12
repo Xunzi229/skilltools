@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { t, useI18n } from "../i18n";
 import {
-  STANDARD_FRONTMATTER_FIELDS,
+  getStandardFrontmatterFields,
   STANDARD_FRONTMATTER_KEYS,
   customFrontmatterEntries,
   parseFrontmatterFields,
@@ -18,22 +19,20 @@ interface SkillMetaFormProps {
 
 type CustomRow = { id: string; key: string; value: string };
 
-const REQUIRED_FIELDS = STANDARD_FRONTMATTER_FIELDS.filter((field) => field.required);
-const OPTIONAL_FIELDS = STANDARD_FRONTMATTER_FIELDS.filter((field) => !field.required);
-
 function buildDraft(markdown: string, name: string, description: string) {
+  const fields = getStandardFrontmatterFields();
   const parsed = parseFrontmatterFields(markdown);
   const standard: Record<string, string> = {};
-  for (const field of STANDARD_FRONTMATTER_FIELDS) {
+  for (const field of fields) {
     standard[field.key] = parsed[field.key] ?? "";
   }
   if (!standard.name) standard.name = name;
   if (!standard.description) standard.description = description;
 
   // 仅展示已有值的可选标准字段
-  const visibleOptional: string[] = OPTIONAL_FIELDS.filter(
-    (field) => (parsed[field.key] ?? "").trim() !== "",
-  ).map((field) => field.key);
+  const visibleOptional: string[] = fields
+    .filter((field) => !field.required && (parsed[field.key] ?? "").trim() !== "")
+    .map((field) => field.key);
 
   const custom: CustomRow[] = customFrontmatterEntries(parsed).map((entry, index) => ({
     id: `c-${index}-${entry.key}`,
@@ -49,8 +48,9 @@ function collectFields(
   visibleOptional: string[],
   custom: CustomRow[],
 ): Record<string, string> | string {
+  const defs = getStandardFrontmatterFields();
   const fields: Record<string, string> = {};
-  for (const field of REQUIRED_FIELDS) {
+  for (const field of defs.filter((item) => item.required)) {
     fields[field.key] = (standard[field.key] ?? "").trim();
   }
   for (const key of visibleOptional) {
@@ -61,10 +61,10 @@ function collectFields(
   }
 
   if (!fields.name?.trim()) {
-    return "name 不能为空";
+    return t("metaForm.nameRequired");
   }
   if (!fields.description?.trim()) {
-    return "description 不能为空";
+    return t("metaForm.descriptionRequired");
   }
 
   const seen = new Set<string>(Object.keys(fields));
@@ -74,10 +74,10 @@ function collectFields(
       continue;
     }
     if (!key) {
-      return "自定义字段的键名不能为空";
+      return t("metaForm.customKeyRequired");
     }
     if (STANDARD_FRONTMATTER_KEYS.has(key) || seen.has(key)) {
-      return `字段键重复：${key}`;
+      return t("metaForm.duplicateKey", { key });
     }
     seen.add(key);
     fields[key] = row.value;
@@ -107,6 +107,7 @@ function FieldEditor({
   onChange: (value: string) => void;
   onRemove?: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="block text-[12px] text-ink-3">
       <div className="flex items-baseline justify-between gap-2">
@@ -120,10 +121,10 @@ function FieldEditor({
             type="button"
             className="macos-btn-ghost macos-btn-sm"
             disabled={busy}
-            aria-label={`移除字段 ${label}`}
+            aria-label={t("metaForm.removeField", { label })}
             onClick={onRemove}
           >
-            移除
+            {t("metaForm.remove")}
           </button>
         )}
       </div>
@@ -154,7 +155,7 @@ function draftsEqual(
   right: { standard: Record<string, string>; custom: CustomRow[]; visibleOptional: string[] },
 ) {
   if (left.visibleOptional.join("\0") !== right.visibleOptional.join("\0")) return false;
-  for (const field of STANDARD_FRONTMATTER_FIELDS) {
+  for (const field of getStandardFrontmatterFields()) {
     if ((left.standard[field.key] ?? "") !== (right.standard[field.key] ?? "")) {
       return false;
     }
@@ -173,6 +174,10 @@ export function SkillMetaForm({
   busy = false,
   onSave,
 }: SkillMetaFormProps) {
+  const { t } = useI18n();
+  const fields = getStandardFrontmatterFields();
+  const requiredFields = fields.filter((field) => field.required);
+  const optionalFields = fields.filter((field) => !field.required);
   const [standard, setStandard] = useState(
     () => buildDraft(markdown, name, description).standard,
   );
@@ -202,7 +207,7 @@ export function SkillMetaForm({
   const dirty = !draftsEqual(baseline, { standard, custom, visibleOptional });
   const formBusy = busy || saving;
 
-  const availableOptional = OPTIONAL_FIELDS.filter(
+  const availableOptional = optionalFields.filter(
     (field) => !visibleOptional.includes(field.key),
   );
 
@@ -225,7 +230,7 @@ export function SkillMetaForm({
     }
     setSaving(true);
     void onSave(collected)
-      .then(() => setMessage("元数据已保存"))
+      .then(() => setMessage(t("metaForm.saved")))
       .catch((error: unknown) => {
         setMessage(
           typeof error === "object" &&
@@ -233,7 +238,7 @@ export function SkillMetaForm({
             "message" in error &&
             typeof (error as { message: unknown }).message === "string"
             ? (error as { message: string }).message
-            : "保存失败",
+            : t("metaForm.saveFailed"),
         );
       })
       .finally(() => setSaving(false));
@@ -271,10 +276,10 @@ export function SkillMetaForm({
           <span className="text-[12px] text-ink-3" aria-hidden="true">
             {expanded ? "▾" : "▸"}
           </span>
-          <h4 className="m-0 text-[13px] font-semibold text-ink">SKILL.md 元数据</h4>
+          <h4 className="m-0 text-[13px] font-semibold text-ink">{t("metaForm.title")}</h4>
           {!expanded && (
             <span className="truncate text-[11px] text-ink-3">
-              {dirty ? "有未应用的更改" : "点击展开编辑"}
+              {dirty ? t("metaForm.dirty") : t("metaForm.expandHint")}
             </span>
           )}
         </button>
@@ -286,14 +291,14 @@ export function SkillMetaForm({
               disabled={formBusy}
               onClick={resetDraft}
             >
-              取消
+              {t("metaForm.cancel")}
             </button>
             <button
               type="submit"
               className="macos-btn-primary macos-btn-sm"
               disabled={formBusy || !(standard.name ?? "").trim()}
             >
-              {saving ? "应用中…" : "应用"}
+              {saving ? t("metaForm.applying") : t("metaForm.apply")}
             </button>
           </div>
         )}
@@ -302,11 +307,11 @@ export function SkillMetaForm({
       {expanded && (
         <>
       <p className="mt-1 mb-0 text-[11px] text-ink-3">
-        默认仅显示已有字段；可通过下方「添加」扩展可选/自定义字段
+        {t("metaForm.fieldsHint")}
       </p>
 
       <div className="mt-2 grid gap-2">
-        {REQUIRED_FIELDS.map((field) => (
+        {requiredFields.map((field) => (
           <FieldEditor
             key={field.key}
             fieldKey={field.key}
@@ -323,7 +328,7 @@ export function SkillMetaForm({
         ))}
 
         {visibleOptional.map((key) => {
-          const field = OPTIONAL_FIELDS.find((item) => item.key === key);
+          const field = optionalFields.find((item) => item.key === key);
           if (!field) return null;
           return (
             <FieldEditor
@@ -352,8 +357,8 @@ export function SkillMetaForm({
             <li key={row.id} className="flex items-start gap-2">
               <input
                 className="macos-input w-[28%] font-mono text-[12px]"
-                placeholder="键"
-                aria-label="自定义字段键"
+                placeholder={t("metaForm.keyPlaceholder")}
+                aria-label={t("metaForm.keyAria")}
                 value={row.key}
                 disabled={formBusy}
                 onChange={(event) =>
@@ -366,8 +371,8 @@ export function SkillMetaForm({
               />
               <input
                 className="macos-input min-w-0 flex-1 font-mono text-[12px]"
-                placeholder="值"
-                aria-label="自定义字段值"
+                placeholder={t("metaForm.valuePlaceholder")}
+                aria-label={t("metaForm.valueAria")}
                 value={row.value}
                 disabled={formBusy}
                 onChange={(event) =>
@@ -382,12 +387,14 @@ export function SkillMetaForm({
                 type="button"
                 className="macos-btn-ghost macos-btn-sm shrink-0"
                 disabled={formBusy}
-                aria-label={`删除字段 ${row.key || "未命名"}`}
+                aria-label={t("metaForm.deleteFieldAria", {
+                  key: row.key || t("metaForm.unnamed"),
+                })}
                 onClick={() =>
                   setCustom((current) => current.filter((item) => item.id !== row.id))
                 }
               >
-                移除
+                {t("metaForm.remove")}
               </button>
             </li>
           ))}
@@ -396,10 +403,10 @@ export function SkillMetaForm({
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
         <label className="flex min-w-0 flex-1 items-center gap-2 text-[12px] text-ink-3">
-          <span className="shrink-0">添加</span>
+          <span className="shrink-0">{t("metaForm.add")}</span>
           <select
             className="macos-select macos-select-sm min-w-0 flex-1"
-            aria-label="添加元数据字段"
+            aria-label={t("metaForm.addAria")}
             value={addChoice}
             disabled={formBusy}
             onChange={(event) => {
@@ -408,13 +415,13 @@ export function SkillMetaForm({
               addField(value);
             }}
           >
-            <option value="">选择字段…</option>
+            <option value="">{t("metaForm.selectField")}</option>
             {availableOptional.map((field) => (
               <option key={field.key} value={field.key}>
                 {field.label}
               </option>
             ))}
-            <option value="__custom__">自定义键值…</option>
+            <option value="__custom__">{t("metaForm.customKv")}</option>
           </select>
         </label>
         {message && <span className="text-[12px] text-ink-2">{message}</span>}

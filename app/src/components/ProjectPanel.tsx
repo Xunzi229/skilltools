@@ -7,6 +7,7 @@ import type {
 } from "../model/skill";
 import { pickDirectory, pickSaveZip, pickZipFile } from "../utils/dialogs";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { getLocale, useI18n } from "../i18n";
 
 interface ProjectPanelProps {
   projects: Project[];
@@ -33,7 +34,8 @@ function formatDateTime(value: string | null): string {
   if (Number.isNaN(date.getTime())) {
     return "—";
   }
-  return new Intl.DateTimeFormat("zh-CN", {
+  const locale = getLocale() === "en" ? "en-US" : "zh-CN";
+  return new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -59,6 +61,7 @@ export function ProjectPanel({
   onExportZip,
   onClearError,
 }: ProjectPanelProps) {
+  const { t } = useI18n();
   const [localPath, setLocalPath] = useState("");
   const [gitUrl, setGitUrl] = useState("");
   const [pullSummary, setPullSummary] = useState<string | null>(null);
@@ -72,27 +75,25 @@ export function ProjectPanel({
     <>
     <section
       className="col-span-2 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel"
-      aria-label="项目管理"
+      aria-label={t("projects.region")}
     >
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="macos-page-title">项目</h2>
-            <p className="macos-page-sub">
-              添加本地 Skill 目录，或克隆并维护 Git Skill 仓库。
-            </p>
+            <h2 className="macos-page-title">{t("projects.title")}</h2>
+            <p className="macos-page-sub">{t("projects.subtitle")}</p>
           </div>
           <button
             type="button"
             className="macos-btn-ghost"
             disabled={busy}
             onClick={() => {
-              void pickZipFile("导入 Skill ZIP").then((path) => {
+              void pickZipFile(t("projects.importZipTitle")).then((path) => {
                 if (path) void onImportZip(path);
               });
             }}
           >
-            导入 ZIP
+            {t("projects.importZip")}
           </button>
         </div>
       </header>
@@ -104,7 +105,7 @@ export function ProjectPanel({
           >
             <span>{error.message}</span>
             <button type="button" className="macos-btn-ghost" onClick={onClearError}>
-              关闭
+              {t("common.close")}
             </button>
           </div>
         )}
@@ -116,7 +117,7 @@ export function ProjectPanel({
               className="macos-btn-ghost"
               onClick={() => setPullSummary(null)}
             >
-              关闭
+              {t("common.close")}
             </button>
           </div>
         )}
@@ -129,13 +130,13 @@ export function ProjectPanel({
             }}
           >
             <label htmlFor="local-project-path" className="text-[12px] text-ink-2">
-              本地项目路径
+              {t("projects.localPath")}
             </label>
             <div className="flex gap-2">
               <input
                 id="local-project-path"
                 className="macos-input min-w-0 flex-1"
-                aria-label="本地项目路径"
+                aria-label={t("projects.localPathAria")}
                 value={localPath}
                 onChange={(event) => setLocalPath(event.target.value)}
                 placeholder="/Users/me/skills"
@@ -145,19 +146,19 @@ export function ProjectPanel({
                 className="macos-btn-ghost shrink-0"
                 disabled={busy}
                 onClick={() => {
-                  void pickDirectory("选择本地项目目录").then((path) => {
+                  void pickDirectory(t("projects.pickDirectoryTitle")).then((path) => {
                     if (path) setLocalPath(path);
                   });
                 }}
               >
-                选择目录
+                {t("projects.pickDirectory")}
               </button>
               <button
                 type="submit"
                 className="macos-btn-primary shrink-0"
                 disabled={busy || !localPath.trim()}
               >
-                添加本地项目
+                {t("projects.addLocal")}
               </button>
             </div>
           </form>
@@ -172,13 +173,13 @@ export function ProjectPanel({
             }}
           >
             <label htmlFor="git-project-url" className="text-[12px] text-ink-2">
-              Git 仓库 URL
+              {t("projects.gitUrl")}
             </label>
             <div className="flex gap-2">
               <input
                 id="git-project-url"
                 className="macos-input min-w-0 flex-1"
-                aria-label="Git 仓库 URL"
+                aria-label={t("projects.gitUrlAria")}
                 value={gitUrl}
                 onChange={(event) => setGitUrl(event.target.value)}
                 placeholder="https://example.com/team/skills.git"
@@ -188,16 +189,16 @@ export function ProjectPanel({
                 className="macos-btn-primary shrink-0"
                 disabled={!gitUrl.trim()}
               >
-                添加 Git 项目
+                {t("projects.addGit")}
               </button>
             </div>
           </form>
         </div>
         {loading && !hasRows ? (
-          <div className="py-10 text-center text-[13px] text-ink-3">正在加载项目…</div>
+          <div className="py-10 text-center text-[13px] text-ink-3">{t("projects.loading")}</div>
         ) : !hasRows ? (
           <div className="py-10 text-center text-[13px] text-ink-3">
-            <strong className="text-ink">暂无项目</strong>
+            <strong className="text-ink">{t("projects.empty")}</strong>
           </div>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
@@ -214,20 +215,20 @@ export function ProjectPanel({
                   </span>
                   {item.status === "importing" ? (
                     <span className="project-meta mt-1 block text-[11px] text-ink-3">
-                      正在导入中…
+                      {t("projects.importing")}
                     </span>
                   ) : (
                     <span
                       className="project-meta mt-1 block text-[11px] text-[#c41e16]"
                       role="alert"
                     >
-                      导入失败：{item.error?.message ?? "未知错误"}
+                      {t("projects.importFailed", { message: item.error?.message ?? t("common.unknownError") })}
                     </span>
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   {item.status === "importing" ? (
-                    <span className="macos-badge">正在导入中</span>
+                    <span className="macos-badge">{t("projects.importingBadge")}</span>
                   ) : (
                     <>
                       <button
@@ -235,15 +236,15 @@ export function ProjectPanel({
                         className="macos-btn-primary macos-btn-sm"
                         onClick={() => void onRetryGitImport(item.tempId)}
                       >
-                        重试
+                        {t("projects.retry")}
                       </button>
                       <button
                         type="button"
                         className="macos-btn-danger-soft macos-btn-sm"
-                        aria-label={`删除导入失败项 ${item.name}`}
+                        aria-label={t("projects.deleteFailedAria", { name: item.name })}
                         onClick={() => onDismissGitImport(item.tempId)}
                       >
-                        删除
+                        {t("projects.delete")}
                       </button>
                     </>
                   )}
@@ -261,9 +262,9 @@ export function ProjectPanel({
                     {project.remoteUrl ?? project.localPath}
                   </span>
                   <span className="project-meta mt-1 block text-[11px] text-ink-3">
-                    最后更新 {formatDateTime(project.lastUpdatedAt)}
+                    {t("projects.lastUpdated", { time: formatDateTime(project.lastUpdatedAt) })}
                     {" · "}
-                    拉取 {formatDateTime(project.lastSyncedAt)}
+                    {t("projects.lastPulled", { time: formatDateTime(project.lastSyncedAt) })}
                   </span>
                 </div>
                 <div className="flex shrink-0 gap-1.5">
@@ -271,7 +272,7 @@ export function ProjectPanel({
                     <button
                       type="button"
                       className="macos-btn-primary macos-btn-sm"
-                      aria-label={`拉取 ${project.name}`}
+                      aria-label={t("projects.pullAria", { name: project.name })}
                       disabled={busy}
                       onClick={() => {
                         void onPull(project.id).then((result) => {
@@ -282,12 +283,17 @@ export function ProjectPanel({
                               .map((skill) => skill.name)
                               .join("、");
                           setPullSummary(
-                            `拉取完成：新增 ${result.added.length}（${names(result.added) || "无"}），移除 ${result.removed.length}，变更 ${result.changed.length}`,
+                            t("projects.pullResult", {
+                              added: result.added.length,
+                              addedNames: names(result.added) || t("common.none"),
+                              removed: result.removed.length,
+                              changed: result.changed.length,
+                            }),
                           );
                         });
                       }}
                     >
-                      {pendingAction === `project:pull:${project.id}` ? "拉取中…" : "拉取"}
+                      {pendingAction === `project:pull:${project.id}` ? t("projects.pulling") : t("projects.pull")}
                     </button>
                   )}
                   <button
@@ -300,16 +306,16 @@ export function ProjectPanel({
                       });
                     }}
                   >
-                    导出
+                    {t("projects.export")}
                   </button>
                   <button
                     type="button"
                     className="macos-btn-danger-soft macos-btn-sm"
-                    aria-label={`移除 ${project.name}`}
+                    aria-label={t("projects.removeAria", { name: project.name })}
                     disabled={busy}
                     onClick={() => setRemoveTarget(project)}
                   >
-                    移除
+                    {t("projects.remove")}
                   </button>
                 </div>
               </li>
@@ -320,9 +326,9 @@ export function ProjectPanel({
     </section>
     <ConfirmDialog
       open={removeTarget !== null}
-      title={`移除项目「${removeTarget?.name ?? ""}」？`}
-      message="仅从 Skill Manager 移除引用，不会删除磁盘上的项目目录。"
-      confirmLabel="确认移除"
+      title={t("projects.removeTitle", { name: removeTarget?.name ?? "" })}
+      message={t("projects.removeMessage")}
+      confirmLabel={t("projects.removeConfirm")}
       tone="danger"
       busy={removeBusy}
       onCancel={() => setRemoveTarget(null)}

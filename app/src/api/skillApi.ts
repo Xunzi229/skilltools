@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 import type {
   AppPathsInfo,
   AppSettings,
@@ -165,10 +166,10 @@ export interface SkillApi {
   ): Promise<BatchResult>;
 }
 
-const unknownError: CommandError = {
+const unknownError = (): CommandError => ({
   code: "UNKNOWN",
-  message: "操作失败，请重试",
-};
+  message: t("api.operationFailed"),
+});
 
 function isCommandError(error: unknown): error is CommandError {
   if (typeof error !== "object" || error === null) {
@@ -186,7 +187,7 @@ async function call<T>(
   try {
     return await invoke<T>(command, args);
   } catch (error) {
-    throw isCommandError(error) ? error : unknownError;
+    throw isCommandError(error) ? error : unknownError();
   }
 }
 

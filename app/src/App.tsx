@@ -15,6 +15,7 @@ import { useInstallations } from "./hooks/useInstallations";
 import { useLocalStorageBool } from "./hooks/useLocalStorageBool";
 import { useSkills } from "./hooks/useSkills";
 import { useLibrary } from "./hooks/useLibrary";
+import { I18nProvider, useI18n } from "./i18n";
 import {
   skillIdForProviderFilter,
   skillMemberIds,
@@ -23,8 +24,8 @@ import {
 } from "./model/skill";
 import {
   EMPTY_LIBRARY_QUERY,
-  TEMPLATE_GROUPS,
-  TEMPLATE_TAGS,
+  getTemplateGroups,
+  getTemplateTags,
   buildPathTaxonomyIndex,
   isLibraryQueryActive,
   joinSkillTaxonomy,
@@ -45,20 +46,28 @@ interface AppProps {
   api?: SkillApi;
 }
 
-const filterTitles: Record<string, string> = {
-  library: "Skill 库",
-  all: "全部 Skill",
-  cursor: "Cursor",
-  claude: "Claude",
-  codex: "Codex",
-  paused: "已暂停",
-  installations: "安装",
-  projects: "项目",
-  backups: "备份记录",
-  settings: "设置",
-};
+function App(props: AppProps) {
+  return (
+    <I18nProvider>
+      <AppShell {...props} />
+    </I18nProvider>
+  );
+}
 
-function App({ api = tauriSkillApi }: AppProps) {
+function AppShell({ api = tauriSkillApi }: AppProps) {
+  const { t } = useI18n();
+  const filterTitles: Record<string, string> = {
+    library: t("nav.library"),
+    all: t("nav.allSkills"),
+    cursor: "Cursor",
+    claude: "Claude",
+    codex: "Codex",
+    paused: t("nav.paused"),
+    installations: t("nav.installations"),
+    projects: t("nav.projects"),
+    backups: t("nav.backups"),
+    settings: t("nav.settings"),
+  };
   const [filter, setFilter] = useState<SkillFilter>("library");
   const [libraryQuery, setLibraryQuery] =
     useState<LibraryTaxonomyQuery>(EMPTY_LIBRARY_QUERY);
@@ -392,12 +401,12 @@ function App({ api = tauriSkillApi }: AppProps) {
           const existingTagNames = new Set(
             library.tags.map((t) => t.name.toLocaleLowerCase()),
           );
-          for (const name of TEMPLATE_GROUPS) {
+          for (const name of getTemplateGroups()) {
             if (!existingGroupNames.has(name.toLocaleLowerCase())) {
               await library.createGroup(name);
             }
           }
-          for (const name of TEMPLATE_TAGS) {
+          for (const name of getTemplateTags()) {
             if (!existingTagNames.has(name.toLocaleLowerCase())) {
               await library.createTag(name);
             }
@@ -532,14 +541,14 @@ function App({ api = tauriSkillApi }: AppProps) {
                 const name = item.newGroupName?.trim();
                 if (name && !groupNameToId.has(name)) {
                   const created = await library.createGroup(name);
-                  if (!created) throw new Error(`创建分组「${name}」失败`);
+                  if (!created) throw new Error(t("app.createGroupFailed", { name }));
                   groupNameToId.set(created.name, created.id);
                 }
                 for (const tagName of item.newTagNames) {
                   const trimmed = tagName.trim();
                   if (trimmed && !tagNameToId.has(trimmed)) {
                     const created = await library.createTag(trimmed);
-                    if (!created) throw new Error(`创建标签「${trimmed}」失败`);
+                    if (!created) throw new Error(t("app.createTagFailed", { name: trimmed }));
                     tagNameToId.set(created.name, created.id);
                   }
                 }
@@ -554,7 +563,7 @@ function App({ api = tauriSkillApi }: AppProps) {
               });
               const groupResult = await batchApplySkillGroups(assignments);
               if (!groupResult || groupResult.failed > 0) {
-                throw new Error("批量设置分组失败，已停止应用标签");
+                throw new Error(t("app.batchSetGroupFailed"));
               }
               for (const item of items) {
                 const tagIds = [...new Set([
@@ -565,7 +574,7 @@ function App({ api = tauriSkillApi }: AppProps) {
                 ])];
                 const tagResult = await batchSetSkillTags([item.skillId], tagIds);
                 if (!tagResult || tagResult.failed > 0) {
-                  throw new Error(`设置「${item.skillId}」的最终标签失败`);
+                  throw new Error(t("app.setTagsFailed", { skillId: item.skillId }));
                 }
               }
               await library.refresh({ silent: true });

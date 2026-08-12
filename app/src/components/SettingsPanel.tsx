@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useI18n } from "../i18n";
 import type { SkillApi } from "../api/skillApi";
 import type {
   AppPathsInfo,
@@ -51,6 +52,7 @@ export function SettingsPanel({
   onSettingsSaved,
   onBackupsChanged,
 }: SettingsPanelProps) {
+  const { locale, setLocale, t } = useI18n();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [paths, setPaths] = useState<AppPathsInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -87,7 +89,7 @@ export function SettingsPanel({
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setError(asCommandError(err, "加载设置失败"));
+          setError(asCommandError(err, t("settings.loadFailed")));
         }
       })
       .finally(() => {
@@ -108,10 +110,10 @@ export function SettingsPanel({
       setPaths(await api.getAppPaths());
       document.documentElement.dataset.theme = saved.theme;
       applyPreviewTypography(saved);
-      setMessage("设置已保存");
+      setMessage(t("settings.saved"));
       onSettingsSaved();
     } catch (err: unknown) {
-      setError(asCommandError(err, "保存设置失败"));
+      setError(asCommandError(err, t("settings.saveFailed")));
     } finally {
       setSaving(false);
     }
@@ -124,7 +126,7 @@ export function SettingsPanel({
 
   const setRoot = async (provider: Provider) => {
     if (!settings) return;
-    const selected = await pickDirectory(`选择 ${providerLabels[provider]} Skill 目录`);
+    const selected = await pickDirectory(t("settings.pickRootTitle", { provider: providerLabels[provider] }));
     if (!selected) return;
     void save({
       ...settings,
@@ -160,10 +162,10 @@ export function SettingsPanel({
     setMessage(null);
     try {
       const deleted = await api.cleanupBackups();
-      setMessage(`已清理 ${deleted} 条备份`);
+      setMessage(t("settings.cleaned", { count: deleted }));
       onBackupsChanged?.();
     } catch (err: unknown) {
-      setError(asCommandError(err, "清理备份失败"));
+      setError(asCommandError(err, t("settings.cleanupFailed")));
     } finally {
       setCleanupBusy(false);
     }
@@ -180,18 +182,18 @@ export function SettingsPanel({
       ]);
       const update = await check();
       if (!update) {
-        setUpdateMessage(`已是最新版本（${APP_VERSION}）`);
+        setUpdateMessage(t("settings.upToDate", { version: APP_VERSION }));
         return;
       }
       const ok = window.confirm(
-        `发现新版本 ${update.version}。\n\n${update.body ?? ""}\n\n立即下载并安装？\n（macOS 未签名时可能受 Gatekeeper 限制）`,
+        t("settings.updateConfirm", { version: update.version, body: update.body ?? "" }),
       );
       if (!ok) {
-        setUpdateMessage(`已发现 ${update.version}，已取消安装`);
+        setUpdateMessage(t("settings.updateCancelled", { version: update.version }));
         return;
       }
       await update.downloadAndInstall();
-      setUpdateMessage("更新已安装，即将重启…");
+      setUpdateMessage(t("settings.updateInstalled"));
       await relaunch();
     } catch (err: unknown) {
       // plugin-updater 的 Error 经 IPC 序列化为纯字符串，不能只认 Error/message
@@ -204,23 +206,45 @@ export function SettingsPanel({
   return (
     <section
       className="col-span-2 flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-panel"
-      aria-label="设置"
+      aria-label={t("settings.region")}
     >
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
-        <h2 className="macos-page-title">设置</h2>
-        <p className="macos-page-sub">
-          主题、预览字体、模型功能服务、路径、备份策略与更新（v{APP_VERSION}）。安装健康见「安装」页。
-        </p>
+        <h2 className="macos-page-title">{t("settings.title")}</h2>
+        <p className="macos-page-sub">{t("settings.subtitle", { version: APP_VERSION })}</p>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {loading ? (
-          <p className="text-[13px] text-ink-3">正在加载设置…</p>
+          <p className="text-[13px] text-ink-3">{t("settings.loading")}</p>
         ) : (
           <>
             {error && <div className="macos-alert-error mb-4">{error.message}</div>}
             {message && <div className="macos-alert-ok mb-4">{message}</div>}
             <section className="macos-card mb-6 p-4">
-              <h3 className="macos-section-title">主题</h3>
+              <h3 className="macos-section-title">{t("settings.language")}</h3>
+              <p className="mt-2 text-[12px] text-ink-3">{t("settings.languageHint")}</p>
+              <div className="macos-seg mt-3">
+                <button
+                  type="button"
+                  className="macos-seg-item px-3.5 text-[13px]"
+                  data-active={locale === "zh" ? "true" : undefined}
+                  aria-pressed={locale === "zh"}
+                  onClick={() => setLocale("zh")}
+                >
+                  {t("settings.langZh")}
+                </button>
+                <button
+                  type="button"
+                  className="macos-seg-item px-3.5 text-[13px]"
+                  data-active={locale === "en" ? "true" : undefined}
+                  aria-pressed={locale === "en"}
+                  onClick={() => setLocale("en")}
+                >
+                  {t("settings.langEn")}
+                </button>
+              </div>
+            </section>
+            <section className="macos-card mb-6 p-4">
+              <h3 className="macos-section-title">{t("settings.theme")}</h3>
               <div className="macos-seg mt-3">
                 {(["light", "dark"] as const).map((theme) => (
                   <button
@@ -232,19 +256,17 @@ export function SettingsPanel({
                     aria-pressed={settings?.theme === theme}
                     onClick={() => setTheme(theme)}
                   >
-                    {theme === "light" ? "浅色" : "深色"}
+                    {theme === "light" ? t("settings.themeLight") : t("settings.themeDark")}
                   </button>
                 ))}
               </div>
             </section>
             <section className="macos-card mb-6 p-4">
-              <h3 className="macos-section-title">预览字体</h3>
-              <p className="mt-2 text-[12px] text-ink-3">
-                用于文件预览与编辑区。字体列表来自本机已安装字体。
-              </p>
+              <h3 className="macos-section-title">{t("settings.previewFont")}</h3>
+              <p className="mt-2 text-[12px] text-ink-3">{t("settings.previewFontHint")}</p>
               <div className="mt-3 flex flex-wrap gap-4">
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
-                  字体类型
+                  {t("settings.fontFamily")}
                   <FontFamilyPicker
                     value={settings?.previewFontFamily || DEFAULT_PREVIEW_FONT_FAMILY}
                     options={fontOptions}
@@ -259,7 +281,7 @@ export function SettingsPanel({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
-                  字号
+                  {t("settings.fontSize")}
                   <select
                     className="macos-select"
                     value={settings?.previewFontSize || DEFAULT_PREVIEW_FONT_SIZE}
@@ -287,14 +309,12 @@ export function SettingsPanel({
                   fontSize: `${settings?.previewFontSize || DEFAULT_PREVIEW_FONT_SIZE}px`,
                 }}
               >
-                预览效果：The quick brown fox 中文预览 0123456789
+                {t("settings.previewSample")}
               </p>
             </section>
             <section className="macos-card mb-6 p-4">
-              <h3 className="macos-section-title">模型功能服务</h3>
-              <p className="mt-2 text-[12px] text-ink-3">
-                OpenAI 兼容接口（chat/completions）。配置完整后启用所有依赖模型的功能（翻译预览、智能分组等）；未配置时这些入口全部隐藏。翻译仅预览不改原文件。
-              </p>
+              <h3 className="macos-section-title">{t("settings.modelService")}</h3>
+              <p className="mt-2 text-[12px] text-ink-3">{t("settings.modelServiceHint")}</p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2 sm:col-span-2">
                   Base URL
@@ -338,7 +358,7 @@ export function SettingsPanel({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
-                  模型
+                  {t("settings.model")}
                   <input
                     type="text"
                     className="macos-input px-2.5 py-1.5"
@@ -358,12 +378,12 @@ export function SettingsPanel({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
-                  目标语言
+                  {t("settings.targetLang")}
                   <input
                     list="translate-lang-options"
                     type="text"
                     className="macos-input px-2.5 py-1.5"
-                    placeholder="中文"
+                    placeholder={t("settings.targetLangPlaceholder")}
                     value={
                       settings?.translate?.targetLang ??
                       DEFAULT_TRANSLATE_SETTINGS.targetLang
@@ -400,25 +420,25 @@ export function SettingsPanel({
                     });
                   }}
                 >
-                  保存模型服务
+                  {t("settings.saveModelService")}
                 </button>
                 <span className="text-[12px] text-ink-3">
                   {settings && isModelServiceConfigured(settings)
-                    ? "已配置：翻译、智能分组等入口可见"
-                    : "未完整配置：依赖模型的功能全部隐藏"}
+                    ? t("settings.modelConfigured")
+                    : t("settings.modelNotConfigured")}
                 </span>
               </div>
             </section>
             <section className="macos-card mb-6 p-4">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="macos-section-title">Skill 根目录</h3>
+                <h3 className="macos-section-title">{t("settings.skillRoots")}</h3>
                 <button
                   type="button"
                   className="macos-btn-ghost"
                   disabled={saving}
                   onClick={resetAllRoots}
                 >
-                  全部重置为默认
+                  {t("settings.resetAllRoots")}
                 </button>
               </div>
               <ul className="mt-3 flex list-none flex-col gap-2 p-0">
@@ -443,7 +463,7 @@ export function SettingsPanel({
                           {providerLabels[provider]}
                           {overridden ? (
                             <span className="ml-2 text-[11px] font-normal text-brand">
-                              已自定义
+                              {t("settings.customized")}
                             </span>
                           ) : null}
                         </strong>
@@ -454,7 +474,7 @@ export function SettingsPanel({
                             disabled={saving}
                             onClick={() => void setRoot(provider)}
                           >
-                            浏览…
+                            {t("settings.browse")}
                           </button>
                           <button
                             type="button"
@@ -462,7 +482,7 @@ export function SettingsPanel({
                             disabled={saving || !overridden}
                             onClick={() => resetRoot(provider)}
                           >
-                            重置
+                            {t("settings.reset")}
                           </button>
                           <button
                             type="button"
@@ -470,7 +490,7 @@ export function SettingsPanel({
                             disabled={!current}
                             onClick={() => current && void api.revealPath(current)}
                           >
-                            打开
+                            {t("settings.open")}
                           </button>
                         </div>
                       </div>
@@ -478,7 +498,9 @@ export function SettingsPanel({
                         {current ?? "—"}
                       </p>
                       {overridden && (
-                        <p className="mt-1 text-[11px] text-ink-3">默认：{defaults}</p>
+                        <p className="mt-1 text-[11px] text-ink-3">
+                          {t("settings.defaultPath", { path: defaults ?? "—" })}
+                        </p>
                       )}
                     </li>
                   );
@@ -486,19 +508,17 @@ export function SettingsPanel({
               </ul>
             </section>
             <section className="macos-card mb-6 p-4">
-              <h3 className="macos-section-title">备份保留</h3>
-              <p className="mt-2 text-[12px] text-ink-3">
-                留空表示不按该维度清理。启动时会静默执行一次。
-              </p>
+              <h3 className="macos-section-title">{t("settings.backupRetention")}</h3>
+              <p className="mt-2 text-[12px] text-ink-3">{t("settings.backupRetentionHint")}</p>
               <div className="mt-3 flex flex-wrap gap-4">
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
-                  保留天数
+                  {t("settings.retainDays")}
                   <input
                     type="number"
                     min={1}
                     className="macos-input w-28 px-2.5 py-1.5"
                     value={settings?.backupRetentionDays ?? ""}
-                    placeholder="永不"
+                    placeholder={t("settings.retainDaysPlaceholder")}
                     disabled={saving}
                     onChange={(event) => {
                       if (!settings) return;
@@ -511,13 +531,13 @@ export function SettingsPanel({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-[12px] text-ink-2">
-                  最大条数
+                  {t("settings.maxCount")}
                   <input
                     type="number"
                     min={1}
                     className="macos-input w-28 px-2.5 py-1.5"
                     value={settings?.backupMaxCount ?? ""}
-                    placeholder="不限"
+                    placeholder={t("settings.maxCountPlaceholder")}
                     disabled={saving}
                     onChange={(event) => {
                       if (!settings) return;
@@ -552,7 +572,7 @@ export function SettingsPanel({
                     });
                   }}
                 >
-                  保存保留策略
+                  {t("settings.saveRetention")}
                 </button>
                 <button
                   type="button"
@@ -560,33 +580,28 @@ export function SettingsPanel({
                   disabled={cleanupBusy}
                   onClick={() => void runCleanup()}
                 >
-                  {cleanupBusy ? "清理中…" : "立即清理"}
+                  {cleanupBusy ? t("settings.cleaning") : t("settings.cleanNow")}
                 </button>
               </div>
             </section>
             <section className="macos-card mb-6 p-4">
-              <h3 className="macos-section-title">应用更新</h3>
-              <p className="mt-2 text-[12px] text-ink-3">
-                从 GitHub Releases 检查更新。Windows 优先可用；macOS 无签名时下载后可能受
-                Gatekeeper 限制。
-              </p>
+              <h3 className="macos-section-title">{t("settings.updates")}</h3>
+              <p className="mt-2 text-[12px] text-ink-3">{t("settings.updatesHint")}</p>
               <button
                 type="button"
                 className="macos-btn-ghost mt-3"
                 disabled={updateBusy}
                 onClick={() => void checkForUpdates()}
               >
-                {updateBusy ? "检查中…" : "检查更新"}
+                {updateBusy ? t("settings.checking") : t("settings.checkUpdate")}
               </button>
               {updateMessage && (
                 <p className="mt-2 text-[12px] text-ink-2">{updateMessage}</p>
               )}
             </section>
             <section className="macos-card p-4">
-              <h3 className="macos-section-title">应用数据</h3>
-              <p className="mt-2 text-[12px] text-ink-3">
-                标识符 com.skilltools.manager；数据目录由系统 appDataDir 决定。
-              </p>
+              <h3 className="macos-section-title">{t("settings.appData")}</h3>
+              <p className="mt-2 text-[12px] text-ink-3">{t("settings.appDataHint")}</p>
               <p className="mt-2 break-all font-mono text-[12px] text-ink-2">
                 {paths?.appDataDir ?? "—"}
               </p>
@@ -596,7 +611,7 @@ export function SettingsPanel({
                 disabled={!paths}
                 onClick={() => paths && void api.revealPath(paths.appDataDir)}
               >
-                在文件管理器中打开
+                {t("settings.openInFileManager")}
               </button>
             </section>
           </>

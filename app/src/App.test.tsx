@@ -1106,10 +1106,10 @@ describe("Skill Manager", () => {
     const list = screen.getByRole("region", { name: "库 Skill 列表" });
 
     expect(within(list).getByText("atom-doc-parse")).toBeInTheDocument();
-    await user.click(within(list).getByRole("button", { name: /收起 auto-code 的子 Skill/ }));
+    await user.click(within(list).getByRole("button", { name: /收起 auto-code/ }));
     expect(within(list).queryByText("atom-doc-parse")).not.toBeInTheDocument();
 
-    await user.click(within(list).getByRole("button", { name: /展开 auto-code 的子 Skill/ }));
+    await user.click(within(list).getByRole("button", { name: /展开 auto-code/ }));
     expect(within(list).getByText("atom-doc-parse")).toBeInTheDocument();
   });
 

@@ -1,3 +1,5 @@
+import { useI18n } from "../i18n";
+
 /** macOS Reminders / Calendar 风格色板 */
 export const APPLE_COLORS = [
   "#FF3B30", // Red
@@ -27,11 +29,13 @@ export function TagColorPicker({
   value,
   onChange,
   disabled,
-  label = "颜色",
+  label,
 }: TagColorPickerProps) {
+  const { t } = useI18n();
+  const resolvedLabel = label ?? t("tagColor.label");
   return (
-    <div className="mt-3" role="group" aria-label={label}>
-      <div className="mb-2 text-[12px] font-medium text-ink-2">{label}</div>
+    <div className="mt-3" role="group" aria-label={resolvedLabel}>
+      <div className="mb-2 text-[12px] font-medium text-ink-2">{resolvedLabel}</div>
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -42,13 +46,13 @@ export function TagColorPicker({
           disabled={disabled}
           onClick={() => onChange(null)}
         >
-          无色
+          {t("tagColor.none")}
         </button>
         {APPLE_COLORS.map((color) => (
           <button
             key={color}
             type="button"
-            aria-label={`颜色 ${color}`}
+            aria-label={t("tagColor.colorAria", { color })}
             className={[
               "size-7 rounded-full border-[2.5px] shadow-sm transition-transform",
               value === color

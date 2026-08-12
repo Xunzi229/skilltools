@@ -18,6 +18,7 @@ import { SkillMetaForm } from "./SkillMetaForm";
 import { TagColorDot } from "./TagColorPicker";
 import { TargetSelector } from "./TargetSelector";
 import { TranslatePreviewButton } from "./TranslatePreviewButton";
+import { useI18n } from "../i18n";
 
 interface LibraryDetailProps {
   api: SkillApi;
@@ -78,6 +79,7 @@ export function LibraryDetail({
   onClearError,
   onMetadataSaved,
 }: LibraryDetailProps) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [nameDialog, setNameDialog] = useState<"group" | "tag" | "rename" | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -91,7 +93,7 @@ export function LibraryDetail({
     return (
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">
-          正在加载库 Skill…
+          {t("libraryDetail.loading")}
         </div>
       </section>
     );
@@ -101,7 +103,7 @@ export function LibraryDetail({
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">
           <strong className={detailError ? "macos-alert-error" : "text-ink"}>
-            {detailError?.message ?? "选择一个库 Skill 查看详情"}
+            {detailError?.message ?? t("libraryDetail.pickOne")}
           </strong>
         </div>
       </section>
@@ -114,22 +116,22 @@ export function LibraryDetail({
   return (
     <section
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel"
-      aria-label="库 Skill 详情"
+      aria-label={t("libraryDetail.region")}
     >
       <header className="shrink-0 border-b border-line-strong px-6 pt-5 pb-4">
         {skill.parentSkillId && (
           <span className="mb-2 inline-block rounded-full bg-hover px-2 py-0.5 text-[11px] font-medium text-ink-2">
-            子 Skill
+            {t("libraryDetail.childSkill")}
           </span>
         )}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="macos-page-title leading-tight">{skill.name}</h2>
             <p className="mt-2 max-w-3xl text-[14px] leading-6 text-ink-2">
-              {displayDescription(skill.description) || "暂无描述"}
+              {displayDescription(skill.description) || t("common.noDescription")}
             </p>
             <p className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[12px] text-ink-3">
-              <span className="shrink-0">来源</span>
+              <span className="shrink-0">{t("libraryDetail.source")}</span>
               {skill.sourceRepo && skill.sourceUrl ? (
                 <button
                   type="button"
@@ -162,7 +164,7 @@ export function LibraryDetail({
               disabled={busy}
               onClick={() => setNameDialog("rename")}
             >
-              重命名
+              {t("libraryDetail.rename")}
             </button>
             <button
               type="button"
@@ -170,7 +172,7 @@ export function LibraryDetail({
               disabled={busy}
               onClick={() => setDeleteOpen(true)}
             >
-              删除
+              {t("libraryDetail.delete")}
             </button>
           </div>
         </div>
@@ -188,12 +190,12 @@ export function LibraryDetail({
               });
             }}
           >
-            导出 ZIP
+            {t("libraryDetail.exportZip")}
           </button>
           <button
             type="button"
             className="macos-btn-ghost macos-btn-sm"
-            aria-label="复制来源路径"
+            aria-label={t("libraryDetail.copyPathAria")}
             onClick={() => {
               void copyText(skill.absolutePath).then(() => {
                 setCopied(true);
@@ -201,7 +203,7 @@ export function LibraryDetail({
               });
             }}
           >
-            {copied ? "已复制" : "复制"}
+            {copied ? t("common.copied") : t("common.copy")}
           </button>
         </div>
       </header>
@@ -218,7 +220,7 @@ export function LibraryDetail({
               className="macos-btn-ghost macos-btn-sm"
               onClick={onClearError}
             >
-              关闭
+              {t("common.close")}
             </button>
           </div>
         )}
@@ -226,26 +228,26 @@ export function LibraryDetail({
         <div className="grid shrink-0 gap-4 md:grid-cols-[minmax(160px,0.7fr)_1fr]">
           <div className="flex flex-col gap-1.5 text-[12px] text-ink-2">
             <div className="flex items-center justify-between gap-2">
-              <span>分组</span>
+              <span>{t("libraryDetail.group")}</span>
               <button
                 type="button"
                 className="macos-link"
                 disabled={busy}
                 onClick={() => setNameDialog("group")}
               >
-                新建分组
+                {t("libraryDetail.newGroup")}
               </button>
             </div>
             <select
               className="macos-select w-full"
-              aria-label="分组"
+              aria-label={t("libraryDetail.groupAria")}
               value={skill.groupId ?? ""}
               disabled={busy}
               onChange={(event) =>
                 void onSetGroup(skill.id, event.target.value || null)
               }
             >
-              <option value="">未分组</option>
+              <option value="">{t("libraryDetail.ungrouped")}</option>
               {[...groups]
                 .sort((left, right) => left.order - right.order)
                 .map((group) => (
@@ -257,21 +259,21 @@ export function LibraryDetail({
           </div>
           <fieldset className="min-w-0 border-0 p-0">
             <legend className="mb-1.5 flex w-full items-center justify-between px-0 text-[12px] text-ink-2">
-              <span>应用内标签</span>
+              <span>{t("libraryDetail.appTags")}</span>
               <button
                 type="button"
                 className="macos-link"
                 disabled={busy}
                 onClick={() => setNameDialog("tag")}
               >
-                新建标签
+                {t("libraryDetail.newTag")}
               </button>
             </legend>
             <p className="mb-1.5 text-[11px] text-ink-3">
-              用于侧栏筛选，不写入 SKILL.md（与文件内 tags 不同）
+              {t("libraryDetail.tagsHint")}
             </p>
             {tags.length === 0 ? (
-              <span className="text-[12px] text-ink-3">暂无标签，可点「新建标签」创建</span>
+              <span className="text-[12px] text-ink-3">{t("libraryDetail.noTags")}</span>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {tags.map((tag) => (
@@ -370,13 +372,13 @@ export function LibraryDetail({
         open={nameDialog !== null}
         title={
           nameDialog === "group"
-            ? "新建分组"
+            ? t("libraryDetail.newGroupTitle")
             : nameDialog === "tag"
-              ? "新建标签"
-              : "重命名 Skill"
+              ? t("libraryDetail.newTagTitle")
+              : t("libraryDetail.renameTitle")
         }
         initialValue={nameDialog === "rename" ? skill.name : ""}
-        confirmLabel={nameDialog === "rename" ? "重命名" : "创建并应用"}
+        confirmLabel={nameDialog === "rename" ? t("common.rename") : t("libraryDetail.createAndApply")}
         showColorPicker={nameDialog === "tag" || nameDialog === "group"}
         initialColor={nameDialog === "tag" || nameDialog === "group" ? "#007AFF" : null}
         busy={busy}
@@ -401,9 +403,9 @@ export function LibraryDetail({
       />
       <ConfirmDialog
         open={deleteOpen}
-        title={`删除 ${skill.name}？`}
-        message="将先卸载所有工具中的安装链接，再删除库目录内的文件。外部引用项目中的 Skill 请到「项目」页移除。"
-        confirmLabel="删除"
+        title={t("libraryDetail.deleteTitle", { name: skill.name })}
+        message={t("libraryDetail.deleteMessage")}
+        confirmLabel={t("common.delete")}
         tone="danger"
         busy={busy}
         onCancel={() => setDeleteOpen(false)}

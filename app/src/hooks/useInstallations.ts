@@ -7,6 +7,7 @@ import type {
   InstallPreset,
   Provider,
 } from "../model/skill";
+import { t } from "../i18n";
 import { normalizeCommandError } from "../utils/errors";
 
 export function useInstallations(api: SkillApi) {
@@ -36,7 +37,7 @@ export function useInstallations(api: SkillApi) {
       }
     } catch (err: unknown) {
       if (requestId === refreshRequestRef.current) {
-        setError(normalizeCommandError(err, "加载安装总览失败"));
+        setError(normalizeCommandError(err, t("hooks.loadInstallationsFailed")));
       }
     } finally {
       if (requestId === refreshRequestRef.current) {
@@ -80,7 +81,7 @@ export function useInstallations(api: SkillApi) {
       await api.uninstallSkill(librarySkillId, provider);
       await refresh({ silent: true });
       return true;
-    }, "卸载失败");
+    }, t("hooks.uninstallFailed"));
 
   const scanHealth = async (): Promise<InstallHealthReport | null> => {
     return runOperation("health:scan", async () => {
@@ -89,7 +90,7 @@ export function useInstallations(api: SkillApi) {
         current ? { ...current, health: report } : current,
       );
       return report;
-    }, "健康扫描失败", true);
+    }, t("hooks.healthScanFailed"), true);
   };
 
   const repair = async (): Promise<InstallHealthReport | null> => {
@@ -97,7 +98,7 @@ export function useInstallations(api: SkillApi) {
       const report = await api.repairInstallations();
       await refresh({ silent: true });
       return report;
-    }, "修复失败", true);
+    }, t("hooks.repairFailed"), true);
   };
 
   const migrateUnmanaged = (skillId: string, replaceWithLink: boolean) =>
@@ -105,7 +106,7 @@ export function useInstallations(api: SkillApi) {
       await api.migrateProviderSkill(skillId, replaceWithLink);
       await refresh({ silent: true });
       return true;
-    }, "迁入库失败");
+    }, t("hooks.migrateFailed"));
 
   const savePreset = async (
     name: string,
@@ -117,21 +118,21 @@ export function useInstallations(api: SkillApi) {
       await api.saveInstallPreset(id, name, skillIds, providers);
       await refresh({ silent: true });
       return true;
-    }, "保存预设失败");
+    }, t("hooks.savePresetFailed"));
 
   const deletePreset = (id: string) =>
     runOperation(`preset:delete:${id}`, async () => {
       await api.deleteInstallPreset(id);
       await refresh({ silent: true });
       return true;
-    }, "删除预设失败");
+    }, t("hooks.deletePresetFailed"));
 
   const applyPreset = (id: string) =>
     runOperation(`preset:apply:${id}`, async () => {
       const result = await api.applyInstallPreset(id);
       await refresh({ silent: true });
       return result;
-    }, "应用预设失败");
+    }, t("hooks.applyPresetFailed"));
 
   return {
     overview,
