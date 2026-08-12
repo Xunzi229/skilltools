@@ -1,5 +1,4 @@
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
@@ -171,7 +170,7 @@ fn resolve_path(path: &Path) -> Result<PathBuf, AppError> {
     let mut existing = absolute.as_path();
     let mut missing: Vec<OsString> = Vec::new();
 
-    let metadata = loop {
+    let _metadata = loop {
         match existing.symlink_metadata() {
             Ok(metadata) => break metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

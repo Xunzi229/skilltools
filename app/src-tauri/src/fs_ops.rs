@@ -256,11 +256,12 @@ fn hex_digest(bytes: &[u8]) -> String {
 
 /// 是否为应只删链接本身的符号链接/junction（不含普通目录/文件）。
 /// Windows：仅白名单 reparse tag（symlink / mount point·junction），排除 OneDrive 等云占位。
+/// 调用方应优先用 [`path_is_symlink_link`]，本函数保留供未来 Windows reparse tag 扩展。
+#[allow(dead_code)]
 pub(crate) fn is_symlink_link(metadata: &fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
         return true;
     }
-    // 无路径时无法读 reparse tag；保守为 false，调用方应优先用 path_is_symlink_link。
     let _ = metadata;
     false
 }
@@ -498,7 +499,7 @@ fn strip_verbatim_prefix(path: &Path) -> String {
 /// 删除目录/文件符号链接（或 Windows junction）本身，绝不跟随到目标内容。
 /// Windows 上目录链接必须用 `remove_dir`；误用 `remove_file` 会报拒绝访问 (os error 5)。
 pub(crate) fn remove_directory_symlink(path: &Path) -> Result<(), AppError> {
-    let metadata = fs::symlink_metadata(path)?;
+    let _metadata = fs::symlink_metadata(path)?;
     if !path_is_symlink_link(path) {
         return Err(AppError::TargetConflict {
             path: path.display().to_string(),

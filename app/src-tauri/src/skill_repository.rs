@@ -542,6 +542,7 @@ where
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(not(test), allow(dead_code))]
 struct Frontmatter {
     name: Option<String>,
     description: Option<String>,
@@ -776,8 +777,6 @@ pub(crate) fn merge_skills_by_canonical_path(skills: Vec<SkillSummary>) -> Vec<S
     });
     merged
 }
-
-pub(crate) use crate::skill_metadata::frontmatter_yaml;
 
 #[cfg(test)]
 mod tests {
@@ -1597,7 +1596,8 @@ mod tests {
 
 #[cfg(test)]
 mod frontmatter_fold_tests {
-    use super::{frontmatter_yaml, read_skill_metadata};
+    use crate::skill_metadata::frontmatter_yaml;
+    use super::read_skill_metadata;
     use std::fs;
     use tempfile::tempdir;
 

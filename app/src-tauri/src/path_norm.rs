@@ -70,6 +70,7 @@ pub(crate) fn paths_eq(left: &Path, right: &Path) -> bool {
 }
 
 /// Windows 卷标识：盘符 `c:` 或 UNC `//server/share`；无法识别则 None。
+#[cfg(windows)]
 pub(crate) fn windows_volume_id(path: &Path) -> Option<String> {
     let key = normalize_path_key(path);
     if let Some(rest) = key.strip_prefix("//") {
@@ -88,6 +89,7 @@ pub(crate) fn windows_volume_id(path: &Path) -> Option<String> {
     None
 }
 
+#[cfg(windows)]
 pub(crate) fn same_windows_volume(left: &Path, right: &Path) -> bool {
     match (windows_volume_id(left), windows_volume_id(right)) {
         (Some(a), Some(b)) => a == b,
