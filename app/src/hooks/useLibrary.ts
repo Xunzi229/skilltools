@@ -24,6 +24,7 @@ export function useLibrary(api: SkillApi) {
     useState<LibrarySkillDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<CommandError | null>(null);
   const [loadError, setLoadError] = useState<CommandError | null>(null);
   const [actionError, setActionError] = useState<CommandError | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -37,8 +38,10 @@ export function useLibrary(api: SkillApi) {
     async (skillId: string, options?: { silent?: boolean }) => {
       const requestId = ++detailRequest.current;
       if (!options?.silent) {
+        setSelectedLibrarySkill(null);
         setDetailLoading(true);
       }
+      setDetailError(null);
       try {
         const detail = await api.getLibrarySkillDetail(skillId);
         if (requestId === detailRequest.current) {
@@ -46,7 +49,8 @@ export function useLibrary(api: SkillApi) {
         }
       } catch (error: unknown) {
         if (requestId === detailRequest.current) {
-          setActionError(normalizeCommandError(error));
+          setSelectedLibrarySkill(null);
+          setDetailError(normalizeCommandError(error, "加载库 Skill 详情失败"));
         }
       } finally {
         if (requestId === detailRequest.current && !options?.silent) {
@@ -109,6 +113,7 @@ export function useLibrary(api: SkillApi) {
   useEffect(() => {
     if (!selectedLibrarySkillId) {
       setSelectedLibrarySkill(null);
+      setDetailError(null);
       return;
     }
     void loadDetail(selectedLibrarySkillId);
@@ -201,6 +206,7 @@ export function useLibrary(api: SkillApi) {
     selectedLibrarySkill,
     loading,
     detailLoading,
+    detailError,
     loadError,
     actionError,
     pendingAction,
@@ -231,26 +237,12 @@ export function useLibrary(api: SkillApi) {
       }),
     removeProject: (id: string) =>
       mutateAndRefresh(`project:remove:${id}`, () => api.removeProject(id)),
-    installSkill: async (id: string, provider: Provider) => {
-      setActionError(null);
-      try {
-        await api.installSkill(id, provider);
-        await refresh({ silent: true });
-      } catch (error) {
-        setActionError(normalizeCommandError(error));
-        throw error;
-      }
-    },
-    uninstallSkill: async (id: string, provider: Provider) => {
-      setActionError(null);
-      try {
-        await api.uninstallSkill(id, provider);
-        await refresh({ silent: true });
-      } catch (error) {
-        setActionError(normalizeCommandError(error));
-        throw error;
-      }
-    },
+    installSkill: (id: string, provider: Provider) =>
+      mutateAndRefresh(`install:${id}:${provider}`, () => api.installSkill(id, provider)),
+    uninstallSkill: (id: string, provider: Provider) =>
+      mutateAndRefresh(`uninstall:${id}:${provider}`, () =>
+        api.uninstallSkill(id, provider),
+      ),
     setSkillTags: (id: string, tagIds: string[]) =>
       mutateAndRefresh(`tags:${id}`, () => api.setSkillTags(id, tagIds)),
     setSkillGroup: (id: string, groupId: string | null) =>

@@ -1,28 +1,52 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
-import type { BatchResult, Provider, SkillGroupAssignment } from "../model/skill";
+import type {
+  BatchResult,
+  CommandError,
+  Provider,
+  SkillGroupAssignment,
+} from "../model/skill";
+import { normalizeCommandError } from "../utils/errors";
 
 export function useBatchActions(api: SkillApi) {
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
+  const [batchError, setBatchError] = useState<CommandError | null>(null);
+  const operationRef = useRef<symbol | null>(null);
 
-  const clearBatchResult = useCallback(() => setBatchResult(null), []);
+  const clearBatchResult = useCallback(() => {
+    setBatchResult(null);
+    setBatchError(null);
+  }, []);
 
-  const run = useCallback(async (action: () => Promise<BatchResult>) => {
+  const run = useCallback(async (
+    action: () => Promise<BatchResult>,
+  ): Promise<BatchResult | null> => {
+    if (operationRef.current) return null;
+    const operation = Symbol("batch-operation");
+    operationRef.current = operation;
     setBatchBusy(true);
     setBatchResult(null);
+    setBatchError(null);
     try {
       const result = await action();
       setBatchResult(result);
       return result;
+    } catch (error: unknown) {
+      setBatchError(normalizeCommandError(error, "批量操作失败"));
+      return null;
     } finally {
-      setBatchBusy(false);
+      if (operationRef.current === operation) {
+        operationRef.current = null;
+        setBatchBusy(false);
+      }
     }
   }, []);
 
   return {
     batchBusy,
     batchResult,
+    batchError,
     clearBatchResult,
     batchPauseSkills: (skillIds: string[]) =>
       run(() => api.batchPauseSkills(skillIds)),

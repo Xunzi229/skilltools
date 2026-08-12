@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  type CommandError,
   skillMatchesSelection,
   skillMemberIds,
   type BatchResult,
@@ -35,6 +36,7 @@ interface SkillListProps {
   hasScannedSkills: boolean;
   batchBusy: boolean;
   batchResult: BatchResult | null;
+  batchError: CommandError | null;
   collapsed?: boolean;
   taxonomyActive?: boolean;
   queryChips?: TaxonomyChip[];
@@ -49,11 +51,11 @@ interface SkillListProps {
   onRemoveQueryChip?: (chip: TaxonomyChip) => void;
   onClearQuery?: () => void;
   onOpenLibrarySkill?: (librarySkillId: string) => void;
-  onBatchPause: () => void;
-  onBatchResume: () => void;
-  onBatchBackup: () => void;
-  onBatchDelete: () => void;
-  onBatchMigrate: (replaceWithLink: boolean) => void;
+  onBatchPause: (ids: string[]) => void;
+  onBatchResume: (ids: string[]) => void;
+  onBatchBackup: (ids: string[]) => void;
+  onBatchDelete: (ids: string[]) => void;
+  onBatchMigrate: (ids: string[], replaceWithLink: boolean) => void;
   onRetry: () => void;
   onClearBatchResult: () => void;
 }
@@ -70,6 +72,7 @@ export function SkillList({
   hasScannedSkills,
   batchBusy,
   batchResult,
+  batchError,
   collapsed = false,
   taxonomyActive = false,
   queryChips = [],
@@ -91,12 +94,35 @@ export function SkillList({
   onRetry,
   onClearBatchResult,
 }: SkillListProps) {
+  const selectableIds = useMemo(
+    () => [...new Set(skills.flatMap((skill) => skillMemberIds(skill)))],
+    [skills],
+  );
+  const selectedSelectableIds = useMemo(
+    () => selectableIds.filter((id) => selectedIds.has(id)),
+    [selectableIds, selectedIds],
+  );
+  const selectedSelectableSet = useMemo(
+    () => new Set(selectedSelectableIds),
+    [selectedSelectableIds],
+  );
+
+  useEffect(() => {
+    if (loading || selectedSelectableIds.length === selectedIds.size) return;
+    onSetSelection(selectedSelectableIds);
+  }, [
+    loading,
+    onSetSelection,
+    selectedIds.size,
+    selectedSelectableIds,
+  ]);
+
   const [deleteTitle, deleteMessage, deleteConfirmLabel] = useMemo(() => {
     let linkCount = 0;
     let bodyCount = 0;
     for (const skill of skills) {
       for (const id of skillMemberIds(skill)) {
-        if (!selectedIds.has(id)) continue;
+        if (!selectedSelectableSet.has(id)) continue;
         if (skill.resolvedPath) linkCount += 1;
         else bodyCount += 1;
       }
@@ -124,18 +150,13 @@ export function SkillList({
       `其中软链 ${linkCount} 个仅移除链接，本体 ${bodyCount} 个先备份再删除；均写入「删除前」事件，单项失败不中断其余项。`,
       "确认删除",
     ] as const;
-  }, [skills, selectedIds]);
+  }, [skills, selectedSelectableSet]);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [replaceWithLink, setReplaceWithLink] = useState(true);
   const { selectionActive, toggleSelectionMode } = useSelectionMode(
     selectedIds.size,
     onClearSelection,
-  );
-
-  const selectableIds = useMemo(
-    () => skills.flatMap((skill) => skillMemberIds(skill)),
-    [skills],
   );
 
   if (collapsed) {
@@ -202,7 +223,7 @@ export function SkillList({
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {skills.map((skill) => {
           const memberIds = skillMemberIds(skill);
-          const checked = memberIds.every((id) => selectedIds.has(id));
+          const checked = memberIds.every((id) => selectedSelectableSet.has(id));
           const taxonomy = resolveTaxonomy?.(skill) ?? null;
           return (
             <li key={skill.id} className="group flex items-center gap-1.5">
@@ -307,7 +328,9 @@ export function SkillList({
         {selectionActive && (
           <div className="mt-3 flex flex-col gap-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-ink-2">已选 {selectedIds.size} 项</span>
+              <span className="text-[11px] text-ink-2">
+                已选 {selectedSelectableIds.length} 项
+              </span>
               <button
                 type="button"
                 className="macos-btn-ghost macos-btn-sm"
@@ -326,7 +349,7 @@ export function SkillList({
               >
                 反选
               </button>
-              {selectedIds.size > 0 ? (
+              {selectedSelectableIds.length > 0 ? (
                 <button
                   type="button"
                   className="macos-btn-ghost macos-btn-sm"
@@ -337,11 +360,11 @@ export function SkillList({
                 </button>
               ) : null}
             </div>
-            {selectedIds.size > 0 ? (
+            {selectedSelectableIds.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
-                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchPause}>暂停</button>
-                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchResume}>恢复</button>
-                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={onBatchBackup}>备份</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => onBatchPause(selectedSelectableIds)}>暂停</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => onBatchResume(selectedSelectableIds)}>恢复</button>
+                <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => onBatchBackup(selectedSelectableIds)}>备份</button>
                 <button type="button" className="macos-btn-ghost macos-btn-sm" disabled={batchBusy} onClick={() => setMigrateOpen(true)}>迁入库</button>
                 <button type="button" className="macos-btn-danger-soft macos-btn-sm" disabled={batchBusy} onClick={() => setDeleteOpen(true)}>删除</button>
               </div>
@@ -356,16 +379,24 @@ export function SkillList({
             </button>
           </div>
         )}
+        {batchError && (
+          <div className="macos-alert-error mt-2 flex items-start justify-between gap-2 py-1.5 text-[11px]">
+            <span>{batchError.message}</span>
+            <button type="button" className="macos-link shrink-0" onClick={onClearBatchResult}>
+              关闭
+            </button>
+          </div>
+        )}
       </header>
       <ConfirmDialog
         open={migrateOpen}
-        title={`迁入 ${selectedIds.size} 个 Skill 到中央库？`}
+        title={`迁入 ${selectedSelectableIds.length} 个 Skill 到中央库？`}
         message="将复制真实目录到库中登记为本地项目。冲突时不会覆盖现有内容。"
         confirmLabel="开始迁入"
         busy={batchBusy}
         onCancel={() => setMigrateOpen(false)}
         onConfirm={() => {
-          onBatchMigrate(replaceWithLink);
+          onBatchMigrate(selectedSelectableIds, replaceWithLink);
           setMigrateOpen(false);
         }}
       >
@@ -387,7 +418,7 @@ export function SkillList({
         busy={batchBusy}
         onCancel={() => setDeleteOpen(false)}
         onConfirm={() => {
-          onBatchDelete();
+          onBatchDelete(selectedSelectableIds);
           setDeleteOpen(false);
         }}
       />
