@@ -16,6 +16,8 @@ use crate::skill_files::read_skill_file_at;
 const MAX_SOURCE_BYTES: usize = 80_000;
 /// Large files are translated in concurrent batches of this size.
 const TRANSLATE_CONCURRENCY: usize = 2;
+/// Each chunk request is retried once after the first failure.
+const TRANSLATE_CHUNK_MAX_ATTEMPTS: usize = 2;
 const HTTP_TIMEOUT_SECS: u64 = 120;
 const ERROR_BODY_SNIPPET_BYTES: usize = 400;
 const TRANSLATE_CACHE_MAX_ENTRIES: usize = 200;
@@ -691,6 +693,31 @@ where
     })
 }
 
+fn translate_chunk_with_retry<F>(
+    settings: &TranslateSettings,
+    prompt: &str,
+    translate_chunk: &F,
+) -> Result<String, AppError>
+where
+    F: Fn(&TranslateSettings, &str) -> Result<String, AppError>,
+{
+    let mut last_error = None;
+    for attempt in 1..=TRANSLATE_CHUNK_MAX_ATTEMPTS {
+        match translate_chunk(settings, prompt) {
+            Ok(text) => return Ok(text),
+            Err(error) => {
+                last_error = Some(error);
+                if attempt < TRANSLATE_CHUNK_MAX_ATTEMPTS {
+                    continue;
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| AppError::Translate {
+        message: "分片翻译失败".into(),
+    }))
+}
+
 fn translate_prompts_in_batches<F>(
     settings: &TranslateSettings,
     prompts: &[String],
@@ -710,7 +737,12 @@ where
             let mut handles = Vec::with_capacity(end - index);
             for (offset, prompt) in prompts[index..end].iter().enumerate() {
                 let absolute = index + offset;
-                handles.push(scope.spawn(move || (absolute, translate_chunk(settings, prompt))));
+                handles.push(scope.spawn(move || {
+                    (
+                        absolute,
+                        translate_chunk_with_retry(settings, prompt, translate_chunk),
+                    )
+                }));
             }
             for handle in handles {
                 match handle.join() {
@@ -1093,6 +1125,69 @@ mod tests {
             .map(|part| format!("{part}/{}", prompts.len()))
             .collect();
         assert_eq!(part_labels, expected);
+    }
+
+    #[test]
+    fn retries_failed_chunk_translation_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let settings = TranslateSettings {
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "sk-x".into(),
+            model: "gpt-4o-mini".into(),
+            target_lang: "中文".into(),
+        };
+        let source = CollectedSource {
+            prompt_body: "hello".into(),
+            source_files: vec!["SKILL.md".into()],
+            truncated: false,
+            content_md5: content_md5_hex("hello"),
+        };
+        let attempts = AtomicUsize::new(0);
+        let preview = translate_with_chunk_fn(&settings, &source, |_settings, prompt| {
+            let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+            assert!(prompt.contains("<!-- file: SKILL.md -->"));
+            if attempt == 1 {
+                return Err(AppError::Translate {
+                    message: "temporary failure".into(),
+                });
+            }
+            Ok("[ok]".into())
+        })
+        .unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(preview.markdown, "[ok]");
+    }
+
+    #[test]
+    fn stops_after_chunk_translation_retry_is_exhausted() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let settings = TranslateSettings {
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "sk-x".into(),
+            model: "gpt-4o-mini".into(),
+            target_lang: "中文".into(),
+        };
+        let source = CollectedSource {
+            prompt_body: "hello".into(),
+            source_files: vec!["SKILL.md".into()],
+            truncated: false,
+            content_md5: content_md5_hex("hello"),
+        };
+        let attempts = AtomicUsize::new(0);
+        let error = translate_with_chunk_fn(&settings, &source, |_settings, _prompt| {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            Err(AppError::Translate {
+                message: "persistent failure".into(),
+            })
+        })
+        .unwrap_err();
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            TRANSLATE_CHUNK_MAX_ATTEMPTS
+        );
+        assert!(error.to_string().contains("persistent failure"));
     }
 
     #[test]
