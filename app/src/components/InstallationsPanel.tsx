@@ -61,6 +61,7 @@ export function InstallationsPanel({
 
   const repairableCount =
     overview?.health.issues.filter((issue) => issue.repairable).length ?? 0;
+  const anyBusy = busyKey !== null || healthBusy;
 
   const toggleProvider = (provider: Provider) => {
     setPresetProviders((current) =>
@@ -93,7 +94,7 @@ export function InstallationsPanel({
             <button
               type="button"
               className="macos-btn-ghost"
-              disabled={healthBusy}
+              disabled={anyBusy}
               onClick={() => void scanHealth()}
             >
               {healthBusy ? "扫描中…" : "扫描"}
@@ -101,10 +102,10 @@ export function InstallationsPanel({
             <button
               type="button"
               className="macos-btn-ghost"
-              disabled={healthBusy || repairableCount === 0}
+              disabled={anyBusy || repairableCount === 0}
               onClick={() =>
-                void repair().then(() => {
-                  onChanged();
+                void repair().then((result) => {
+                  if (result) onChanged();
                 })
               }
             >
@@ -163,7 +164,7 @@ export function InstallationsPanel({
                 !presetName.trim() ||
                 selectedSkillIds.length === 0 ||
                 presetProviders.length === 0 ||
-                busyKey === "preset:save"
+                anyBusy
               }
               title={
                 selectedSkillIds.length === 0
@@ -172,7 +173,9 @@ export function InstallationsPanel({
               }
               onClick={() =>
                 void savePreset(presetName.trim(), selectedSkillIds, presetProviders).then(
-                  () => setPresetName(""),
+                  (result) => {
+                    if (result) setPresetName("");
+                  },
                 )
               }
             >
@@ -204,7 +207,7 @@ export function InstallationsPanel({
                     <button
                       type="button"
                       className="macos-btn-ghost macos-btn-sm"
-                      disabled={busyKey === `preset:apply:${preset.id}`}
+                      disabled={anyBusy}
                       onClick={() =>
                         setConfirm({
                           kind: "apply",
@@ -219,7 +222,7 @@ export function InstallationsPanel({
                     <button
                       type="button"
                       className="macos-btn-danger-soft macos-btn-sm"
-                      disabled={busyKey === `preset:delete:${preset.id}`}
+                      disabled={anyBusy}
                       onClick={() => void deletePreset(preset.id)}
                     >
                       删除
@@ -261,11 +264,11 @@ export function InstallationsPanel({
                         <button
                           type="button"
                           className="macos-btn-ghost macos-btn-sm"
-                          disabled={busyKey === key}
+                          disabled={anyBusy}
                           onClick={() =>
-                            void uninstall(item.librarySkillId, item.provider).then(() =>
-                              onChanged(),
-                            )
+                            void uninstall(item.librarySkillId, item.provider).then((result) => {
+                              if (result) onChanged();
+                            })
                           }
                         >
                           卸载
@@ -302,9 +305,11 @@ export function InstallationsPanel({
                         <button
                           type="button"
                           className="macos-btn-ghost macos-btn-sm"
-                          disabled={busyKey === `migrate:${item.skillId}`}
+                          disabled={anyBusy}
                           onClick={() =>
-                            void migrateUnmanaged(item.skillId, false).then(() => onChanged())
+                            void migrateUnmanaged(item.skillId, false).then((result) => {
+                              if (result) onChanged();
+                            })
                           }
                         >
                           迁入库
@@ -312,7 +317,7 @@ export function InstallationsPanel({
                         <button
                           type="button"
                           className="macos-btn-ghost macos-btn-sm"
-                          disabled={busyKey === `migrate:${item.skillId}`}
+                          disabled={anyBusy}
                           onClick={() =>
                             setConfirm({ kind: "replace", skillId: item.skillId })
                           }
@@ -364,12 +369,13 @@ export function InstallationsPanel({
           : ""
       }
       confirmLabel="应用"
-      busy={confirm?.kind === "apply" && busyKey === `preset:apply:${confirm.id}`}
+      busy={anyBusy}
       onCancel={() => setConfirm(null)}
       onConfirm={() => {
         if (confirm?.kind !== "apply") return;
         const id = confirm.id;
-        void applyPreset(id).then(() => {
+        void applyPreset(id).then((result) => {
+          if (!result) return;
           setConfirm(null);
           onChanged();
         });
@@ -381,14 +387,13 @@ export function InstallationsPanel({
       message="将删除本机真实目录并替换为库链接。冲突的真实目录不会被覆盖。"
       confirmLabel="替换"
       tone="danger"
-      busy={
-        confirm?.kind === "replace" && busyKey === `migrate:${confirm.skillId}`
-      }
+      busy={anyBusy}
       onCancel={() => setConfirm(null)}
       onConfirm={() => {
         if (confirm?.kind !== "replace") return;
         const skillId = confirm.skillId;
-        void migrateUnmanaged(skillId, true).then(() => {
+        void migrateUnmanaged(skillId, true).then((result) => {
+          if (!result) return;
           setConfirm(null);
           onChanged();
         });

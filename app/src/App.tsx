@@ -78,6 +78,7 @@ function App({ api = tauriSkillApi }: AppProps) {
   const {
     batchBusy,
     batchResult,
+    batchError,
     clearBatchResult,
     batchPauseSkills,
     batchResumeSkills,
@@ -362,7 +363,7 @@ function App({ api = tauriSkillApi }: AppProps) {
           void installations.refresh();
         }}
         onCreateGroup={async (name, color) => {
-          await library.createGroup(name, undefined, color);
+          await library.createGroup(name, color);
         }}
         onRenameGroup={async (id, name, color) => {
           await library.updateGroup(id, name, color);
@@ -482,6 +483,7 @@ function App({ api = tauriSkillApi }: AppProps) {
             errorMessage={library.loadError?.message ?? null}
             batchBusy={batchBusy}
             batchResult={batchResult}
+            batchError={batchError}
             collapsed={listCollapsed}
             onToggleCollapse={() => setListCollapsed((value) => !value)}
             onSearchChange={setSearch}
@@ -500,26 +502,23 @@ function App({ api = tauriSkillApi }: AppProps) {
               }
             }}
             onClearQuery={() => setLibraryQuery(EMPTY_LIBRARY_QUERY)}
-            onBatchInstall={(provider: Provider) => {
-              const ids = [...librarySelectedIds];
+            onBatchInstall={(ids, provider: Provider) => {
               if (batchBusy || ids.length === 0) return;
-              void batchInstallSkills(ids, provider).then(() => {
-                syncAfterLibraryChange();
+              void batchInstallSkills(ids, provider).then((result) => {
+                if (result) syncAfterLibraryChange();
               });
             }}
-            onBatchUninstall={(provider: Provider) => {
-              const ids = [...librarySelectedIds];
+            onBatchUninstall={(ids, provider: Provider) => {
               if (batchBusy || ids.length === 0) return;
-              void batchUninstallSkills(ids, provider).then(() => {
-                syncAfterLibraryChange();
+              void batchUninstallSkills(ids, provider).then((result) => {
+                if (result) syncAfterLibraryChange();
               });
             }}
-            onBatchSetGroup={(groupId) => {
-              const ids = [...librarySelectedIds];
+            onBatchSetGroup={(ids, groupId) => {
               if (batchBusy || ids.length === 0) return;
-              void batchSetSkillGroup(ids, groupId).then(() =>
-                void library.refresh({ silent: true }),
-              );
+              void batchSetSkillGroup(ids, groupId).then((result) => {
+                if (result) void library.refresh({ silent: true });
+              });
             }}
             onApplyAiGroups={async (items) => {
               if (batchBusy || items.length === 0) return;
@@ -533,13 +532,15 @@ function App({ api = tauriSkillApi }: AppProps) {
                 const name = item.newGroupName?.trim();
                 if (name && !groupNameToId.has(name)) {
                   const created = await library.createGroup(name);
-                  if (created) groupNameToId.set(created.name, created.id);
+                  if (!created) throw new Error(`创建分组「${name}」失败`);
+                  groupNameToId.set(created.name, created.id);
                 }
                 for (const tagName of item.newTagNames) {
                   const trimmed = tagName.trim();
                   if (trimmed && !tagNameToId.has(trimmed)) {
                     const created = await library.createTag(trimmed);
-                    if (created) tagNameToId.set(created.name, created.id);
+                    if (!created) throw new Error(`创建标签「${trimmed}」失败`);
+                    tagNameToId.set(created.name, created.id);
                   }
                 }
               }
@@ -551,40 +552,41 @@ function App({ api = tauriSkillApi }: AppProps) {
                 }
                 return { skillId: item.skillId, groupId };
               });
-              await batchApplySkillGroups(assignments);
+              const groupResult = await batchApplySkillGroups(assignments);
+              if (!groupResult || groupResult.failed > 0) {
+                throw new Error("批量设置分组失败，已停止应用标签");
+              }
               for (const item of items) {
-                const tagIds = [
+                const tagIds = [...new Set([
                   ...item.tagIds,
                   ...item.newTagNames
                     .map((n) => tagNameToId.get(n.trim()))
                     .filter((id): id is string => Boolean(id)),
-                ];
-                for (const tagId of tagIds) {
-                  await api.batchAddSkillTags([item.skillId], tagId);
+                ])];
+                const tagResult = await batchSetSkillTags([item.skillId], tagIds);
+                if (!tagResult || tagResult.failed > 0) {
+                  throw new Error(`设置「${item.skillId}」的最终标签失败`);
                 }
               }
               await library.refresh({ silent: true });
             }}
-            onBatchAddTag={(tagId) => {
-              const ids = [...librarySelectedIds];
+            onBatchAddTag={(ids, tagId) => {
               if (batchBusy || ids.length === 0) return;
-              void batchAddSkillTags(ids, tagId).then(() =>
-                void library.refresh({ silent: true }),
-              );
+              void batchAddSkillTags(ids, tagId).then((result) => {
+                if (result) void library.refresh({ silent: true });
+              });
             }}
-            onBatchRemoveTag={(tagId) => {
-              const ids = [...librarySelectedIds];
+            onBatchRemoveTag={(ids, tagId) => {
               if (batchBusy || ids.length === 0) return;
-              void batchRemoveSkillTags(ids, tagId).then(() =>
-                void library.refresh({ silent: true }),
-              );
+              void batchRemoveSkillTags(ids, tagId).then((result) => {
+                if (result) void library.refresh({ silent: true });
+              });
             }}
-            onBatchClearTags={() => {
-              const ids = [...librarySelectedIds];
+            onBatchClearTags={(ids) => {
               if (batchBusy || ids.length === 0) return;
-              void batchSetSkillTags(ids, []).then(() =>
-                void library.refresh({ silent: true }),
-              );
+              void batchSetSkillTags(ids, []).then((result) => {
+                if (result) void library.refresh({ silent: true });
+              });
             }}
             onCreateSkill={async (name) => {
               await library.createLibrarySkill(name, "");
@@ -605,6 +607,7 @@ function App({ api = tauriSkillApi }: AppProps) {
             api={api}
             skill={
               library.selectedLibrarySkill &&
+              library.selectedLibrarySkill.id === library.selectedLibrarySkillId &&
               visibleLibrarySkills.some(
                 (skill) => skill.id === library.selectedLibrarySkill?.id,
               )
@@ -614,13 +617,14 @@ function App({ api = tauriSkillApi }: AppProps) {
             tags={library.tags}
             groups={library.groups}
             loading={library.detailLoading}
+            detailError={library.detailError}
             actionError={library.actionError}
             pendingAction={library.pendingAction}
             onSetTags={library.setSkillTags}
             onSetGroup={library.setSkillGroup}
             onCreateTag={(name, color) => library.createTag(name, color ?? null)}
             onCreateGroup={(name, color) =>
-              library.createGroup(name, undefined, color ?? null)
+              library.createGroup(name, color ?? null)
             }
             onInstall={async (id, provider) => {
               await library.installSkill(id, provider);
@@ -662,6 +666,7 @@ function App({ api = tauriSkillApi }: AppProps) {
             hasScannedSkills={skills.length > 0}
             batchBusy={batchBusy}
             batchResult={batchResult}
+            batchError={batchError}
             collapsed={listCollapsed}
             taxonomyActive={taxonomyActive}
             queryChips={queryChips}
@@ -709,38 +714,39 @@ function App({ api = tauriSkillApi }: AppProps) {
               setFilter("library");
               library.selectLibrarySkill(librarySkillId);
             }}
-            onBatchPause={() => {
-              const ids = [...skillSelectedIds];
+            onBatchPause={(ids) => {
               if (batchBusy || ids.length === 0) return;
-              void batchPauseSkills(ids).then(() => void refresh({ silent: true }));
+              void batchPauseSkills(ids).then((result) => {
+                if (result) void refresh({ silent: true });
+              });
             }}
-            onBatchResume={() => {
-              const ids = [...skillSelectedIds];
+            onBatchResume={(ids) => {
               if (batchBusy || ids.length === 0) return;
-              void batchResumeSkills(ids).then(() => void refresh({ silent: true }));
+              void batchResumeSkills(ids).then((result) => {
+                if (result) void refresh({ silent: true });
+              });
             }}
-            onBatchBackup={() => {
-              const ids = [...skillSelectedIds];
+            onBatchBackup={(ids) => {
               if (batchBusy || ids.length === 0) return;
-              void batchBackupSkills(ids).then(() => {
+              void batchBackupSkills(ids).then((result) => {
+                if (!result) return;
                 void refresh({ silent: true });
                 void loadBackups();
               });
             }}
-            onBatchDelete={() => {
-              const ids = [...skillSelectedIds];
+            onBatchDelete={(ids) => {
               if (batchBusy || ids.length === 0) return;
-              void batchDeleteSkills(ids).then(() => {
+              void batchDeleteSkills(ids).then((result) => {
+                if (!result) return;
                 setSkillSelectedIds(new Set());
                 syncAfterLibraryChange();
                 void loadBackups();
               });
             }}
-            onBatchMigrate={(replaceWithLink) => {
-              const ids = [...skillSelectedIds];
+            onBatchMigrate={(ids, replaceWithLink) => {
               if (batchBusy || ids.length === 0) return;
-              void batchMigrateProviderSkills(ids, replaceWithLink).then(() => {
-                syncAfterLibraryChange();
+              void batchMigrateProviderSkills(ids, replaceWithLink).then((result) => {
+                if (result) syncAfterLibraryChange();
               });
             }}
             onRetry={() => void refresh()}

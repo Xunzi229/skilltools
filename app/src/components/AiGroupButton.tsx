@@ -101,12 +101,15 @@ function suggestionsToDrafts(
       const existing = groupsByName.get(item.groupName);
       groupKey = existing ? existing.id : `__new__:${item.groupName}`;
     }
-    const tagIds: string[] = [];
+    const tagIds = [...new Set(skill?.tagIds ?? [])];
     const newTagNames: string[] = [];
     for (const name of item.tagNames ?? []) {
       const existing = tagsByName.get(name);
-      if (existing) tagIds.push(existing.id);
-      else if (!newTagNames.includes(name)) newTagNames.push(name);
+      if (existing) {
+        if (!tagIds.includes(existing.id)) tagIds.push(existing.id);
+      } else if (!newTagNames.includes(name)) {
+        newTagNames.push(name);
+      }
     }
     return {
       skillId: item.skillId,
@@ -372,7 +375,9 @@ export function AiGroupButton({
                             <th className="px-2 py-2 font-medium">Skill</th>
                             <th className="px-2 py-2 font-medium">描述</th>
                             <th className="w-[150px] px-2 py-2 font-medium">分组</th>
-                            <th className="w-[180px] px-2 py-2 font-medium">标签</th>
+                            <th className="w-[180px] px-2 py-2 font-medium">
+                              应用后的最终标签
+                            </th>
                           </tr>
                         </thead>
                         <tbody>

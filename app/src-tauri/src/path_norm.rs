@@ -1,17 +1,23 @@
 use std::path::Path;
 
-/// 跨平台路径比较键：去 Windows verbatim 前缀、统一 `/`、ascii 小写。
+/// 跨平台路径比较键：Windows 路径去 verbatim 前缀、统一 `/` 并 ASCII 小写；
+/// POSIX 路径保留大小写。
 pub(crate) fn normalize_path_key(path: &Path) -> String {
     normalize_path_key_str(&path.to_string_lossy())
 }
 
 pub(crate) fn normalize_path_key_str(raw: &str) -> String {
     let stripped = strip_windows_verbatim(raw);
-    let lowered = stripped.replace('\\', "/").to_ascii_lowercase();
-    let (prefix, rest) = if let Some(rest) = lowered.strip_prefix("//") {
+    let windows_style = is_windows_style_path(raw, &stripped);
+    let normalized = if windows_style {
+        stripped.replace('\\', "/").to_ascii_lowercase()
+    } else {
+        stripped
+    };
+    let (prefix, rest) = if let Some(rest) = normalized.strip_prefix("//") {
         ("//", rest)
     } else {
-        ("", lowered.as_str())
+        ("", normalized.as_str())
     };
     let mut key = String::from(prefix);
     let mut prev_slash = false;
@@ -31,6 +37,18 @@ pub(crate) fn normalize_path_key_str(raw: &str) -> String {
         key.pop();
     }
     key
+}
+
+fn is_windows_style_path(raw: &str, stripped: &str) -> bool {
+    raw.starts_with(r"\\?\")
+        || raw.starts_with("//?/")
+        || raw.starts_with(r"\\")
+        || stripped.starts_with(r"\\")
+        || stripped.starts_with("//")
+        || stripped
+            .as_bytes()
+            .get(0..2)
+            .is_some_and(|prefix| prefix[0].is_ascii_alphabetic() && prefix[1] == b':')
 }
 
 /// `child` 是否位于 `parent` 之下（含相等）。
@@ -78,14 +96,26 @@ pub(crate) fn same_windows_volume(left: &Path, right: &Path) -> bool {
 }
 
 fn strip_windows_verbatim(raw: &str) -> String {
-    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
-        rest.to_owned()
-    } else if let Some(rest) = raw.strip_prefix("//?/UNC/") {
-        format!("//{rest}")
-    } else if let Some(rest) = raw.strip_prefix("//?/") {
-        rest.to_owned()
+    if raw
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(r"\\?\UNC\"))
+    {
+        format!(r"\\{}", &raw[8..])
+    } else if raw
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(r"\\?\"))
+    {
+        raw[4..].to_owned()
+    } else if raw
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("//?/UNC/"))
+    {
+        format!("//{}", &raw[8..])
+    } else if raw
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("//?/"))
+    {
+        raw[4..].to_owned()
     } else {
         raw.to_owned()
     }
@@ -110,6 +140,10 @@ mod tests {
             normalize_path_key_str(r"\\?\UNC\server\share\skills"),
             "//server/share/skills"
         );
+        assert_eq!(
+            normalize_path_key_str(r"\\?\unc\Server\Share\Skills"),
+            "//server/share/skills"
+        );
     }
 
     #[test]
@@ -117,10 +151,7 @@ mod tests {
         let lib = PathBuf::from(r"C:\Users\Demo\library");
         let child = PathBuf::from(r"\\?\C:\Users\Demo\library\projects\abc\skill");
         assert!(path_is_under(&child, &lib));
-        assert!(!path_is_under(
-            &PathBuf::from(r"\\?\D:\other\skill"),
-            &lib
-        ));
+        assert!(!path_is_under(&PathBuf::from(r"\\?\D:\other\skill"), &lib));
     }
 
     #[test]
@@ -132,6 +163,18 @@ mod tests {
         assert_eq!(
             normalize_path_key_str("//server//share///a//"),
             "//server/share/a"
+        );
+    }
+
+    #[test]
+    fn preserves_posix_case_and_only_ascii_folds_windows() {
+        assert_eq!(
+            normalize_path_key_str("/Users/Demo/技能"),
+            "/Users/Demo/技能"
+        );
+        assert_eq!(
+            normalize_path_key_str(r"C:\Users\Demo\ÄSkill"),
+            "c:/users/demo/Äskill"
         );
     }
 }

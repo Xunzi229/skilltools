@@ -307,10 +307,10 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     deleteTag: async () => undefined,
     setSkillTags: unavailable,
     listGroups: async () => groups,
-    createGroup: async (name, order, color = null) => ({
+    createGroup: async (name, color = null) => ({
       id: `group-${name}`,
       name,
-      order,
+      order: groups.reduce((max, group) => Math.max(max, group.order), -1) + 1,
       color,
     }),
     renameGroup: async (id, name) => ({ id, name, order: 0, color: null }),
@@ -1390,5 +1390,191 @@ describe("Skill Manager", () => {
 
     await user.click(screen.getByRole("button", { name: "拉取 team/skills" }));
     expect(await screen.findByText("Git 拉取失败：存在未提交修改")).toBeInTheDocument();
+  });
+
+  it("智能分组默认保留已有标签，取消后提交准确的最终集合", async () => {
+    const configuredSettings = {
+      theme: "light" as const,
+      skillRootOverrides: { cursor: null, claude: null, codex: null },
+      backupRetentionDays: 30,
+      backupMaxCount: 200,
+      previewFontFamily: "Microsoft YaHei",
+      previewFontSize: 14,
+      translate: {
+        baseUrl: "https://example.com/v1",
+        apiKey: "test-key",
+        model: "test-model",
+        targetLang: "中文",
+      },
+    };
+    const taggedSkills = librarySkills.map((skill) =>
+      skill.id === "library-reviewer"
+        ? { ...skill, tagIds: ["tag-backend"] }
+        : skill,
+    );
+    const frontendTag = { id: "tag-frontend", name: "前端", color: null };
+    const batchSetSkillTags = vi.fn(async (skillIds: string[], tagIds: string[]) => ({
+      total: skillIds.length,
+      success: skillIds.length,
+      failed: 0,
+      skipped: 0,
+      items: skillIds.map((id) => ({ id, status: "success" as const })),
+      tagIds,
+    }));
+    const user = userEvent.setup();
+    await renderLibrary(
+      createApi({
+        getSettings: async () => configuredSettings,
+        listLibrarySkills: async () => taggedSkills,
+        listTags: async () => [...tags, frontendTag],
+        suggestSkillGroups: async () => [
+          {
+            skillId: "library-reviewer",
+            groupName: "开发",
+            tagNames: ["后端", "前端", "前端"],
+          },
+        ],
+        batchSetSkillTags,
+      }),
+    );
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+    await user.click(within(list).getByRole("button", { name: "选择" }));
+    await user.click(within(list).getByRole("checkbox", { name: "选择 reviewer" }));
+    await user.click(await within(list).findByRole("button", { name: "智能分组" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "智能分组" });
+    expect(within(dialog).getByText("应用后的最终标签")).toBeInTheDocument();
+    const backend = within(dialog).getByRole("checkbox", { name: "后端" });
+    const frontend = within(dialog).getByRole("checkbox", { name: "前端" });
+    expect(backend).toBeChecked();
+    expect(frontend).toBeChecked();
+    await user.click(backend);
+    await user.click(within(dialog).getByRole("button", { name: "应用" }));
+
+    await waitFor(() =>
+      expect(batchSetSkillTags).toHaveBeenCalledWith(
+        ["library-reviewer"],
+        ["tag-frontend"],
+      ),
+    );
+  });
+
+  it("库批量操作在搜索和状态变化后只提交真正可见的 ID", async () => {
+    const statusSkills = librarySkills.map((skill) =>
+      skill.id === "library-auto-code"
+        ? { ...skill, installedProviders: ["cursor" as const] }
+        : skill,
+    );
+    const batchInstallSkills = vi.fn(createApi().batchInstallSkills);
+    const batchUninstallSkills = vi.fn(createApi().batchUninstallSkills);
+    const user = userEvent.setup();
+    await renderLibrary(
+      createApi({
+        listLibrarySkills: async () => statusSkills,
+        batchInstallSkills,
+        batchUninstallSkills,
+      }),
+    );
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+    await user.click(within(list).getByRole("button", { name: "选择" }));
+    await user.click(within(list).getByRole("checkbox", { name: "选择 reviewer" }));
+    await user.click(within(list).getByRole("checkbox", { name: "选择 ask-matt" }));
+    await user.type(within(list).getByRole("searchbox", { name: "搜索库 Skill" }), "reviewer");
+    await waitFor(() => expect(within(list).getByText("已选 1 项")).toBeInTheDocument());
+    await user.click(within(list).getByRole("button", { name: "安装 cursor" }));
+    await waitFor(() =>
+      expect(batchInstallSkills).toHaveBeenCalledWith(["library-reviewer"], "cursor"),
+    );
+
+    await user.clear(within(list).getByRole("searchbox", { name: "搜索库 Skill" }));
+    await user.click(within(list).getByRole("checkbox", { name: "选择 auto-code" }));
+    await user.click(within(list).getByRole("tab", { name: /已安装/ }));
+    await waitFor(() => expect(within(list).getByText("已选 1 项")).toBeInTheDocument());
+    await user.click(within(list).getByRole("button", { name: "卸载 cursor" }));
+    await waitFor(() =>
+      expect(batchUninstallSkills).toHaveBeenCalledWith(["library-auto-code"], "cursor"),
+    );
+  });
+
+  it("taxonomy 筛选后库批量请求只包含筛选内 ID", async () => {
+    const taxonomySkills = librarySkills.map((skill) =>
+      skill.id === "library-reviewer"
+        ? { ...skill, groupId: "group-dev" }
+        : skill,
+    );
+    const batchAddSkillTags = vi.fn(createApi().batchAddSkillTags);
+    const user = userEvent.setup();
+    await renderLibrary(
+      createApi({
+        listLibrarySkills: async () => taxonomySkills,
+        batchAddSkillTags,
+      }),
+    );
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+    await user.click(within(list).getByRole("button", { name: "选择" }));
+    await user.click(within(list).getByRole("checkbox", { name: "选择 reviewer" }));
+    await user.click(within(list).getByRole("checkbox", { name: "选择 ask-matt" }));
+    const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
+    await user.click(within(navigation).getByRole("button", { name: /^开发/ }));
+    await waitFor(() => expect(within(list).getByText("已选 1 项")).toBeInTheDocument());
+    await user.selectOptions(
+      within(list).getByRole("combobox", { name: "批量追加标签" }),
+      "tag-backend",
+    );
+    await waitFor(() =>
+      expect(batchAddSkillTags).toHaveBeenCalledWith(
+        ["library-reviewer"],
+        "tag-backend",
+      ),
+    );
+  });
+
+  it("本机搜索变化会同步删除文案和请求 ID", async () => {
+    const batchDeleteSkills = vi.fn(createApi().batchDeleteSkills);
+    const user = await renderLoaded(createApi({ batchDeleteSkills }));
+    const list = screen.getByRole("region", { name: "Skill 列表" });
+    await user.click(within(list).getByRole("button", { name: "选择" }));
+    await user.click(within(list).getByRole("checkbox", { name: "选择 brainstorming" }));
+    await user.click(within(list).getByRole("checkbox", { name: "选择 tdd-test" }));
+    await user.type(within(list).getByRole("searchbox", { name: "搜索 Skill" }), "brainstorming");
+    await waitFor(() => expect(within(list).getByText("已选 1 项")).toBeInTheDocument());
+    await user.click(within(list).getByRole("button", { name: "删除" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("删除 1 个 Skill");
+    await user.click(screen.getByRole("button", { name: "备份并删除" }));
+    await waitFor(() =>
+      expect(batchDeleteSkills).toHaveBeenCalledWith(["cursor:brainstorming"]),
+    );
+  });
+
+  it("切换库详情后新请求失败时不会保留旧详情", async () => {
+    const getLibrarySkillDetail = vi.fn(async (id: string) => {
+      if (id === "library-auto-code") {
+        throw new Error("详情加载失败");
+      }
+      const summary = librarySkills.find((skill) => skill.id === id)!;
+      return { ...summary, skillMarkdown: `# ${summary.name}\n`, files: ["SKILL.md"] };
+    });
+    const user = userEvent.setup();
+    await renderLibrary(createApi({ getLibrarySkillDetail }));
+    expect(await screen.findByRole("heading", { name: "reviewer" })).toBeInTheDocument();
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+    await user.click(within(list).getByText("auto-code"));
+
+    expect(await screen.findByText("详情加载失败")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "reviewer" })).not.toBeInTheDocument();
+  });
+
+  it("批量 API 拒绝时在列表展示错误且不会产生未处理拒绝", async () => {
+    const batchInstallSkills = vi.fn(async () => {
+      throw { code: "BATCH_FAILED", message: "批量安装失败" };
+    });
+    const user = userEvent.setup();
+    await renderLibrary(createApi({ batchInstallSkills }));
+    const list = screen.getByRole("region", { name: "库 Skill 列表" });
+    await user.click(within(list).getByRole("button", { name: "选择" }));
+    await user.click(within(list).getByRole("checkbox", { name: "选择 reviewer" }));
+    await user.click(within(list).getByRole("button", { name: "安装 cursor" }));
+
+    expect(await within(list).findByText("批量安装失败")).toBeInTheDocument();
   });
 });

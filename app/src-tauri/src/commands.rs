@@ -5,28 +5,26 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
 use crate::backup_repository::BackupRepository;
+use crate::batch;
 use crate::error::AppError;
 use crate::external_open::{self, ExternalEditor};
+use crate::group_suggest::{self, GroupSuggestion};
 use crate::library_repository::LibraryRepository;
-use crate::batch;
 use crate::model::{
     BackupReason, BackupRecord, BatchResult, FileContent, FileNode, InstallHealthReport,
     InstallOverview, InstallPreset, LibrarySkillDetail, LibrarySkillSummary, MigrateResult,
     Project, ProjectPullResult, Provider, ScanResult, SkillDetail, SkillGroup, SkillInstallation,
     Tag,
 };
-use crate::skill_metadata::{self, FrontmatterValidation};
 use crate::paths::AppPaths;
 use crate::settings::{self, AppPathsInfo, AppSettings};
 use crate::skill_files::{
     list_skill_tree as build_skill_tree, read_skill_file as load_skill_file,
-    write_skill_file as save_skill_file, resolve_skill_file_path,
+    resolve_skill_file_path, write_skill_file as save_skill_file,
 };
+use crate::skill_metadata::{self, FrontmatterValidation};
 use crate::skill_repository::SkillRepository;
-use crate::group_suggest::{self, GroupSuggestion};
-use crate::translate::{
-    self, TranslatePreview, TranslateSkillSource,
-};
+use crate::translate::{self, TranslatePreview, TranslateSkillSource};
 
 pub struct AppState {
     pub skills: Mutex<SkillRepository>,
@@ -270,9 +268,7 @@ pub fn open_skill_file_external(
         .map_err(|_| state_lock_error())?
         .detail(&skill_id)
         .map_err(map_app_error)?;
-    let root = detail
-        .resolved_path
-        .unwrap_or(detail.current_path);
+    let root = detail.resolved_path.unwrap_or(detail.current_path);
     let path = resolve_skill_file_path(&root, &relative_path).map_err(map_app_error)?;
     external_open::open_path_with(&path, &editor_id).map_err(map_app_error)
 }
@@ -355,10 +351,7 @@ pub fn add_local_project(
 }
 
 #[tauri::command]
-pub async fn add_git_project(
-    app: AppHandle,
-    url: String,
-) -> Result<Project, CommandError> {
+pub async fn add_git_project(app: AppHandle, url: String) -> Result<Project, CommandError> {
     // clone + 扫描放到 blocking 线程，避免占住 async runtime
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
@@ -592,14 +585,13 @@ pub fn list_groups(state: State<'_, AppState>) -> Result<Vec<SkillGroup>, Comman
 pub fn create_group(
     state: State<'_, AppState>,
     name: String,
-    order: i32,
     color: Option<String>,
 ) -> Result<SkillGroup, CommandError> {
     state
         .library
         .lock()
         .map_err(|_| state_lock_error())?
-        .create_group(name, order, color)
+        .create_group(name, color)
         .map_err(map_app_error)
 }
 
@@ -756,9 +748,18 @@ pub fn get_app_paths(state: State<'_, AppState>) -> Result<AppPathsInfo, Command
         disabled_dir: paths.disabled_dir.clone(),
         backups_dir: paths.backups_dir.clone(),
         library_dir: paths.library_dir.clone(),
-        cursor_skills: paths.provider_root(Provider::Cursor).map_err(map_app_error)?.to_path_buf(),
-        claude_skills: paths.provider_root(Provider::Claude).map_err(map_app_error)?.to_path_buf(),
-        codex_skills: paths.provider_root(Provider::Codex).map_err(map_app_error)?.to_path_buf(),
+        cursor_skills: paths
+            .provider_root(Provider::Cursor)
+            .map_err(map_app_error)?
+            .to_path_buf(),
+        claude_skills: paths
+            .provider_root(Provider::Claude)
+            .map_err(map_app_error)?
+            .to_path_buf(),
+        codex_skills: paths
+            .provider_root(Provider::Codex)
+            .map_err(map_app_error)?
+            .to_path_buf(),
         default_cursor_skills: AppPaths::default_provider_root(&state.home_dir, Provider::Cursor),
         default_claude_skills: AppPaths::default_provider_root(&state.home_dir, Provider::Claude),
         default_codex_skills: AppPaths::default_provider_root(&state.home_dir, Provider::Codex),
@@ -1009,13 +1010,8 @@ pub fn migrate_provider_skill(
         .lock()
         .map_err(|_| state_lock_error())?
         .detail(&skill_id)
+        .and_then(batch::require_active_for_migration)
         .map_err(map_app_error)?;
-    if detail.status != crate::model::SkillStatus::Active {
-        return Err(CommandError {
-            code: "IO",
-            message: "请先恢复再迁移已暂停的 Skill".into(),
-        });
-    }
     state
         .library
         .lock()
@@ -1158,7 +1154,9 @@ pub fn batch_migrate_provider_skills(
 }
 
 #[tauri::command]
-pub fn list_install_presets(state: State<'_, AppState>) -> Result<Vec<InstallPreset>, CommandError> {
+pub fn list_install_presets(
+    state: State<'_, AppState>,
+) -> Result<Vec<InstallPreset>, CommandError> {
     let paths = current_paths(state.inner())?;
     crate::install_presets::list_presets(&paths.app_data_dir).map_err(map_app_error)
 }
@@ -1177,10 +1175,7 @@ pub fn save_install_preset(
 }
 
 #[tauri::command]
-pub fn delete_install_preset(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), CommandError> {
+pub fn delete_install_preset(state: State<'_, AppState>, id: String) -> Result<(), CommandError> {
     let paths = current_paths(state.inner())?;
     crate::install_presets::delete_preset(&paths.app_data_dir, &id).map_err(map_app_error)
 }
@@ -1191,7 +1186,8 @@ pub fn apply_install_preset(
     id: String,
 ) -> Result<BatchResult, CommandError> {
     let paths = current_paths(state.inner())?;
-    let presets = crate::install_presets::list_presets(&paths.app_data_dir).map_err(map_app_error)?;
+    let presets =
+        crate::install_presets::list_presets(&paths.app_data_dir).map_err(map_app_error)?;
     let preset = presets
         .into_iter()
         .find(|preset| preset.id == id)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
 import type {
   CommandError,
@@ -16,23 +16,30 @@ export function useInstallations(api: SkillApi) {
   const [error, setError] = useState<CommandError | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [healthBusy, setHealthBusy] = useState(false);
+  const operationRef = useRef<symbol | null>(null);
+  const refreshRequestRef = useRef(0);
 
   const refresh = useCallback(async (options?: { silent?: boolean }) => {
+    const requestId = ++refreshRequestRef.current;
     if (!options?.silent) {
       setLoading(true);
     }
-    setError(null);
+    if (requestId === refreshRequestRef.current) setError(null);
     try {
       const [nextOverview, nextPresets] = await Promise.all([
         api.getInstallOverview(),
         api.listInstallPresets(),
       ]);
-      setOverview(nextOverview);
-      setPresets(nextPresets);
+      if (requestId === refreshRequestRef.current) {
+        setOverview(nextOverview);
+        setPresets(nextPresets);
+      }
     } catch (err: unknown) {
-      setError(normalizeCommandError(err, "加载安装总览失败"));
+      if (requestId === refreshRequestRef.current) {
+        setError(normalizeCommandError(err, "加载安装总览失败"));
+      }
     } finally {
-      if (!options?.silent) {
+      if (requestId === refreshRequestRef.current) {
         setLoading(false);
       }
     }
@@ -42,110 +49,89 @@ export function useInstallations(api: SkillApi) {
     void refresh();
   }, [refresh]);
 
-  const uninstall = async (librarySkillId: string, provider: Provider) => {
-    const key = `${librarySkillId}:${provider}`;
-    setBusyKey(key);
+  const runOperation = async <T,>(
+    key: string,
+    action: () => Promise<T>,
+    fallback: string,
+    health = false,
+  ): Promise<T | null> => {
+    if (operationRef.current) return null;
+    const operation = Symbol(key);
+    operationRef.current = operation;
+    if (health) setHealthBusy(true);
+    else setBusyKey(key);
     setError(null);
     try {
-      await api.uninstallSkill(librarySkillId, provider);
-      await refresh({ silent: true });
+      return await action();
     } catch (err: unknown) {
-      setError(normalizeCommandError(err, "卸载失败"));
+      setError(normalizeCommandError(err, fallback));
+      return null;
     } finally {
-      setBusyKey(null);
+      if (operationRef.current === operation) {
+        operationRef.current = null;
+        if (health) setHealthBusy(false);
+        else setBusyKey(null);
+      }
     }
   };
 
+  const uninstall = (librarySkillId: string, provider: Provider) =>
+    runOperation(`${librarySkillId}:${provider}`, async () => {
+      await api.uninstallSkill(librarySkillId, provider);
+      await refresh({ silent: true });
+      return true;
+    }, "卸载失败");
+
   const scanHealth = async (): Promise<InstallHealthReport | null> => {
-    setHealthBusy(true);
-    setError(null);
-    try {
+    return runOperation("health:scan", async () => {
       const report = await api.scanInstallHealth();
       setOverview((current) =>
         current ? { ...current, health: report } : current,
       );
       return report;
-    } catch (err: unknown) {
-      setError(normalizeCommandError(err, "健康扫描失败"));
-      return null;
-    } finally {
-      setHealthBusy(false);
-    }
+    }, "健康扫描失败", true);
   };
 
   const repair = async (): Promise<InstallHealthReport | null> => {
-    setHealthBusy(true);
-    setError(null);
-    try {
+    return runOperation("health:repair", async () => {
       const report = await api.repairInstallations();
       await refresh({ silent: true });
       return report;
-    } catch (err: unknown) {
-      setError(normalizeCommandError(err, "修复失败"));
-      return null;
-    } finally {
-      setHealthBusy(false);
-    }
+    }, "修复失败", true);
   };
 
-  const migrateUnmanaged = async (skillId: string, replaceWithLink: boolean) => {
-    setBusyKey(`migrate:${skillId}`);
-    setError(null);
-    try {
+  const migrateUnmanaged = (skillId: string, replaceWithLink: boolean) =>
+    runOperation(`migrate:${skillId}`, async () => {
       await api.migrateProviderSkill(skillId, replaceWithLink);
       await refresh({ silent: true });
-    } catch (err: unknown) {
-      setError(normalizeCommandError(err, "迁入库失败"));
-    } finally {
-      setBusyKey(null);
-    }
-  };
+      return true;
+    }, "迁入库失败");
 
   const savePreset = async (
     name: string,
     skillIds: string[],
     providers: Provider[],
     id: string | null = null,
-  ) => {
-    setBusyKey("preset:save");
-    setError(null);
-    try {
+  ) =>
+    runOperation("preset:save", async () => {
       await api.saveInstallPreset(id, name, skillIds, providers);
       await refresh({ silent: true });
-    } catch (err: unknown) {
-      setError(normalizeCommandError(err, "保存预设失败"));
-    } finally {
-      setBusyKey(null);
-    }
-  };
+      return true;
+    }, "保存预设失败");
 
-  const deletePreset = async (id: string) => {
-    setBusyKey(`preset:delete:${id}`);
-    setError(null);
-    try {
+  const deletePreset = (id: string) =>
+    runOperation(`preset:delete:${id}`, async () => {
       await api.deleteInstallPreset(id);
       await refresh({ silent: true });
-    } catch (err: unknown) {
-      setError(normalizeCommandError(err, "删除预设失败"));
-    } finally {
-      setBusyKey(null);
-    }
-  };
+      return true;
+    }, "删除预设失败");
 
-  const applyPreset = async (id: string) => {
-    setBusyKey(`preset:apply:${id}`);
-    setError(null);
-    try {
+  const applyPreset = (id: string) =>
+    runOperation(`preset:apply:${id}`, async () => {
       const result = await api.applyInstallPreset(id);
       await refresh({ silent: true });
       return result;
-    } catch (err: unknown) {
-      setError(normalizeCommandError(err, "应用预设失败"));
-      return null;
-    } finally {
-      setBusyKey(null);
-    }
-  };
+    }, "应用预设失败");
 
   return {
     overview,

@@ -44,7 +44,7 @@ export function skillProviders(skill: Pick<SkillSummary, "provider" | "providers
   return [skill.provider];
 }
 
-/** 去重/ join 键：与 Rust `path_norm::normalize_path_key` 对齐（verbatim、`\`→`/`、折叠 `//`、ascii 小写、去尾 `/`） */
+/** 去重/ join 键：Windows 路径 ASCII 小写；POSIX 路径保留大小写。 */
 export function skillCanonicalKey(
   skill: Pick<SkillSummary, "resolvedPath" | "currentPath">,
 ): string {
@@ -53,23 +53,33 @@ export function skillCanonicalKey(
 
 /** 与后端 normalize_path_key_str 同规则，供 taxonomy join / 列表去重共用 */
 export function normalizePathKey(input: string | null | undefined): string {
-  let raw = (input ?? "").trim();
-  if (raw.startsWith("\\\\?\\UNC\\")) {
-    raw = `\\\\${raw.slice("\\\\?\\UNC\\".length)}`;
-  } else if (raw.startsWith("\\\\?\\")) {
+  let raw = input ?? "";
+  const original = raw;
+  if (raw.slice(0, 8).toUpperCase() === "\\\\?\\UNC\\") {
+    raw = `\\\\${raw.slice(8)}`;
+  } else if (raw.slice(0, 4).toUpperCase() === "\\\\?\\") {
     raw = raw.slice("\\\\?\\".length);
-  } else if (raw.startsWith("//?/UNC/")) {
-    raw = `//${raw.slice("//?/UNC/".length)}`;
-  } else if (raw.startsWith("//?/")) {
+  } else if (raw.slice(0, 8).toUpperCase() === "//?/UNC/") {
+    raw = `//${raw.slice(8)}`;
+  } else if (raw.slice(0, 4).toUpperCase() === "//?/") {
     raw = raw.slice("//?/".length);
   }
 
-  const lowered = raw.replace(/\\/g, "/").toLowerCase();
+  const windowsStyle =
+    original.startsWith("\\\\?\\") ||
+    original.startsWith("//?/") ||
+    original.startsWith("\\\\") ||
+    raw.startsWith("\\\\") ||
+    raw.startsWith("//") ||
+    /^[A-Za-z]:/.test(raw);
+  const normalized = windowsStyle
+    ? raw.replace(/\\/g, "/").replace(/[A-Z]/g, (char) => char.toLowerCase())
+    : raw;
   let prefix = "";
-  let rest = lowered;
-  if (lowered.startsWith("//")) {
+  let rest = normalized;
+  if (normalized.startsWith("//")) {
     prefix = "//";
-    rest = lowered.slice(2);
+    rest = normalized.slice(2);
   }
   let key = prefix;
   let prevSlash = false;
@@ -152,6 +162,7 @@ export interface BackupRecord {
   originalPath: string;
   archivePath: string;
   checksum: string;
+  archiveKind?: "directory" | "providerSymlink";
 }
 
 export type ProjectSourceType = "local" | "git";

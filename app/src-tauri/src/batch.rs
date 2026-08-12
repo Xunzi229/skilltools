@@ -1,5 +1,8 @@
+use crate::error::AppError;
 use crate::library_repository::LibraryRepository;
-use crate::model::{BatchItemResult, BatchItemStatus, BatchResult, Provider};
+use crate::model::{
+    BatchItemResult, BatchItemStatus, BatchResult, Provider, SkillDetail, SkillStatus,
+};
 use crate::skill_repository::SkillRepository;
 
 pub fn map_item<T, E: ToString>(id: String, result: Result<T, E>) -> BatchItemResult {
@@ -27,6 +30,15 @@ pub fn skipped(id: String, message: impl Into<String>) -> BatchItemResult {
 
 pub fn collect(items: Vec<BatchItemResult>) -> BatchResult {
     BatchResult::from_items(items)
+}
+
+pub(crate) fn require_active_for_migration(detail: SkillDetail) -> Result<SkillDetail, AppError> {
+    if detail.status != SkillStatus::Active {
+        return Err(AppError::Io {
+            message: "请先恢复再迁移已暂停的 Skill".into(),
+        });
+    }
+    Ok(detail)
 }
 
 pub fn run_ids<E, F>(skill_ids: Vec<String>, mut action: F) -> BatchResult
@@ -183,14 +195,17 @@ pub fn batch_migrate_provider_skills(
     let items = skill_ids
         .into_iter()
         .map(|id| {
-            let result = skills.detail(&id).and_then(|detail| {
-                library.migrate_provider_skill(
-                    &detail.name,
-                    detail.provider,
-                    &detail.current_path,
-                    replace_with_link,
-                )
-            });
+            let result = skills
+                .detail(&id)
+                .and_then(require_active_for_migration)
+                .and_then(|detail| {
+                    library.migrate_provider_skill(
+                        &detail.name,
+                        detail.provider,
+                        &detail.current_path,
+                        replace_with_link,
+                    )
+                });
             map_item(id, result)
         })
         .collect();
@@ -241,5 +256,30 @@ mod tests {
         let set = batch_set_skill_tags(&library, vec!["missing".into()], vec![]);
         assert_eq!(set.total, 1);
         assert_eq!(set.items[0].status, BatchItemStatus::Failed);
+    }
+
+    #[test]
+    fn batch_migration_rejects_paused_skill() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_test(dir.path());
+        let source = paths
+            .provider_root(Provider::Cursor)
+            .unwrap()
+            .join("paused");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("SKILL.md"), "# paused").unwrap();
+        let skills = SkillRepository::new(paths.clone());
+        let id = skills.scan().unwrap()[0].id.clone();
+        skills.pause(&id).unwrap();
+        let library = LibraryRepository::new(paths);
+
+        let result = batch_migrate_provider_skills(&skills, &library, vec![id], false);
+
+        assert_eq!(result.failed, 1);
+        assert!(result.items[0]
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("恢复")));
+        assert!(library.list_library_skills().unwrap().is_empty());
     }
 }

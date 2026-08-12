@@ -25,6 +25,7 @@ interface LibraryDetailProps {
   tags: Tag[];
   groups: SkillGroup[];
   loading: boolean;
+  detailError: CommandError | null;
   actionError: CommandError | null;
   pendingAction: string | null;
   onSetTags: (id: string, tagIds: string[]) => Promise<void>;
@@ -62,6 +63,7 @@ export function LibraryDetail({
   tags,
   groups,
   loading,
+  detailError,
   actionError,
   pendingAction,
   onSetTags,
@@ -98,7 +100,9 @@ export function LibraryDetail({
     return (
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
         <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">
-          <strong className="text-ink">选择一个库 Skill 查看详情</strong>
+          <strong className={detailError ? "macos-alert-error" : "text-ink"}>
+            {detailError?.message ?? "选择一个库 Skill 查看详情"}
+          </strong>
         </div>
       </section>
     );

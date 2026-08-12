@@ -5,6 +5,7 @@ use std::time::Duration;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::error::AppError;
 use crate::json_store::{read_json_value, write_json_value};
@@ -12,9 +13,9 @@ use crate::settings::TranslateSettings;
 use crate::skill_files::read_skill_file_at;
 
 /// Soft cap so a single request does not blow past common model context limits.
-const MAX_SOURCE_CHARS: usize = 80_000;
+const MAX_SOURCE_BYTES: usize = 80_000;
 const HTTP_TIMEOUT_SECS: u64 = 120;
-const ERROR_BODY_SNIPPET_CHARS: usize = 400;
+const ERROR_BODY_SNIPPET_BYTES: usize = 400;
 const TRANSLATE_CACHE_MAX_ENTRIES: usize = 200;
 const TRANSLATE_CACHE_FILE: &str = "translate-cache.json";
 
@@ -143,10 +144,9 @@ pub fn collect_translate_source(
     let header = format!("<!-- file: {relative_path} -->\n");
     let mut truncated = false;
     let mut body = content;
-    if header.len() + body.len() > MAX_SOURCE_CHARS {
-        let keep = MAX_SOURCE_CHARS.saturating_sub(header.len());
-        body.truncate(keep);
-        truncated = true;
+    if header.len() + body.len() > MAX_SOURCE_BYTES {
+        let keep = MAX_SOURCE_BYTES.saturating_sub(header.len());
+        truncated = truncate_utf8_to_max_bytes(&mut body, keep);
     }
 
     Ok(CollectedSource {
@@ -190,10 +190,7 @@ fn md5_hex(data: &[u8]) -> String {
             let temp = d;
             d = c;
             c = b;
-            let sum = a
-                .wrapping_add(f)
-                .wrapping_add(MD5_K[i])
-                .wrapping_add(w[g]);
+            let sum = a.wrapping_add(f).wrapping_add(MD5_K[i]).wrapping_add(w[g]);
             b = b.wrapping_add(sum.rotate_left(MD5_S[i]));
             a = temp;
         }
@@ -219,22 +216,101 @@ const MD5_S: [u32; 64] = [
 ];
 
 const MD5_K: [u32; 64] = [
-    0xd76a_a478, 0xe8c7_b756, 0x2420_70db, 0xc1bd_ceee, 0xf57c_0faf, 0x4787_c62a, 0xa830_4613,
-    0xfd46_9501, 0x6980_98d8, 0x8b44_f7af, 0xffff_5bb1, 0x895c_d7be, 0x6b90_1122, 0xfd98_7193,
-    0xa679_438e, 0x49b4_0821, 0xf61e_2562, 0xc040_b340, 0x265e_5a51, 0xe9b6_c7aa, 0xd62f_105d,
-    0x0244_1453, 0xd8a1_e681, 0xe7d3_fbc8, 0x21e1_cde6, 0xc337_07d6, 0xf4d5_0d87, 0x455a_14ed,
-    0xa9e3_e905, 0xfcef_a3f8, 0x676f_02d9, 0x8d2a_4c8a, 0xfffa_3942, 0x8771_f681, 0x6d9d_6122,
-    0xfde5_380c, 0xa4be_ea44, 0x4bde_cfa9, 0xf6bb_4b60, 0xbebf_bc70, 0x289b_7ec6, 0xeaa1_27fa,
-    0xd4ef_3085, 0x0488_1d05, 0xd9d4_d039, 0xe6db_99e5, 0x1fa2_7cf8, 0xc4ac_5665, 0xf429_2244,
-    0x432a_ff97, 0xab94_23a7, 0xfc93_a039, 0x655b_59c3, 0x8f0c_cc92, 0xffef_f47d, 0x8584_5dd1,
-    0x6fa8_7e4f, 0xfe2c_e6e0, 0xa301_4314, 0x4e08_11a1, 0xf753_7e82, 0xbd3a_f235, 0x2ad7_d2bb,
+    0xd76a_a478,
+    0xe8c7_b756,
+    0x2420_70db,
+    0xc1bd_ceee,
+    0xf57c_0faf,
+    0x4787_c62a,
+    0xa830_4613,
+    0xfd46_9501,
+    0x6980_98d8,
+    0x8b44_f7af,
+    0xffff_5bb1,
+    0x895c_d7be,
+    0x6b90_1122,
+    0xfd98_7193,
+    0xa679_438e,
+    0x49b4_0821,
+    0xf61e_2562,
+    0xc040_b340,
+    0x265e_5a51,
+    0xe9b6_c7aa,
+    0xd62f_105d,
+    0x0244_1453,
+    0xd8a1_e681,
+    0xe7d3_fbc8,
+    0x21e1_cde6,
+    0xc337_07d6,
+    0xf4d5_0d87,
+    0x455a_14ed,
+    0xa9e3_e905,
+    0xfcef_a3f8,
+    0x676f_02d9,
+    0x8d2a_4c8a,
+    0xfffa_3942,
+    0x8771_f681,
+    0x6d9d_6122,
+    0xfde5_380c,
+    0xa4be_ea44,
+    0x4bde_cfa9,
+    0xf6bb_4b60,
+    0xbebf_bc70,
+    0x289b_7ec6,
+    0xeaa1_27fa,
+    0xd4ef_3085,
+    0x0488_1d05,
+    0xd9d4_d039,
+    0xe6db_99e5,
+    0x1fa2_7cf8,
+    0xc4ac_5665,
+    0xf429_2244,
+    0x432a_ff97,
+    0xab94_23a7,
+    0xfc93_a039,
+    0x655b_59c3,
+    0x8f0c_cc92,
+    0xffef_f47d,
+    0x8584_5dd1,
+    0x6fa8_7e4f,
+    0xfe2c_e6e0,
+    0xa301_4314,
+    0x4e08_11a1,
+    0xf753_7e82,
+    0xbd3a_f235,
+    0x2ad7_d2bb,
     0xeb86_d391,
 ];
 
-pub fn translate_cache_key(md5: &str, target_lang: &str, relative_path: &str) -> String {
+pub fn translate_cache_key(
+    md5: &str,
+    target_lang: &str,
+    relative_path: &str,
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+) -> String {
     let lang = target_lang.trim();
     let path = relative_path.trim().replace('\\', "/");
-    format!("{md5}:{lang}:{path}")
+    let base_url = chat_completions_url(base_url);
+    let model = model.trim();
+    let api_key_sha256 = sha256_hex(api_key.trim().as_bytes());
+    let parts = [md5, lang, &path, &base_url, model, &api_key_sha256];
+    let mut material = String::from("translate-cache-v2");
+    for part in parts {
+        material.push(':');
+        material.push_str(&part.len().to_string());
+        material.push(':');
+        material.push_str(part);
+    }
+    format!("v2:{}", sha256_hex(material.as_bytes()))
+}
+
+fn sha256_hex(value: &[u8]) -> String {
+    Sha256::digest(value)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub fn translate_cache_path(app_data_dir: &Path) -> PathBuf {
@@ -297,21 +373,30 @@ where
         .first()
         .map(|s| s.as_str())
         .unwrap_or("");
-    let key = translate_cache_key(&source.content_md5, &target_lang, relative_path);
+    let normalized_path = relative_path.trim().replace('\\', "/");
+    let model = settings.model.trim().to_string();
+    let key = translate_cache_key(
+        &source.content_md5,
+        &target_lang,
+        &normalized_path,
+        &settings.base_url,
+        &model,
+        &settings.api_key,
+    );
 
     if let Ok(store) = load_translate_cache(app_data_dir) {
         if let Some(entry) = store.entries.get(&key) {
-            if entry.md5 == source.content_md5 && entry.target_lang == target_lang {
+            if entry.md5 == source.content_md5
+                && entry.target_lang == target_lang
+                && entry.relative_path == normalized_path
+                && entry.model == model
+            {
                 return Ok(TranslatePreview {
                     markdown: entry.translated.clone(),
                     source_files: source.source_files.clone(),
                     truncated: source.truncated,
                     target_lang,
-                    model: if entry.model.is_empty() {
-                        settings.model.trim().to_string()
-                    } else {
-                        entry.model.clone()
-                    },
+                    model: entry.model.clone(),
                     from_cache: true,
                 });
             }
@@ -326,10 +411,10 @@ where
         key,
         TranslateCacheEntry {
             md5: source.content_md5.clone(),
-            target_lang: preview.target_lang.clone(),
-            relative_path: relative_path.to_string(),
+            target_lang,
+            relative_path: normalized_path,
             translated: preview.markdown.clone(),
-            model: preview.model.clone(),
+            model,
             updated_at: Utc::now().to_rfc3339(),
         },
     );
@@ -417,7 +502,7 @@ impl MessageContent {
 /// from empty model content. Never includes API keys in error messages.
 pub fn parse_translate_api_response(status: u16, response_text: &str) -> Result<String, AppError> {
     if !(200..300).contains(&status) {
-        let snippet = sanitize_api_error_body(response_text, ERROR_BODY_SNIPPET_CHARS);
+        let snippet = sanitize_api_error_body(response_text, ERROR_BODY_SNIPPET_BYTES);
         return Err(AppError::Translate {
             message: format!("翻译接口返回 HTTP {status}：{snippet}"),
         });
@@ -434,7 +519,7 @@ pub fn parse_translate_api_response(status: u16, response_text: &str) -> Result<
 
     // SSE streams are not supported for this synchronous preview path.
     if trimmed.starts_with("data:") || trimmed.contains("\ndata:") {
-        let snippet = sanitize_api_error_body(trimmed, ERROR_BODY_SNIPPET_CHARS);
+        let snippet = sanitize_api_error_body(trimmed, ERROR_BODY_SNIPPET_BYTES);
         return Err(AppError::Translate {
             message: format!(
                 "API 响应解析失败：收到 SSE/流式响应，请关闭 stream 或改用非流式 chat/completions。片段：{snippet}"
@@ -445,7 +530,7 @@ pub fn parse_translate_api_response(status: u16, response_text: &str) -> Result<
     let parsed: ChatCompletionResponse = match serde_json::from_str(trimmed) {
         Ok(value) => value,
         Err(error) => {
-            let snippet = sanitize_api_error_body(trimmed, ERROR_BODY_SNIPPET_CHARS);
+            let snippet = sanitize_api_error_body(trimmed, ERROR_BODY_SNIPPET_BYTES);
             // If the body looks like raw markdown/text rather than an API envelope,
             // say so explicitly — this is still an API-shape mismatch, not "empty model content".
             let hint = if looks_like_raw_markdown(trimmed) {
@@ -456,9 +541,7 @@ pub fn parse_translate_api_response(status: u16, response_text: &str) -> Result<
                 "响应体不是有效的 chat/completions JSON。"
             };
             return Err(AppError::Translate {
-                message: format!(
-                    "API 响应解析失败：{hint}（{error}）。片段：{snippet}"
-                ),
+                message: format!("API 响应解析失败：{hint}（{error}）。片段：{snippet}"),
             });
         }
     };
@@ -541,7 +624,10 @@ pub fn translate_with_openai_compatible(
     // Never log api_key. Error messages must not include the Authorization header.
     let response = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", settings.api_key.trim()))
+        .header(
+            "Authorization",
+            format!("Bearer {}", settings.api_key.trim()),
+        )
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
@@ -566,26 +652,125 @@ pub fn translate_with_openai_compatible(
     })
 }
 
-fn sanitize_api_error_body(body: &str, max_chars: usize) -> String {
-    let mut text = body.replace('\n', " ").replace('\r', " ");
-    // Best-effort: strip anything that looks like a bearer token if the server echoed it.
-    let lower = text.to_ascii_lowercase();
-    if let Some(idx) = lower.find("bearer ") {
-        let end = (idx + 40).min(text.len());
-        text.replace_range(idx..end, "bearer ***");
+fn truncate_utf8_to_max_bytes(value: &mut String, max_bytes: usize) -> bool {
+    if value.len() <= max_bytes {
+        return false;
     }
-    // Avoid leaking sk- styled keys if echoed in error pages.
-    if let Some(idx) = text.find("sk-") {
-        let end = (idx + 12).min(text.len());
-        text.replace_range(idx..end, "sk-***");
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
     }
+    value.truncate(end);
+    true
+}
+
+fn redact_json_secret_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                if key.eq_ignore_ascii_case("api_key")
+                    || key.eq_ignore_ascii_case("apiKey")
+                    || key.eq_ignore_ascii_case("authorization")
+                {
+                    *value = serde_json::Value::String("***".into());
+                } else {
+                    redact_json_secret_fields(value);
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                redact_json_secret_fields(value);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn find_ascii_case_insensitive(text: &str, start: usize, needle: &[u8]) -> Option<usize> {
+    text.as_bytes()[start..]
+        .windows(needle.len())
+        .position(|window| window.eq_ignore_ascii_case(needle))
+        .map(|offset| start + offset)
+}
+
+fn token_end(text: &str, start: usize) -> usize {
+    text[start..]
+        .char_indices()
+        .find(|(_, ch)| {
+            !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~' | '+' | '/' | '='))
+        })
+        .map(|(offset, _)| start + offset)
+        .unwrap_or(text.len())
+}
+
+fn find_bearer_token(text: &str, start: usize) -> Option<(usize, usize)> {
+    let mut search_from = start;
+    while let Some(found) = find_ascii_case_insensitive(text, search_from, b"bearer") {
+        let after_word = found + "bearer".len();
+        let has_boundary_before = found == 0 || !text.as_bytes()[found - 1].is_ascii_alphanumeric();
+        let whitespace_len = text[after_word..]
+            .chars()
+            .take_while(|ch| ch.is_ascii_whitespace())
+            .map(char::len_utf8)
+            .sum::<usize>();
+        if has_boundary_before && whitespace_len > 0 {
+            return Some((found, after_word + whitespace_len));
+        }
+        search_from = after_word;
+    }
+    None
+}
+
+fn redact_api_tokens(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while cursor < text.len() {
+        let bearer =
+            find_bearer_token(text, cursor).map(|(start, token_start)| (start, token_start, false));
+        let sk = find_ascii_case_insensitive(text, cursor, b"sk-")
+            .map(|start| (start, start + "sk-".len(), true));
+        let next = match (bearer, sk) {
+            (Some(bearer), Some(sk)) => Some(if bearer.0 <= sk.0 { bearer } else { sk }),
+            (Some(found), None) | (None, Some(found)) => Some(found),
+            (None, None) => None,
+        };
+        let Some((start, token_start, is_sk)) = next else {
+            out.push_str(&text[cursor..]);
+            break;
+        };
+        let end = token_end(text, token_start);
+        if end == token_start {
+            out.push_str(&text[cursor..token_start]);
+            cursor = token_start;
+            continue;
+        }
+        out.push_str(&text[cursor..start]);
+        if is_sk {
+            out.push_str("sk-***");
+        } else {
+            out.push_str("bearer ***");
+        }
+        cursor = end;
+    }
+    out
+}
+
+fn sanitize_api_error_body(body: &str, max_bytes: usize) -> String {
+    let mut text = if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(body) {
+        redact_json_secret_fields(&mut value);
+        serde_json::to_string(&value).unwrap_or_else(|_| body.to_string())
+    } else {
+        body.to_string()
+    };
+    text = redact_api_tokens(&text);
+    text = text.replace(['\n', '\r'], " ");
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return "(空响应体)".into();
     }
     let mut out = trimmed.to_string();
-    if out.len() > max_chars {
-        out.truncate(max_chars);
+    if truncate_utf8_to_max_bytes(&mut out, max_bytes) {
         out.push('…');
     }
     out
@@ -641,10 +826,27 @@ mod tests {
             collected.source_files,
             vec!["references/thresholds.md".to_string()]
         );
-        assert!(collected.prompt_body.contains("<!-- file: references/thresholds.md -->"));
+        assert!(collected
+            .prompt_body
+            .contains("<!-- file: references/thresholds.md -->"));
         assert!(collected.prompt_body.contains("# Thresholds"));
         assert!(!collected.prompt_body.contains("# Hello"));
         assert!(!collected.truncated);
+    }
+
+    #[test]
+    fn truncates_selected_file_at_utf8_boundary() {
+        let dir = tempdir().unwrap();
+        let relative_path = "SKILL.md";
+        let header = format!("<!-- file: {relative_path} -->\n");
+        let keep = MAX_SOURCE_BYTES - header.len();
+        let content = format!("{}中文", "a".repeat(keep - 1));
+        fs::write(dir.path().join(relative_path), content).unwrap();
+
+        let collected = collect_translate_source(dir.path(), relative_path).unwrap();
+        assert!(collected.truncated);
+        assert!(collected.prompt_body.len() <= MAX_SOURCE_BYTES);
+        assert!(collected.prompt_body.ends_with('a'));
     }
 
     #[test]
@@ -735,11 +937,32 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_strips_bearer_and_sk_prefix() {
-        let raw = "auth failed bearer sk-abcdefghijklmnopqrstuvwxyz remaining";
+    fn sanitize_strips_all_bearer_and_sk_tokens() {
+        let raw = "Bearer first-token and bEaReR second.token plus sk-one and SK-two";
         let cleaned = sanitize_api_error_body(raw, 400);
-        assert!(!cleaned.contains("sk-abcdefgh"), "{cleaned}");
-        assert!(cleaned.contains("bearer ***") || cleaned.contains("sk-***"), "{cleaned}");
+        for secret in ["first-token", "second.token", "sk-one", "SK-two"] {
+            assert!(!cleaned.contains(secret), "{cleaned}");
+        }
+        assert_eq!(cleaned.matches("***").count(), 4, "{cleaned}");
+    }
+
+    #[test]
+    fn sanitize_strips_json_secret_fields_recursively() {
+        let raw = r#"{"api_key":"first","apiKey":"second","AUTHORIZATION":"Basic third","nested":{"Api_Key":"fourth"},"safe":"kept"}"#;
+        let cleaned = sanitize_api_error_body(raw, 400);
+        for secret in ["first", "second", "third", "fourth"] {
+            assert!(!cleaned.contains(secret), "{cleaned}");
+        }
+        assert!(cleaned.contains("kept"), "{cleaned}");
+    }
+
+    #[test]
+    fn sanitize_truncates_chinese_at_utf8_boundary_after_redaction() {
+        let raw = format!("Bearer secret {}", "中".repeat(200));
+        let cleaned = sanitize_api_error_body(&raw, 20);
+        assert!(!cleaned.contains("secret"), "{cleaned}");
+        assert!(cleaned.ends_with('…'), "{cleaned}");
+        assert!(cleaned.len() <= 23);
     }
 
     #[test]
@@ -751,6 +974,49 @@ mod tests {
         let b = content_md5_hex("# Hello\n\nChanged");
         assert_ne!(a, b);
         assert_eq!(a, content_md5_hex("# Hello\n"));
+    }
+
+    #[test]
+    fn cache_key_covers_translation_configuration_without_raw_api_key() {
+        let args = (
+            "md5",
+            "中文",
+            "references\\doc.md",
+            "https://example.com//v1/",
+            "model-a",
+            "sk-secret",
+        );
+        let key = translate_cache_key(args.0, args.1, args.2, args.3, args.4, args.5);
+        assert!(key.starts_with("v2:"));
+        assert!(!key.contains("sk-secret"));
+        assert_eq!(
+            key,
+            translate_cache_key(
+                args.0,
+                args.1,
+                "references/doc.md",
+                "https://example.com/v1",
+                args.4,
+                args.5
+            )
+        );
+        for changed in [
+            translate_cache_key("other", args.1, args.2, args.3, args.4, args.5),
+            translate_cache_key(args.0, "English", args.2, args.3, args.4, args.5),
+            translate_cache_key(args.0, args.1, "other.md", args.3, args.4, args.5),
+            translate_cache_key(
+                args.0,
+                args.1,
+                args.2,
+                "https://other.example/v1",
+                args.4,
+                args.5,
+            ),
+            translate_cache_key(args.0, args.1, args.2, args.3, "model-b", args.5),
+            translate_cache_key(args.0, args.1, args.2, args.3, args.4, "sk-other"),
+        ] {
+            assert_ne!(key, changed);
+        }
     }
 
     #[test]

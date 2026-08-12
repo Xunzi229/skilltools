@@ -206,7 +206,10 @@ fn resolve_file_path(root: &Path, relative_path: &str) -> Result<PathBuf, AppErr
 }
 
 /// Like resolve_file_path, but allows creating a new leaf file that does not exist yet.
-fn resolve_writable_file_path(root: &Path, relative_path: &str) -> Result<PathBuf, AppError> {
+pub(crate) fn resolve_writable_file_path(
+    root: &Path,
+    relative_path: &str,
+) -> Result<PathBuf, AppError> {
     let relative = Path::new(relative_path);
     if relative.as_os_str().is_empty()
         || relative

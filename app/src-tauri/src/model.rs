@@ -111,6 +111,13 @@ pub struct FileContent {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BackupArchiveKind {
+    Directory,
+    ProviderSymlink,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupRecord {
@@ -123,6 +130,9 @@ pub struct BackupRecord {
     pub original_path: PathBuf,
     pub archive_path: PathBuf,
     pub checksum: String,
+    /// 旧版记录无此字段，恢复时使用严格的 marker-only 兼容判断。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive_kind: Option<BackupArchiveKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

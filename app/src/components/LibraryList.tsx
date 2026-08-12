@@ -3,6 +3,7 @@ import type { SkillApi } from "../api/skillApi";
 import type {
   AiTaxonomyApplyItem,
   BatchResult,
+  CommandError,
   LibrarySkillSummary,
   Provider,
   SkillGroup,
@@ -37,6 +38,7 @@ interface LibraryListProps {
   errorMessage: string | null;
   batchBusy: boolean;
   batchResult: BatchResult | null;
+  batchError: CommandError | null;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   onSearchChange: (value: string) => void;
@@ -47,12 +49,12 @@ interface LibraryListProps {
   onClearSelection: () => void;
   onRemoveQueryChip?: (chip: TaxonomyChip) => void;
   onClearQuery?: () => void;
-  onBatchInstall: (provider: Provider) => void;
-  onBatchUninstall: (provider: Provider) => void;
-  onBatchSetGroup: (groupId: string | null) => void;
-  onBatchAddTag: (tagId: string) => void;
-  onBatchRemoveTag: (tagId: string) => void;
-  onBatchClearTags: () => void;
+  onBatchInstall: (ids: string[], provider: Provider) => void;
+  onBatchUninstall: (ids: string[], provider: Provider) => void;
+  onBatchSetGroup: (ids: string[], groupId: string | null) => void;
+  onBatchAddTag: (ids: string[], tagId: string) => void;
+  onBatchRemoveTag: (ids: string[], tagId: string) => void;
+  onBatchClearTags: (ids: string[]) => void;
   onApplyAiGroups: (items: AiTaxonomyApplyItem[]) => Promise<void>;
   onCreateSkill: (name: string) => Promise<void>;
   onRetry: () => void;
@@ -74,6 +76,7 @@ export function LibraryList({
   errorMessage,
   batchBusy,
   batchResult,
+  batchError,
   collapsed: panelCollapsed = false,
   onToggleCollapse,
   onSearchChange,
@@ -199,10 +202,25 @@ export function LibraryList({
     return ordered;
   }, [childrenByParent, collapsed, filtered, parents]);
 
-  const selectableIds = useMemo(
-    () => filtered.map((skill) => skill.id),
-    [filtered],
+  const selectableIds = useMemo(() => visible.map((skill) => skill.id), [visible]);
+  const selectedSelectableIds = useMemo(
+    () => selectableIds.filter((id) => selectedIds.has(id)),
+    [selectableIds, selectedIds],
   );
+  const selectedSelectableSet = useMemo(
+    () => new Set(selectedSelectableIds),
+    [selectedSelectableIds],
+  );
+
+  useEffect(() => {
+    if (loading || selectedSelectableIds.length === selectedIds.size) return;
+    onSetSelection(selectedSelectableIds);
+  }, [
+    loading,
+    onSetSelection,
+    selectedIds.size,
+    selectedSelectableIds,
+  ]);
 
   const tabs: Array<{ id: StatusTab; label: string }> = [
     { id: "all", label: "全部" },
@@ -343,7 +361,9 @@ export function LibraryList({
           <div className="library-batch mt-3">
             <section className="library-batch-block" aria-label="选择">
               <div className="library-batch-actions">
-                <span className="library-batch-count">已选 {selectedIds.size} 项</span>
+                <span className="library-batch-count">
+                  已选 {selectedSelectableIds.length} 项
+                </span>
                 <button
                   type="button"
                   className="macos-btn-ghost"
@@ -362,7 +382,7 @@ export function LibraryList({
                 >
                   反选
                 </button>
-                {selectedIds.size > 0 ? (
+                {selectedSelectableIds.length > 0 ? (
                   <button
                     type="button"
                     className="macos-btn-ghost"
@@ -374,7 +394,7 @@ export function LibraryList({
                 ) : null}
               </div>
             </section>
-            {selectedIds.size > 0 ? (
+            {selectedSelectableIds.length > 0 ? (
               <>
                 <section className="library-batch-block" aria-label="安装">
                   <div className="library-batch-actions">
@@ -384,7 +404,7 @@ export function LibraryList({
                         type="button"
                         className="macos-btn-ghost"
                         disabled={batchBusy}
-                        onClick={() => onBatchInstall(provider)}
+                        onClick={() => onBatchInstall(selectedSelectableIds, provider)}
                       >
                         安装 {provider}
                       </button>
@@ -395,7 +415,7 @@ export function LibraryList({
                         type="button"
                         className="macos-btn-ghost"
                         disabled={batchBusy}
-                        onClick={() => onBatchUninstall(provider)}
+                        onClick={() => onBatchUninstall(selectedSelectableIds, provider)}
                       >
                         卸载 {provider}
                       </button>
@@ -412,6 +432,7 @@ export function LibraryList({
                       onChange={(event) => {
                         const value = event.target.value;
                         onBatchSetGroup(
+                          selectedSelectableIds,
                           value === "" ? null : value === "__none__" ? null : value,
                         );
                         event.target.value = "";
@@ -432,7 +453,7 @@ export function LibraryList({
                       skills={skills}
                       groups={groups}
                       tags={tags}
-                      selectedIds={selectedIds}
+                      selectedIds={selectedSelectableSet}
                       disabled={batchBusy}
                       onApply={onApplyAiGroups}
                     />
@@ -442,7 +463,9 @@ export function LibraryList({
                       disabled={batchBusy || tags.length === 0}
                       defaultValue=""
                       onChange={(event) => {
-                        if (event.target.value) onBatchAddTag(event.target.value);
+                        if (event.target.value) {
+                          onBatchAddTag(selectedSelectableIds, event.target.value);
+                        }
                         event.target.value = "";
                       }}
                     >
@@ -459,7 +482,9 @@ export function LibraryList({
                       disabled={batchBusy || tags.length === 0}
                       defaultValue=""
                       onChange={(event) => {
-                        if (event.target.value) onBatchRemoveTag(event.target.value);
+                        if (event.target.value) {
+                          onBatchRemoveTag(selectedSelectableIds, event.target.value);
+                        }
                         event.target.value = "";
                       }}
                     >
@@ -474,7 +499,7 @@ export function LibraryList({
                       type="button"
                       className="macos-btn-ghost"
                       disabled={batchBusy}
-                      onClick={onBatchClearTags}
+                      onClick={() => onBatchClearTags(selectedSelectableIds)}
                     >
                       清空标签
                     </button>
@@ -487,6 +512,14 @@ export function LibraryList({
         {batchResult && (
           <div className="macos-alert-ok mt-2 flex items-start justify-between gap-2 py-1.5 text-[11px]">
             <span>{formatBatchSummary(batchResult)}</span>
+            <button type="button" className="macos-link shrink-0" onClick={onClearBatchResult}>
+              关闭
+            </button>
+          </div>
+        )}
+        {batchError && (
+          <div className="macos-alert-error mt-2 flex items-start justify-between gap-2 py-1.5 text-[11px]">
+            <span>{batchError.message}</span>
             <button type="button" className="macos-link shrink-0" onClick={onClearBatchResult}>
               关闭
             </button>
@@ -537,7 +570,7 @@ export function LibraryList({
                   <input
                     type="checkbox"
                     className={rowCheckboxClass(selectionActive)}
-                    checked={selectedIds.has(skill.id)}
+                    checked={selectedSelectableSet.has(skill.id)}
                     tabIndex={selectionActive ? 0 : -1}
                     aria-label={`选择 ${skill.name}`}
                     onChange={() => onToggleSelect(skill.id)}

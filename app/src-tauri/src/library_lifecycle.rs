@@ -100,6 +100,18 @@ impl LibraryRepository {
         skill_id: &str,
         new_name: String,
     ) -> Result<LibrarySkillSummary, AppError> {
+        self.rename_library_skill_with_writer(skill_id, new_name, |index| self.write_index(index))
+    }
+
+    pub(crate) fn rename_library_skill_with_writer<Writer>(
+        &self,
+        skill_id: &str,
+        new_name: String,
+        write_index: Writer,
+    ) -> Result<LibrarySkillSummary, AppError>
+    where
+        Writer: FnOnce(&crate::library_repository::LibraryIndex) -> Result<(), AppError>,
+    {
         let new_name = validate_skill_dirname(&new_name)?;
         let _guard = lock_app_transaction(self.paths())?;
         let mut index = self.load_index()?;
@@ -121,12 +133,9 @@ impl LibraryRepository {
                 message: "请先卸载所有安装后再重命名".into(),
             });
         }
-        let parent = skill
-            .absolute_path
-            .parent()
-            .ok_or_else(|| AppError::Io {
-                message: "无法解析 Skill 父目录".into(),
-            })?;
+        let parent = skill.absolute_path.parent().ok_or_else(|| AppError::Io {
+            message: "无法解析 Skill 父目录".into(),
+        })?;
         let dest = parent.join(&new_name);
         if dest.exists() {
             return Err(AppError::TargetConflict {
@@ -135,36 +144,51 @@ impl LibraryRepository {
         }
         self.paths().assert_allowed(&skill.absolute_path)?;
         self.paths().assert_allowed(&dest)?;
+        let original_skill_md_path =
+            crate::skill_files::resolve_writable_file_path(&skill.absolute_path, "SKILL.md")?;
+        let original_skill_md = fs::read(&original_skill_md_path)?;
         fs::rename(&skill.absolute_path, &dest)?;
-        rewrite_skill_frontmatter_name(&dest, &new_name)?;
-
-        let project = index
-            .projects
-            .iter()
-            .find(|project| project.id == skill.project_id)
-            .cloned()
-            .ok_or_else(|| AppError::ProjectNotFound {
-                id: skill.project_id.clone(),
-            })?;
-        replace_project_skills(&mut index, &project)?;
-        // Preserve taxonomy for renamed skill by matching relative path stem when possible.
-        if let Some(updated) = index
-            .library_skills
-            .iter_mut()
-            .find(|item| item.project_id == project.id && item.name == new_name)
-        {
-            updated.group_id = skill.group_id;
-            updated.tag_ids = skill.tag_ids;
+        let result = (|| {
+            rewrite_skill_frontmatter_name(&dest, &new_name)?;
+            let project = index
+                .projects
+                .iter()
+                .find(|project| project.id == skill.project_id)
+                .cloned()
+                .ok_or_else(|| AppError::ProjectNotFound {
+                    id: skill.project_id.clone(),
+                })?;
+            replace_project_skills(&mut index, &project)?;
+            // Preserve taxonomy for renamed skill by matching relative path stem when possible.
+            if let Some(updated) = index
+                .library_skills
+                .iter_mut()
+                .find(|item| item.project_id == project.id && item.name == new_name)
+            {
+                updated.group_id = skill.group_id.clone();
+                updated.tag_ids = skill.tag_ids.clone();
+            }
+            sync_installation_statuses(&mut index);
+            let updated = index
+                .library_skills
+                .iter()
+                .find(|item| item.project_id == project.id && item.name == new_name)
+                .cloned()
+                .ok_or_else(|| AppError::Io {
+                    message: "重命名后未扫描到 Skill".into(),
+                })?;
+            write_index(&index)?;
+            Ok(updated)
+        })();
+        match result {
+            Ok(updated) => Ok(updated),
+            Err(error) => Err(rollback_library_skill_rename(
+                error,
+                &dest,
+                &skill.absolute_path,
+                &original_skill_md,
+            )),
         }
-        sync_installation_statuses(&mut index);
-        self.write_index(&index)?;
-        index
-            .library_skills
-            .into_iter()
-            .find(|item| item.project_id == project.id && item.name == new_name)
-            .ok_or_else(|| AppError::Io {
-                message: "重命名后未扫描到 Skill".into(),
-            })
     }
 
     pub fn delete_library_skill(&self, skill_id: &str) -> Result<(), AppError> {
@@ -239,6 +263,34 @@ impl LibraryRepository {
         sync_installation_statuses(&mut index);
         self.write_index(&index)?;
         Ok(())
+    }
+}
+
+fn rollback_library_skill_rename(
+    original_error: AppError,
+    renamed_path: &Path,
+    original_path: &Path,
+    original_skill_md: &[u8],
+) -> AppError {
+    let mut rollback_errors = Vec::new();
+    match crate::skill_files::resolve_writable_file_path(renamed_path, "SKILL.md") {
+        Ok(path) => {
+            if let Err(error) = fs::write(path, original_skill_md) {
+                rollback_errors.push(error.to_string());
+            }
+        }
+        Err(error) => rollback_errors.push(error.to_string()),
+    }
+    if let Err(error) = crate::fs_ops::rename_directory_no_replace(renamed_path, original_path) {
+        rollback_errors.push(error.to_string());
+    }
+    if rollback_errors.is_empty() {
+        original_error
+    } else {
+        AppError::RollbackFailed {
+            original_error: original_error.to_string(),
+            rollback_error: rollback_errors.join("; "),
+        }
     }
 }
 
@@ -355,5 +407,32 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, AppError::TargetConflict { .. }));
         assert!(first.absolute_path.exists());
+    }
+
+    #[test]
+    fn rename_index_failure_restores_directory_and_frontmatter() {
+        let base = tempdir().unwrap();
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+        let created = repository
+            .create_library_skill("alpha".into(), "original".into(), None)
+            .unwrap();
+        let original = fs::read(created.absolute_path.join("SKILL.md")).unwrap();
+
+        let error = repository
+            .rename_library_skill_with_writer(&created.id, "beta".into(), |_| {
+                Err(AppError::Io {
+                    message: "injected rename index failure".into(),
+                })
+            })
+            .unwrap_err();
+
+        assert!(error.to_string().contains("injected rename index failure"));
+        assert!(created.absolute_path.is_dir());
+        assert!(!created.absolute_path.with_file_name("beta").exists());
+        assert_eq!(
+            fs::read(created.absolute_path.join("SKILL.md")).unwrap(),
+            original
+        );
+        assert_eq!(repository.list_library_skills().unwrap()[0].name, "alpha");
     }
 }
