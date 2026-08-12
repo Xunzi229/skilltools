@@ -243,7 +243,7 @@ pub fn translate_cache_key(
     let path = relative_path.trim().replace('\\', "/");
     let base_url = chat_completions_url(base_url);
     let model = model.trim();
-    let api_key_sha256 = format!("{:x}", Sha256::digest(api_key.trim().as_bytes()));
+    let api_key_sha256 = sha256_hex(api_key.trim().as_bytes());
     let parts = [md5, lang, &path, &base_url, model, &api_key_sha256];
     let mut material = String::from("translate-cache-v2");
     for part in parts {
@@ -252,7 +252,14 @@ pub fn translate_cache_key(
         material.push(':');
         material.push_str(part);
     }
-    format!("v2:{:x}", Sha256::digest(material.as_bytes()))
+    format!("v2:{}", sha256_hex(material.as_bytes()))
+}
+
+fn sha256_hex(value: &[u8]) -> String {
+    Sha256::digest(value)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub fn translate_cache_path(app_data_dir: &Path) -> PathBuf {

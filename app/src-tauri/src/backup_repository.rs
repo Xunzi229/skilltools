@@ -624,7 +624,9 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{copy_verified_directory_with, BackupRepository};
+    use super::{
+        copy_verified_directory_with, BackupRepository, SYMLINK_TARGET_MARKER,
+    };
     use crate::error::AppError;
     use crate::fs_ops::rename_directory_no_replace;
     use crate::model::{BackupReason, BackupRecord, PauseRecord, SkillStatus};

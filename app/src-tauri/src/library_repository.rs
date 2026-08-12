@@ -811,7 +811,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::LibraryRepository;
+    use super::{create_directory_symlink, LibraryRepository};
     use crate::error::AppError;
     use crate::model::{InstallHealthKind, ProjectSourceType, Provider};
     use crate::paths::AppPaths;
