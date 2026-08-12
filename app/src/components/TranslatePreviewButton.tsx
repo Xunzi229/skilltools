@@ -35,7 +35,7 @@ function TranslatingPanel() {
           </span>
         </p>
         <p className="mt-1.5 m-0 text-[12px] leading-5 text-ink-3">
-          正在调用模型，完成后自动展示预览
+          大文件会自动分片并发翻译，完成后拼装预览
         </p>
       </div>
       <div className="translate-loading-skeleton w-full max-w-md" aria-hidden="true">

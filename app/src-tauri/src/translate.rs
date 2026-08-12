@@ -14,6 +14,8 @@ use crate::skill_files::read_skill_file_at;
 
 /// Soft cap so a single request does not blow past common model context limits.
 const MAX_SOURCE_BYTES: usize = 80_000;
+/// Large files are translated in concurrent batches of this size.
+const TRANSLATE_CONCURRENCY: usize = 2;
 const HTTP_TIMEOUT_SECS: u64 = 120;
 const ERROR_BODY_SNIPPET_BYTES: usize = 400;
 const TRANSLATE_CACHE_MAX_ENTRIES: usize = 200;
@@ -41,10 +43,12 @@ pub struct TranslatePreview {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollectedSource {
+    /// Raw selected-file content (not prompt-wrapped). Large files are chunked at translate time.
     pub prompt_body: String,
     pub source_files: Vec<String>,
+    /// Kept for API compatibility; chunked translation no longer truncates source text.
     pub truncated: bool,
-    /// Hex MD5 of raw file content (before prompt wrapping / truncation).
+    /// Hex MD5 of raw file content.
     pub content_md5: String,
 }
 
@@ -141,20 +145,80 @@ pub fn collect_translate_source(
     }
 
     let content_md5 = content_md5_hex(&content);
-    let header = format!("<!-- file: {relative_path} -->\n");
-    let mut truncated = false;
-    let mut body = content;
-    if header.len() + body.len() > MAX_SOURCE_BYTES {
-        let keep = MAX_SOURCE_BYTES.saturating_sub(header.len());
-        truncated = truncate_utf8_to_max_bytes(&mut body, keep);
-    }
-
     Ok(CollectedSource {
-        prompt_body: format!("{header}{body}"),
+        prompt_body: content,
         source_files: vec![relative_path],
-        truncated,
+        truncated: false,
         content_md5,
     })
+}
+
+/// Split text into UTF-8 safe slices that prefer ending on a newline.
+pub fn split_text_into_byte_chunks(text: &str, max_bytes: usize) -> Vec<String> {
+    if max_bytes == 0 {
+        return if text.is_empty() {
+            Vec::new()
+        } else {
+            text.chars().map(|ch| ch.to_string()).collect()
+        };
+    }
+    if text.len() <= max_bytes {
+        return vec![text.to_string()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut start = 0usize;
+    while start < text.len() {
+        let remaining = text.len() - start;
+        if remaining <= max_bytes {
+            chunks.push(text[start..].to_string());
+            break;
+        }
+
+        let mut end = start + max_bytes;
+        while end > start && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end <= start {
+            end = (start + 1..=text.len())
+                .find(|index| text.is_char_boundary(*index))
+                .unwrap_or(text.len());
+        }
+
+        let window = &text[start..end];
+        let prefer_from = window.len() / 2;
+        if let Some(rel) = window[prefer_from..].rfind('\n') {
+            end = start + prefer_from + rel + 1;
+        } else if let Some(rel) = window.rfind('\n') {
+            end = start + rel + 1;
+        }
+        if end <= start {
+            end = (start + 1..=text.len())
+                .find(|index| text.is_char_boundary(*index))
+                .unwrap_or(text.len());
+        }
+
+        chunks.push(text[start..end].to_string());
+        start = end;
+    }
+    chunks
+}
+
+fn chunk_content_budget(relative_path: &str) -> usize {
+    let overhead = format!("<!-- file: {relative_path} -->\n<!-- part: 999/999 -->\n").len();
+    MAX_SOURCE_BYTES.saturating_sub(overhead).max(1_024)
+}
+
+fn build_chunk_prompt(relative_path: &str, part: usize, total: usize, chunk: &str) -> String {
+    if total <= 1 {
+        format!("<!-- file: {relative_path} -->\n{chunk}")
+    } else {
+        format!("<!-- file: {relative_path} -->\n<!-- part: {part}/{total} -->\n{chunk}")
+    }
+}
+
+fn join_translated_chunks(chunks: &[String]) -> String {
+    chunks.join("")
 }
 
 /// Hex MD5 of file content bytes (UTF-8). Used as cache key material.
@@ -574,6 +638,19 @@ pub fn translate_with_openai_compatible(
     settings: &TranslateSettings,
     source: &CollectedSource,
 ) -> Result<TranslatePreview, AppError> {
+    translate_with_chunk_fn(settings, source, translate_prompt_http)
+}
+
+/// Translate a collected source by splitting large bodies and running up to two chunk
+/// requests at a time, then assembling results in order.
+pub fn translate_with_chunk_fn<F>(
+    settings: &TranslateSettings,
+    source: &CollectedSource,
+    translate_chunk: F,
+) -> Result<TranslatePreview, AppError>
+where
+    F: Fn(&TranslateSettings, &str) -> Result<String, AppError> + Sync,
+{
     if !settings.is_configured() {
         return Err(AppError::Translate {
             message: "请先在设置中配置完整的翻译接口（Base URL、API Key、模型、目标语言）".into(),
@@ -582,6 +659,109 @@ pub fn translate_with_openai_compatible(
 
     let target_lang = settings.target_lang.trim().to_string();
     let model = settings.model.trim().to_string();
+    let relative_path = source
+        .source_files
+        .first()
+        .map(|path| path.as_str())
+        .unwrap_or("SKILL.md");
+    let budget = chunk_content_budget(relative_path);
+    let chunks = split_text_into_byte_chunks(&source.prompt_body, budget);
+    if chunks.is_empty() {
+        return Err(AppError::Translate {
+            message: format!("「{relative_path}」没有可翻译的文本内容"),
+        });
+    }
+
+    let total = chunks.len();
+    let prompts: Vec<String> = chunks
+        .iter()
+        .enumerate()
+        .map(|(index, chunk)| build_chunk_prompt(relative_path, index + 1, total, chunk))
+        .collect();
+    let translated_parts =
+        translate_prompts_in_batches(settings, &prompts, TRANSLATE_CONCURRENCY, &translate_chunk)?;
+
+    Ok(TranslatePreview {
+        markdown: join_translated_chunks(&translated_parts),
+        source_files: source.source_files.clone(),
+        truncated: false,
+        target_lang,
+        model,
+        from_cache: false,
+    })
+}
+
+fn translate_prompts_in_batches<F>(
+    settings: &TranslateSettings,
+    prompts: &[String],
+    concurrency: usize,
+    translate_chunk: &F,
+) -> Result<Vec<String>, AppError>
+where
+    F: Fn(&TranslateSettings, &str) -> Result<String, AppError> + Sync,
+{
+    let concurrency = concurrency.max(1);
+    let mut translated = vec![String::new(); prompts.len()];
+    let mut index = 0usize;
+    while index < prompts.len() {
+        let end = (index + concurrency).min(prompts.len());
+        let mut batch_error: Option<AppError> = None;
+        std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(end - index);
+            for (offset, prompt) in prompts[index..end].iter().enumerate() {
+                let absolute = index + offset;
+                handles.push(scope.spawn(move || (absolute, translate_chunk(settings, prompt))));
+            }
+            for handle in handles {
+                match handle.join() {
+                    Ok((absolute, Ok(text))) => translated[absolute] = text,
+                    Ok((_, Err(error))) => {
+                        if batch_error.is_none() {
+                            batch_error = Some(error);
+                        }
+                    }
+                    Err(_) => {
+                        if batch_error.is_none() {
+                            batch_error = Some(AppError::Translate {
+                                message: "分片翻译线程异常退出".into(),
+                            });
+                        }
+                    }
+                }
+            }
+        });
+        if let Some(error) = batch_error {
+            return Err(error);
+        }
+        index = end;
+    }
+    Ok(translated)
+}
+
+fn translate_system_prompt(target_lang: &str, multipart: bool) -> String {
+    let mut prompt = format!(
+        "You are a careful documentation translator. Translate the skill documents into {target_lang}. \
+         Preserve markdown structure, headings, lists, tables, links, code fences, inline code, \
+         YAML/JSON frontmatter keys and values that are identifiers, file paths, URLs, and command names. \
+         Only translate natural-language prose. Keep HTML comments like <!-- file: ... --> unchanged. \
+         Output only the translated markdown, with no surrounding explanation."
+    );
+    if multipart {
+        prompt.push_str(
+            " This input is one ordered part of a larger document (see <!-- part: i/n -->). \
+             Translate only this part, keep continuity of markdown structure, and do not add \
+             part labels, summaries, or content from other parts.",
+        );
+    }
+    prompt
+}
+
+fn translate_prompt_http(
+    settings: &TranslateSettings,
+    user_prompt: &str,
+) -> Result<String, AppError> {
+    let target_lang = settings.target_lang.trim();
+    let model = settings.model.trim();
     let url = chat_completions_url(&settings.base_url);
     if url.is_empty() {
         return Err(AppError::Translate {
@@ -589,28 +769,15 @@ pub fn translate_with_openai_compatible(
         });
     }
 
-    let system = format!(
-        "You are a careful documentation translator. Translate the skill documents into {target_lang}. \
-         Preserve markdown structure, headings, lists, tables, links, code fences, inline code, \
-         YAML/JSON frontmatter keys and values that are identifiers, file paths, URLs, and command names. \
-         Only translate natural-language prose. Keep HTML comments like <!-- file: ... --> unchanged. \
-         Output only the translated markdown, with no surrounding explanation."
-    );
-
-    let mut user = source.prompt_body.clone();
-    if source.truncated {
-        user.push_str(
-            "\n\n<!-- note: source was truncated for length; translate what is provided -->\n",
-        );
-    }
-
+    let multipart = user_prompt.contains("<!-- part:");
+    let system = translate_system_prompt(target_lang, multipart);
     let body = json!({
         "model": model,
         "temperature": 0.2,
         "stream": false,
         "messages": [
             { "role": "system", "content": system },
-            { "role": "user", "content": user },
+            { "role": "user", "content": user_prompt },
         ],
     });
 
@@ -639,17 +806,7 @@ pub fn translate_with_openai_compatible(
     let response_text = response.text().map_err(|error| AppError::Translate {
         message: format!("读取翻译响应失败：{error}"),
     })?;
-
-    let markdown = parse_translate_api_response(status, &response_text)?;
-
-    Ok(TranslatePreview {
-        markdown,
-        source_files: source.source_files.clone(),
-        truncated: source.truncated,
-        target_lang,
-        model,
-        from_cache: false,
-    })
+    parse_translate_api_response(status, &response_text)
 }
 
 fn truncate_utf8_to_max_bytes(value: &mut String, max_bytes: usize) -> bool {
@@ -826,27 +983,116 @@ mod tests {
             collected.source_files,
             vec!["references/thresholds.md".to_string()]
         );
-        assert!(collected
-            .prompt_body
-            .contains("<!-- file: references/thresholds.md -->"));
+        assert!(!collected.prompt_body.contains("<!-- file:"));
         assert!(collected.prompt_body.contains("# Thresholds"));
         assert!(!collected.prompt_body.contains("# Hello"));
         assert!(!collected.truncated);
     }
 
     #[test]
-    fn truncates_selected_file_at_utf8_boundary() {
+    fn collects_large_file_without_truncation() {
         let dir = tempdir().unwrap();
         let relative_path = "SKILL.md";
-        let header = format!("<!-- file: {relative_path} -->\n");
-        let keep = MAX_SOURCE_BYTES - header.len();
-        let content = format!("{}中文", "a".repeat(keep - 1));
-        fs::write(dir.path().join(relative_path), content).unwrap();
+        let content = format!("{}中文", "a".repeat(MAX_SOURCE_BYTES + 100));
+        fs::write(dir.path().join(relative_path), &content).unwrap();
 
         let collected = collect_translate_source(dir.path(), relative_path).unwrap();
-        assert!(collected.truncated);
-        assert!(collected.prompt_body.len() <= MAX_SOURCE_BYTES);
-        assert!(collected.prompt_body.ends_with('a'));
+        assert!(!collected.truncated);
+        assert_eq!(collected.prompt_body, content);
+        assert!(collected.prompt_body.len() > MAX_SOURCE_BYTES);
+    }
+
+    #[test]
+    fn splits_large_text_on_utf8_and_newline_boundaries() {
+        let text = format!("{}中\n{}", "a".repeat(40), "b".repeat(40));
+        let chunks = split_text_into_byte_chunks(&text, 50);
+        assert!(chunks.len() >= 2);
+        assert_eq!(chunks.join(""), text);
+        for chunk in &chunks {
+            assert!(chunk.len() <= 50);
+            assert!(std::str::from_utf8(chunk.as_bytes()).is_ok());
+        }
+        assert!(chunks[0].ends_with('\n') || chunks.len() == 1);
+    }
+
+    #[test]
+    fn translates_large_source_in_ordered_concurrent_batches() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Mutex,
+        };
+
+        let settings = TranslateSettings {
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "sk-x".into(),
+            model: "gpt-4o-mini".into(),
+            target_lang: "中文".into(),
+        };
+        let body = format!(
+            "one\n{}\ntwo\n{}\nthree\n{}",
+            "a".repeat(40_000),
+            "b".repeat(40_000),
+            "c".repeat(40_000)
+        );
+        let source = CollectedSource {
+            prompt_body: body.clone(),
+            source_files: vec!["SKILL.md".into()],
+            truncated: false,
+            content_md5: content_md5_hex(&body),
+        };
+
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let seen = Mutex::new(Vec::new());
+        let preview = translate_with_chunk_fn(&settings, &source, |_settings, prompt| {
+            let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(current, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(30));
+            active.fetch_sub(1, Ordering::SeqCst);
+            seen.lock().unwrap().push(prompt.to_string());
+            let marker = prompt
+                .lines()
+                .find_map(|line| line.strip_prefix("<!-- part: "))
+                .and_then(|rest| rest.strip_suffix(" -->"))
+                .unwrap_or("1/1");
+            Ok(format!("[{marker}]"))
+        })
+        .unwrap();
+
+        let prompts = seen.lock().unwrap().clone();
+        assert!(
+            prompts.len() >= 2,
+            "expected chunking, got {}",
+            prompts.len()
+        );
+        assert!(peak.load(Ordering::SeqCst) <= TRANSLATE_CONCURRENCY);
+        assert!(peak.load(Ordering::SeqCst) >= 2.min(prompts.len()));
+        assert!(!preview.truncated);
+        assert_eq!(
+            preview.markdown,
+            (1..=prompts.len())
+                .map(|part| format!("[{part}/{}]", prompts.len()))
+                .collect::<String>()
+        );
+        let mut part_labels: Vec<String> = prompts
+            .iter()
+            .map(|prompt| {
+                assert!(prompt.contains("<!-- file: SKILL.md -->"));
+                prompt
+                    .lines()
+                    .find_map(|line| {
+                        line.strip_prefix("<!-- part: ")
+                            .and_then(|rest| rest.strip_suffix(" -->"))
+                            .map(str::to_string)
+                    })
+                    .expect("chunk prompt missing part marker")
+            })
+            .collect();
+        part_labels.sort();
+        let expected: Vec<String> = (1..=prompts.len())
+            .map(|part| format!("{part}/{}", prompts.len()))
+            .collect();
+        assert_eq!(part_labels, expected);
     }
 
     #[test]
