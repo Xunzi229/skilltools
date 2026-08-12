@@ -499,7 +499,8 @@ fn strip_verbatim_prefix(path: &Path) -> String {
 /// 删除目录/文件符号链接（或 Windows junction）本身，绝不跟随到目标内容。
 /// Windows 上目录链接必须用 `remove_dir`；误用 `remove_file` 会报拒绝访问 (os error 5)。
 pub(crate) fn remove_directory_symlink(path: &Path) -> Result<(), AppError> {
-    let _metadata = fs::symlink_metadata(path)?;
+    #[cfg_attr(not(windows), allow(unused_variables))]
+    let metadata = fs::symlink_metadata(path)?;
     if !path_is_symlink_link(path) {
         return Err(AppError::TargetConflict {
             path: path.display().to_string(),
