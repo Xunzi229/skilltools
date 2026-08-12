@@ -1632,6 +1632,6 @@ type: skill
         assert!(metadata.warnings.is_empty(), "{:?}", metadata.warnings);
         let markdown = fs::read_to_string(skill.join("SKILL.md")).unwrap();
         let yaml = frontmatter_yaml(&markdown).unwrap();
-        assert!(serde_yaml::from_str::<super::Frontmatter>(yaml).is_ok());
+        assert!(noyalib::compat::serde_yaml::from_str::<super::Frontmatter>(yaml).is_ok());
     }
 }

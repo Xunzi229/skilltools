@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 
+use noyalib::compat::serde_yaml::{self, Mapping, Value};
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
 
 use crate::error::AppError;
 
@@ -70,12 +70,10 @@ fn value_to_edit_string(value: &Value) -> String {
     }
 }
 
-fn mapping_to_fields(map: &serde_yaml::Mapping) -> HashMap<String, String> {
+fn mapping_to_fields(map: &Mapping) -> HashMap<String, String> {
     let mut fields = HashMap::new();
     for (key, value) in map {
-        if let Some(name) = key.as_str() {
-            fields.insert(name.to_owned(), value_to_edit_string(value));
-        }
+        fields.insert(key.clone(), value_to_edit_string(value));
     }
     fields
 }
@@ -128,14 +126,14 @@ fn fields_to_yaml(fields: &HashMap<String, String>) -> Result<String, AppError> 
     }
 
     // Re-emit in preferred order (BTreeMap is alpha; rebuild manually).
-    let mut map = serde_yaml::Mapping::new();
+    let mut map = Mapping::new();
     for key in KNOWN_FIELD_ORDER {
         if let Some(value) = ordered.remove(*key) {
-            map.insert(Value::String((*key).to_owned()), value);
+            map.insert((*key).to_owned(), value);
         }
     }
     for (key, value) in ordered {
-        map.insert(Value::String(key), value);
+        map.insert(key, value);
     }
 
     let yaml = serde_yaml::to_string(&Value::Mapping(map)).map_err(|error| AppError::Io {
