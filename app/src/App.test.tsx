@@ -307,10 +307,10 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     deleteTag: async () => undefined,
     setSkillTags: unavailable,
     listGroups: async () => groups,
-    createGroup: async (name, order, color = null) => ({
+    createGroup: async (name, color = null) => ({
       id: `group-${name}`,
       name,
-      order,
+      order: groups.reduce((max, group) => Math.max(max, group.order), -1) + 1,
       color,
     }),
     renameGroup: async (id, name) => ({ id, name, order: 0, color: null }),

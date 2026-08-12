@@ -23,6 +23,20 @@ impl LibraryRepository {
         library_skill_id: &str,
         provider: Provider,
     ) -> Result<SkillInstallation, AppError> {
+        self.install_skill_with_writer(library_skill_id, provider, |index| {
+            self.write_index(index)
+        })
+    }
+
+    pub(crate) fn install_skill_with_writer<Writer>(
+        &self,
+        library_skill_id: &str,
+        provider: Provider,
+        write_index: Writer,
+    ) -> Result<SkillInstallation, AppError>
+    where
+        Writer: FnOnce(&crate::library_repository::LibraryIndex) -> Result<(), AppError>,
+    {
         let _guard = lock_app_transaction(self.paths())?;
         let mut index = self.load_index()?;
         let skill = index
@@ -53,10 +67,62 @@ impl LibraryRepository {
         let managed_position = index.installations.iter().position(|installation| {
             installation.library_skill_id == library_skill_id && installation.provider == provider
         });
-        let target_path = match managed_position {
-            Some(position) => index.installations[position].target_path.clone(),
-            None => safe_skill_target(root, &skill.name)?,
-        };
+        let target_path = safe_skill_target(root, &skill.name)?;
+        if let Some(position) = managed_position {
+            let previous_target = index.installations[position].target_path.clone();
+            if !crate::path_norm::paths_eq(&previous_target, &target_path) {
+                if !path_is_symlink_link(&previous_target) {
+                    return Err(AppError::TargetConflict {
+                        path: previous_target.display().to_string(),
+                    });
+                }
+                let previous_resolved = previous_target.canonicalize().map_err(|_| {
+                    AppError::TargetConflict {
+                        path: previous_target.display().to_string(),
+                    }
+                })?;
+                if previous_resolved != source_path {
+                    return Err(AppError::TargetConflict {
+                        path: previous_target.display().to_string(),
+                    });
+                }
+                if fs::symlink_metadata(&target_path).is_ok() {
+                    return Err(AppError::TargetConflict {
+                        path: target_path.display().to_string(),
+                    });
+                }
+                let previous_link = fs::read_link(&previous_target)?;
+                create_directory_symlink(&source_path, &target_path)?;
+                if let Err(error) =
+                    remove_matching_directory_link(&previous_target, Some(&source_path))
+                {
+                    return Err(remove_new_install_link_after_failure(
+                        error,
+                        &target_path,
+                        &source_path,
+                    ));
+                }
+                let installation = SkillInstallation {
+                    library_skill_id: library_skill_id.to_owned(),
+                    provider,
+                    source_path,
+                    target_path: target_path.clone(),
+                    installed_at: Utc::now(),
+                };
+                index.installations[position] = installation.clone();
+                sync_installation_statuses(&mut index);
+                if let Err(error) = write_index(&index) {
+                    return Err(rollback_changed_provider_root_install(
+                        error,
+                        &previous_link,
+                        &previous_target,
+                        &target_path,
+                        &installation.source_path,
+                    ));
+                }
+                return Ok(installation);
+            }
+        }
         let old_link = match fs::symlink_metadata(&target_path) {
             Ok(_) if !path_is_symlink_link(&target_path) => {
                 return Err(AppError::TargetConflict {
@@ -106,13 +172,12 @@ impl LibraryRepository {
             index.installations.push(installation.clone());
         }
         sync_installation_statuses(&mut index);
-        if let Err(error) = self.write_index(&index) {
-            remove_directory_symlink(&target_path).map_err(|rollback_error| {
-                AppError::RollbackFailed {
+        if let Err(error) = write_index(&index) {
+            remove_matching_directory_link(&target_path, Some(&installation.source_path))
+                .map_err(|rollback_error| AppError::RollbackFailed {
                     original_error: error.to_string(),
                     rollback_error: rollback_error.to_string(),
-                }
-            })?;
+                })?;
             if let Some(old_target) = old_link {
                 create_directory_symlink(&old_target, &target_path).map_err(|rollback_error| {
                     AppError::RollbackFailed {
@@ -212,7 +277,32 @@ impl LibraryRepository {
         source_path: &Path,
         replace_with_link: bool,
     ) -> Result<MigrateResult, AppError> {
+        self.migrate_provider_skill_with_hooks(
+            skill_name,
+            provider,
+            source_path,
+            replace_with_link,
+            create_directory_symlink,
+            |index| self.write_index(index),
+        )
+    }
+
+    pub(crate) fn migrate_provider_skill_with_hooks<Link, Writer>(
+        &self,
+        skill_name: &str,
+        provider: Provider,
+        source_path: &Path,
+        replace_with_link: bool,
+        create_link: Link,
+        write_index: Writer,
+    ) -> Result<MigrateResult, AppError>
+    where
+        Link: FnOnce(&Path, &Path) -> Result<(), AppError>,
+        Writer: FnOnce(&crate::library_repository::LibraryIndex) -> Result<(), AppError>,
+    {
         let _guard = lock_app_transaction(self.paths())?;
+        let provider_root = self.paths().provider_root(provider)?;
+        ensure_provider_source_path(source_path, provider_root)?;
         self.paths().assert_skill_access(source_path)?;
         if path_is_symlink_link(source_path) {
             let resolved = fs::canonicalize(source_path)?;
@@ -232,8 +322,7 @@ impl LibraryRepository {
         }
 
         let replace_target = if replace_with_link {
-            let root = self.paths().provider_root(provider)?;
-            let target = safe_skill_target(root, skill_name)?;
+            let target = safe_skill_target(provider_root, skill_name)?;
             if target != source_path && fs::symlink_metadata(&target).is_ok() {
                 return Err(AppError::TargetConflict {
                     path: target.display().to_string(),
@@ -261,10 +350,25 @@ impl LibraryRepository {
             });
         }
 
-        let mut index = self.load_index()?;
-        ensure_project_path_is_new(&index, &dest_root)?;
+        let mut index = match self.load_index() {
+            Ok(index) => index,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&dest_root);
+                return Err(error);
+            }
+        };
+        if let Err(error) = ensure_project_path_is_new(&index, &dest_root) {
+            let _ = fs::remove_dir_all(&dest_root);
+            return Err(error);
+        }
         let project = project_for_source(ProjectSourceType::Local, dest_root.clone(), None);
-        let skills = scan_project(&project, &[])?;
+        let skills = match scan_project(&project, &[]) {
+            Ok(skills) => skills,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&dest_root);
+                return Err(error);
+            }
+        };
         let library_skill_id = skills
             .iter()
             .find(|skill| skill.name == skill_name || skill.relative_path.as_os_str().is_empty())
@@ -272,21 +376,44 @@ impl LibraryRepository {
             .map(|skill| skill.id.clone())
             .ok_or_else(|| AppError::Io {
                 message: "迁移后未扫描到 Skill".into(),
-            })?;
+            });
+        let library_skill_id = match library_skill_id {
+            Ok(id) => id,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&dest_root);
+                return Err(error);
+            }
+        };
         index.projects.push(project.clone());
         index.library_skills.extend(skills);
-        self.write_index(&index)?;
 
         let mut replaced_with_link = false;
         if let Some(target) = replace_target {
-            // Remove original real directory then link.
-            fs::remove_dir_all(source_path)?;
-            let source_canon = dest_skill.canonicalize().map_err(AppError::from)?;
-            if let Err(error) = create_directory_symlink(&source_canon, &target) {
-                // Best-effort: leave library copy; surface error.
+            let source_canon = match dest_skill.canonicalize() {
+                Ok(path) => path,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&dest_root);
+                    return Err(error.into());
+                }
+            };
+            let Some(parent) = source_path.parent() else {
+                let _ = fs::remove_dir_all(&dest_root);
+                return Err(AppError::Io {
+                    message: format!("迁移源缺少父目录：{}", source_path.display()),
+                });
+            };
+            let tombstone = parent.join(format!(
+                ".skill-migrate-{}.tombstone",
+                Uuid::new_v4()
+            ));
+            if let Err(error) = self.paths().assert_allowed(&tombstone) {
+                let _ = fs::remove_dir_all(&dest_root);
                 return Err(error);
             }
-            let mut index = self.load_index()?;
+            if let Err(error) = fs::rename(source_path, &tombstone) {
+                let _ = fs::remove_dir_all(&dest_root);
+                return Err(error.into());
+            }
             index.installations.retain(|installation| {
                 !(installation.library_skill_id == library_skill_id
                     && installation.provider == provider)
@@ -294,13 +421,43 @@ impl LibraryRepository {
             index.installations.push(SkillInstallation {
                 library_skill_id: library_skill_id.clone(),
                 provider,
-                source_path: source_canon,
-                target_path: target,
+                source_path: source_canon.clone(),
+                target_path: target.clone(),
                 installed_at: Utc::now(),
             });
             sync_installation_statuses(&mut index);
-            self.write_index(&index)?;
+            if let Err(error) = create_link(&source_canon, &target) {
+                return Err(rollback_migration(
+                    error,
+                    false,
+                    &source_canon,
+                    &target,
+                    &tombstone,
+                    source_path,
+                    &dest_root,
+                ));
+            }
+            if let Err(error) = write_index(&index) {
+                return Err(rollback_migration(
+                    error,
+                    true,
+                    &source_canon,
+                    &target,
+                    &tombstone,
+                    source_path,
+                    &dest_root,
+                ));
+            }
+            if let Err(error) = fs::remove_dir_all(&tombstone) {
+                eprintln!(
+                    "迁移成功后无法清理墓碑目录 {}：{error}",
+                    tombstone.display()
+                );
+            }
             replaced_with_link = true;
+        } else if let Err(error) = write_index(&index) {
+            let _ = fs::remove_dir_all(&dest_root);
+            return Err(error);
         }
 
         Ok(MigrateResult {
@@ -390,6 +547,120 @@ impl LibraryRepository {
             health,
         })
     }
+}
+
+fn remove_new_install_link_after_failure(
+    original_error: AppError,
+    target: &Path,
+    expected_source: &Path,
+) -> AppError {
+    match remove_matching_directory_link(target, Some(expected_source)) {
+        Ok(()) => original_error,
+        Err(rollback_error) => AppError::RollbackFailed {
+            original_error: original_error.to_string(),
+            rollback_error: rollback_error.to_string(),
+        },
+    }
+}
+
+fn ensure_provider_source_path(source_path: &Path, provider_root: &Path) -> Result<(), AppError> {
+    let parent = source_path.parent().ok_or_else(|| AppError::PathOutsideManagedRoots {
+        path: source_path.display().to_string(),
+    })?;
+    let resolved_parent = parent.canonicalize()?;
+    let resolved_root = provider_root.canonicalize()?;
+    if crate::path_norm::path_is_under(&resolved_parent, &resolved_root) {
+        Ok(())
+    } else {
+        Err(AppError::PathOutsideManagedRoots {
+            path: source_path.display().to_string(),
+        })
+    }
+}
+
+fn rollback_changed_provider_root_install(
+    original_error: AppError,
+    previous_link: &Path,
+    previous_target: &Path,
+    new_target: &Path,
+    expected_source: &Path,
+) -> AppError {
+    let mut rollback_errors = Vec::new();
+    if let Err(error) = create_directory_symlink(previous_link, previous_target) {
+        rollback_errors.push(error.to_string());
+    }
+    if let Err(error) = remove_matching_directory_link(new_target, Some(expected_source)) {
+        rollback_errors.push(error.to_string());
+    }
+    if rollback_errors.is_empty() {
+        original_error
+    } else {
+        AppError::RollbackFailed {
+            original_error: original_error.to_string(),
+            rollback_error: rollback_errors.join("; "),
+        }
+    }
+}
+
+fn rollback_migration(
+    original_error: AppError,
+    link_created: bool,
+    expected_source: &Path,
+    target: &Path,
+    tombstone: &Path,
+    source_path: &Path,
+    dest_root: &Path,
+) -> AppError {
+    let mut rollback_errors = Vec::new();
+    if link_created {
+        if let Err(error) = remove_matching_directory_link(target, Some(expected_source)) {
+            rollback_errors.push(error.to_string());
+        }
+    }
+    if let Err(error) = crate::fs_ops::rename_directory_no_replace(tombstone, source_path) {
+        rollback_errors.push(error.to_string());
+    }
+    if let Err(error) = fs::remove_dir_all(dest_root) {
+        rollback_errors.push(error.to_string());
+    }
+    if rollback_errors.is_empty() {
+        original_error
+    } else {
+        AppError::RollbackFailed {
+            original_error: original_error.to_string(),
+            rollback_error: rollback_errors.join("; "),
+        }
+    }
+}
+
+fn remove_matching_directory_link(
+    target: &Path,
+    expected_source: Option<&Path>,
+) -> Result<(), AppError> {
+    match fs::symlink_metadata(target) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+        Ok(_) if !path_is_symlink_link(target) => {
+            return Err(AppError::TargetConflict {
+                path: target.display().to_string(),
+            });
+        }
+        Ok(_) => {}
+    }
+    if let Some(expected_source) = expected_source {
+        let resolved = target.canonicalize().map_err(|_| AppError::TargetConflict {
+            path: target.display().to_string(),
+        })?;
+        let expected = expected_source
+            .canonicalize()
+            .unwrap_or_else(|_| expected_source.to_path_buf());
+        if !crate::path_norm::paths_eq(&resolved, &expected) {
+            return Err(AppError::TargetConflict {
+                path: target.display().to_string(),
+            });
+        }
+    }
+    remove_directory_symlink(target)
 }
 
 /// 未纳管 symlink 是否与库 Skill 同名（目录名或 SKILL.md frontmatter name）。

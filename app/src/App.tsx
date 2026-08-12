@@ -362,7 +362,7 @@ function App({ api = tauriSkillApi }: AppProps) {
           void installations.refresh();
         }}
         onCreateGroup={async (name, color) => {
-          await library.createGroup(name, undefined, color);
+          await library.createGroup(name, color);
         }}
         onRenameGroup={async (id, name, color) => {
           await library.updateGroup(id, name, color);
@@ -620,7 +620,7 @@ function App({ api = tauriSkillApi }: AppProps) {
             onSetGroup={library.setSkillGroup}
             onCreateTag={(name, color) => library.createTag(name, color ?? null)}
             onCreateGroup={(name, color) =>
-              library.createGroup(name, undefined, color ?? null)
+              library.createGroup(name, color ?? null)
             }
             onInstall={async (id, provider) => {
               await library.installSkill(id, provider);

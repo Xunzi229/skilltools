@@ -16,6 +16,9 @@ describe("skillCanonicalKey", () => {
         resolvedPath: undefined,
       }),
     ).toBe("//server/share/skills/a");
+    expect(normalizePathKey(String.raw`\\?\unc\Server\Share\Skills`)).toBe(
+      "//server/share/skills",
+    );
   });
 
   it("折叠中间重复斜杠（对齐 Rust path_norm）", () => {
@@ -24,5 +27,12 @@ describe("skillCanonicalKey", () => {
       "c:/users/demo/library/skill",
     );
     expect(normalizePathKey("//server//share///a//")).toBe("//server/share/a");
+  });
+
+  it("POSIX 保留大小写且 Windows 仅折叠 ASCII 大小写", () => {
+    expect(normalizePathKey("/Users/Demo/技能")).toBe("/Users/Demo/技能");
+    expect(normalizePathKey(String.raw`C:\Users\Demo\ÄSkill`)).toBe(
+      "c:/users/demo/Äskill",
+    );
   });
 });

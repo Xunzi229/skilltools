@@ -13,7 +13,9 @@ use crate::fs_ops::{
 /// 软链 Skill 删除/备份归档标记：只记录链接目标，恢复时重建链接。
 const SYMLINK_TARGET_MARKER: &str = ".skill-manager-symlink-target";
 use crate::json_store::{read_json, write_json};
-use crate::model::{BackupReason, BackupRecord, SkillDetail, SkillStatus};
+use crate::model::{
+    BackupArchiveKind, BackupReason, BackupRecord, SkillDetail, SkillStatus,
+};
 use crate::paths::AppPaths;
 use crate::skill_repository::SkillRepository;
 use crate::transaction_lock::{lock_app_transaction, AppTransactionGuard};
@@ -114,10 +116,16 @@ impl BackupRepository {
         self.paths.assert_allowed(&temp_path)?;
         fs::create_dir_all(&skill_backup_dir)?;
 
-        let manifest = if is_symlink(source) {
-            archive_provider_symlink(source, &temp_path)?
+        let (manifest, archive_kind) = if is_symlink(source) {
+            (
+                archive_provider_symlink(source, &temp_path)?,
+                BackupArchiveKind::ProviderSymlink,
+            )
         } else {
-            copy_verified_directory(source, &temp_path)?
+            (
+                copy_verified_directory(source, &temp_path)?,
+                BackupArchiveKind::Directory,
+            )
         };
         let checksum = manifest_checksum(&manifest)?;
         if let Err(error) = fs::rename(&temp_path, &archive_path) {
@@ -135,6 +143,7 @@ impl BackupRepository {
             original_path: detail.original_path.clone(),
             archive_path: archive_path.clone(),
             checksum,
+            archive_kind: Some(archive_kind),
         };
         records.push(record.clone());
         if let Err(index_error) = write_index(&records) {
@@ -333,7 +342,12 @@ impl BackupRepository {
         fs::create_dir_all(parent)?;
         let temp_path = parent.join(format!(".restore-{}", Uuid::new_v4()));
         self.paths.assert_allowed(&temp_path)?;
-        if is_provider_symlink_archive(&record.archive_path) {
+        let restore_as_symlink = match record.archive_kind {
+            Some(BackupArchiveKind::ProviderSymlink) => true,
+            Some(BackupArchiveKind::Directory) => false,
+            None => is_legacy_provider_symlink_archive(&record.archive_path),
+        };
+        if restore_as_symlink {
             if let Err(error) = restore_provider_symlink_archive(&record.archive_path, &temp_path)
             {
                 let _ = remove_restored_skill_path(&temp_path);
@@ -526,8 +540,18 @@ fn archive_provider_symlink(
     directory_manifest(target)
 }
 
-fn is_provider_symlink_archive(archive: &Path) -> bool {
-    archive.join(SYMLINK_TARGET_MARKER).is_file()
+fn is_legacy_provider_symlink_archive(archive: &Path) -> bool {
+    let Ok(mut entries) = fs::read_dir(archive) else {
+        return false;
+    };
+    let Some(Ok(entry)) = entries.next() else {
+        return false;
+    };
+    entries.next().is_none()
+        && entry.file_name() == std::ffi::OsStr::new(SYMLINK_TARGET_MARKER)
+        && entry
+            .file_type()
+            .is_ok_and(|file_type| file_type.is_file() && !file_type.is_symlink())
 }
 
 /// 从软链事件备份重建安装链接（不复制目标目录内容）。
@@ -791,6 +815,10 @@ mod tests {
         let record = repository.delete_skill(&id).unwrap();
 
         assert!(!link.exists());
+        assert_eq!(
+            record.archive_kind,
+            Some(crate::model::BackupArchiveKind::ProviderSymlink)
+        );
         assert!(outside.path().join("SKILL.md").exists());
         assert_eq!(
             fs::read_to_string(outside.path().join("keep.txt")).unwrap(),
@@ -821,6 +849,9 @@ mod tests {
 
         let record = repository.delete_skill(&id).unwrap();
         assert!(!link.exists());
+        let mut legacy_records = repository.load_records().unwrap();
+        legacy_records[0].archive_kind = None;
+        repository.write_records(&legacy_records).unwrap();
 
         let detail = repository.restore_backup(&record.id).unwrap();
 
@@ -838,6 +869,33 @@ mod tests {
         assert_eq!(
             fs::read_to_string(outside.path().join("SKILL.md")).unwrap(),
             "# Keep Me"
+        );
+    }
+
+    #[test]
+    fn directory_backup_with_symlink_marker_restores_as_directory() {
+        let base = tempdir().unwrap();
+        let (paths, repository, id) = repository_with_skill(&base, "marker-directory");
+        let source = paths.skill_roots[0].path.join("marker-directory");
+        fs::write(source.join(SYMLINK_TARGET_MARKER), "/tmp/not-a-link").unwrap();
+
+        let record = repository.create_backup(&id, BackupReason::Manual).unwrap();
+        assert_eq!(
+            record.archive_kind,
+            Some(crate::model::BackupArchiveKind::Directory)
+        );
+        let mut legacy_records = repository.load_records().unwrap();
+        legacy_records[0].archive_kind = None;
+        repository.write_records(&legacy_records).unwrap();
+        fs::remove_dir_all(&source).unwrap();
+
+        repository.restore_backup(&record.id).unwrap();
+
+        assert!(source.is_dir());
+        assert!(!crate::fs_ops::path_is_symlink_link(&source));
+        assert_eq!(
+            fs::read_to_string(source.join(SYMLINK_TARGET_MARKER)).unwrap(),
+            "/tmp/not-a-link"
         );
     }
 

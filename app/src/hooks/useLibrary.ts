@@ -305,14 +305,10 @@ export function useLibrary(api: SkillApi) {
       mutateAndRefresh(`library:delete:${id}`, () => api.deleteLibrarySkill(id)),
     createGroup: async (
       name: string,
-      order?: number,
       color: string | null = null,
     ): Promise<SkillGroup | undefined> =>
       runAction("group:create", async () => {
-        const nextOrder =
-          order ??
-          groups.reduce((max, group) => Math.max(max, group.order), -1) + 1;
-        const group = await api.createGroup(name.trim(), nextOrder, color);
+        const group = await api.createGroup(name.trim(), color);
         await refresh({ silent: true });
         return group;
       }),

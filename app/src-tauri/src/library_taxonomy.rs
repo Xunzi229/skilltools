@@ -116,13 +116,19 @@ impl LibraryRepository {
     pub fn create_group(
         &self,
         name: String,
-        order: i32,
         color: Option<String>,
     ) -> Result<SkillGroup, AppError> {
         self.mutate_index(|index| {
             ensure_unique_name(&index.groups, &name, None, "分组", |group| {
                 (&group.id, &group.name)
             })?;
+            let order = index
+                .groups
+                .iter()
+                .map(|group| group.order)
+                .max()
+                .unwrap_or(-1)
+                .saturating_add(1);
             let group = SkillGroup {
                 id: Uuid::new_v4().to_string(),
                 name,

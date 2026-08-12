@@ -981,8 +981,11 @@ mod tests {
             .create_tag("常用".into(), Some("#fff".into()))
             .unwrap();
         let group = repository
-            .create_group("开发".into(), 10, Some("#007AFF".into()))
+            .create_group("开发".into(), Some("#007AFF".into()))
             .unwrap();
+        assert_eq!(group.order, 0);
+        let next_group = repository.create_group("运维".into(), None).unwrap();
+        assert_eq!(next_group.order, 1);
 
         repository
             .set_skill_tags(&skill_id, vec![tag_a.id.clone(), tag_b.id.clone()])
@@ -1116,6 +1119,119 @@ mod tests {
             fs::read_link(&original.target_path).unwrap(),
             source.path().join("alpha").canonicalize().unwrap()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_moves_matching_link_when_provider_root_changes() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let old = repository
+            .install_skill(&skill_id, Provider::Cursor)
+            .unwrap();
+
+        let mut moved_paths = paths;
+        let new_root = base.path().join("new-cursor-root");
+        moved_paths
+            .skill_roots
+            .iter_mut()
+            .find(|root| root.provider == Provider::Cursor)
+            .unwrap()
+            .path = new_root.clone();
+        let moved_repository = LibraryRepository::new(moved_paths);
+        let moved = moved_repository
+            .install_skill(&skill_id, Provider::Cursor)
+            .unwrap();
+
+        assert_eq!(moved.target_path, new_root.join("Alpha"));
+        assert!(crate::fs_ops::path_is_symlink_link(&moved.target_path));
+        assert!(fs::symlink_metadata(old.target_path).is_err());
+        moved_repository
+            .uninstall_skill(&skill_id, Provider::Cursor)
+            .unwrap();
+        assert!(fs::symlink_metadata(moved.target_path).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_root_change_rejects_mismatched_old_link() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        let other = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        write_skill(&other.path().join("other"), "Other");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let old = repository
+            .install_skill(&skill_id, Provider::Cursor)
+            .unwrap();
+        fs::remove_file(&old.target_path).unwrap();
+        std::os::unix::fs::symlink(other.path().join("other"), &old.target_path).unwrap();
+
+        let mut moved_paths = paths;
+        let new_root = base.path().join("new-cursor-root");
+        moved_paths
+            .skill_roots
+            .iter_mut()
+            .find(|root| root.provider == Provider::Cursor)
+            .unwrap()
+            .path = new_root.clone();
+        let moved_repository = LibraryRepository::new(moved_paths);
+
+        assert!(matches!(
+            moved_repository.install_skill(&skill_id, Provider::Cursor),
+            Err(AppError::TargetConflict { .. })
+        ));
+        assert!(crate::fs_ops::path_is_symlink_link(&old.target_path));
+        assert!(!new_root.join("Alpha").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_root_change_index_failure_restores_old_link() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let old = repository
+            .install_skill(&skill_id, Provider::Cursor)
+            .unwrap();
+
+        let mut moved_paths = paths;
+        let new_root = base.path().join("new-cursor-root");
+        moved_paths
+            .skill_roots
+            .iter_mut()
+            .find(|root| root.provider == Provider::Cursor)
+            .unwrap()
+            .path = new_root.clone();
+        let moved_repository = LibraryRepository::new(moved_paths);
+
+        let error = moved_repository
+            .install_skill_with_writer(&skill_id, Provider::Cursor, |_| {
+                Err(AppError::Io {
+                    message: "injected install index failure".into(),
+                })
+            })
+            .unwrap_err();
+
+        assert!(error.to_string().contains("injected install index failure"));
+        assert!(crate::fs_ops::path_is_symlink_link(&old.target_path));
+        assert_eq!(
+            old.target_path.canonicalize().unwrap(),
+            source.path().join("alpha").canonicalize().unwrap()
+        );
+        assert!(fs::symlink_metadata(new_root.join("Alpha")).is_err());
     }
 
     #[cfg(unix)]
@@ -1361,5 +1477,76 @@ mod tests {
         assert!(matches!(err, AppError::TargetConflict { .. }));
         assert!(other.is_dir());
         assert!(blocker.is_dir());
+    }
+
+    #[test]
+    fn migrate_provider_skill_rejects_source_from_other_provider_root() {
+        let base = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        let source = paths.provider_root(Provider::Claude).unwrap().join("wrong-root");
+        write_skill(&source, "wrong-root");
+        let repository = LibraryRepository::new(paths);
+
+        let error = repository
+            .migrate_provider_skill("wrong-root", Provider::Cursor, &source, false)
+            .unwrap_err();
+
+        assert!(matches!(error, AppError::PathOutsideManagedRoots { .. }));
+        assert!(source.join("SKILL.md").is_file());
+        assert!(repository.list_library_skills().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn migrate_provider_skill_boundary_allows_then_rejects_source_symlink() {
+        let base = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        write_skill(&outside.path().join("linked"), "linked");
+        let source = paths.provider_root(Provider::Cursor).unwrap().join("linked");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("linked"), &source).unwrap();
+        let repository = LibraryRepository::new(paths);
+
+        let error = repository
+            .migrate_provider_skill("linked", Provider::Cursor, &source, false)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("符号链接"));
+        assert!(crate::fs_ops::path_is_symlink_link(&source));
+        assert!(repository.list_library_skills().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn migrate_replace_index_failure_restores_source_and_removes_copy_and_link() {
+        let base = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        let source = paths.provider_root(Provider::Cursor).unwrap().join("rollback");
+        write_skill(&source, "rollback");
+        let repository = LibraryRepository::new(paths.clone());
+
+        let error = repository
+            .migrate_provider_skill_with_hooks(
+                "rollback",
+                Provider::Cursor,
+                &source,
+                true,
+                create_directory_symlink,
+                |_| Err(AppError::Io {
+                    message: "injected index failure".into(),
+                }),
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("injected index failure"));
+        assert!(source.is_dir());
+        assert!(!crate::fs_ops::path_is_symlink_link(&source));
+        assert!(source.join("SKILL.md").is_file());
+        assert!(repository.list_library_skills().unwrap().is_empty());
+        let project_count = fs::read_dir(&paths.library_projects_dir)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(project_count, 0);
     }
 }

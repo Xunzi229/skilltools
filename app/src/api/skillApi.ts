@@ -115,7 +115,6 @@ export interface SkillApi {
   listGroups(): Promise<SkillGroup[]>;
   createGroup(
     name: string,
-    order: number,
     color: string | null,
   ): Promise<SkillGroup>;
   renameGroup(id: string, name: string): Promise<SkillGroup>;
@@ -257,8 +256,7 @@ export const tauriSkillApi: SkillApi = {
   deleteTag: (id) => call("delete_tag", { id }),
   setSkillTags: (skillId, tagIds) => call("set_skill_tags", { skillId, tagIds }),
   listGroups: () => call("list_groups"),
-  createGroup: (name, order, color) =>
-    call("create_group", { name, order, color }),
+  createGroup: (name, color) => call("create_group", { name, color }),
   renameGroup: (id, name) => call("rename_group", { id, name }),
   updateGroup: (id, name, color) => call("update_group", { id, name, color }),
   updateGroupOrder: (id, order) => call("update_group_order", { id, order }),

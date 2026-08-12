@@ -310,7 +310,7 @@ pub fn update_frontmatter_fields(
 }
 
 pub fn rewrite_skill_frontmatter_name(skill_dir: &Path, new_name: &str) -> Result<(), AppError> {
-    let path = skill_dir.join("SKILL.md");
+    let path = crate::skill_files::resolve_writable_file_path(skill_dir, "SKILL.md")?;
     let content = fs::read_to_string(&path)?;
     let updated = update_frontmatter_fields(&content, Some(new_name), None)?;
     fs::write(path, updated)?;
@@ -340,7 +340,7 @@ pub fn write_skill_metadata(
     normalized.insert("name".into(), name.to_owned());
     normalized.insert("description".into(), description.to_owned());
 
-    let path = skill_dir.join("SKILL.md");
+    let path = crate::skill_files::resolve_writable_file_path(skill_dir, "SKILL.md")?;
     let content = fs::read_to_string(&path).unwrap_or_default();
     let body = markdown_body_after_frontmatter(&content);
     let yaml = fields_to_yaml(&normalized)?;
@@ -418,5 +418,25 @@ mod tests {
         assert!(content.contains("author: tester"));
         assert!(content.contains("metadata:"));
         assert!(content.contains("# Body"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn metadata_writes_reject_external_skill_md_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let external = outside.path().join("external.md");
+        let original = "---\nname: outside\ndescription: keep\n---\n";
+        fs::write(&external, original).unwrap();
+        symlink(&external, dir.path().join("SKILL.md")).unwrap();
+        let mut fields = HashMap::new();
+        fields.insert("name".into(), "changed".into());
+        fields.insert("description".into(), "changed".into());
+
+        assert!(write_skill_metadata(dir.path(), &fields).is_err());
+        assert!(rewrite_skill_frontmatter_name(dir.path(), "changed").is_err());
+        assert_eq!(fs::read_to_string(external).unwrap(), original);
     }
 }

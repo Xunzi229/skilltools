@@ -412,7 +412,6 @@ pub(crate) fn create_directory_link(source: &Path, target: &Path) -> Result<(), 
 fn create_directory_link_windows(source: &Path, target: &Path) -> Result<(), AppError> {
     use std::os::windows::fs::symlink_dir;
 
-    let source_abs = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
     let target_abs = if target.is_absolute() {
         target.to_path_buf()
     } else {
@@ -420,6 +419,15 @@ fn create_directory_link_windows(source: &Path, target: &Path) -> Result<(), App
             .map(|cwd| cwd.join(target))
             .unwrap_or_else(|_| target.to_path_buf())
     };
+    let source_candidate = if source.is_absolute() {
+        source.to_path_buf()
+    } else {
+        target_abs
+            .parent()
+            .map(|parent| parent.join(source))
+            .unwrap_or_else(|| source.to_path_buf())
+    };
+    let source_abs = fs::canonicalize(&source_candidate).unwrap_or(source_candidate);
     match symlink_dir(&source_abs, target) {
         Ok(()) => Ok(()),
         Err(error) if is_privilege_not_held(&error) => {
@@ -698,6 +706,34 @@ mod tests {
         remove_directory_symlink(&link).unwrap();
         assert!(fs::symlink_metadata(&link).is_err());
         assert!(target.join("SKILL.md").is_file(), "不得删除 junction 目标内容");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn relative_directory_link_source_is_resolved_from_target_parent() {
+        let base = tempdir().unwrap();
+        let parent = base.path().join("links");
+        let source = parent.join("source");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# relative").unwrap();
+        let link = parent.join("linked");
+
+        if let Err(error) = super::create_directory_link_windows(
+            std::path::Path::new("source"),
+            &link,
+        ) {
+            let message = error.to_string();
+            if message.contains("特权")
+                || message.contains("privilege")
+                || message.contains("os error 1314")
+            {
+                eprintln!("skip: creating directory symlink requires privilege: {message}");
+                return;
+            }
+            panic!("create_directory_link_windows failed: {message}");
+        }
+
+        assert_eq!(fs::read_to_string(link.join("SKILL.md")).unwrap(), "# relative");
     }
 }
 

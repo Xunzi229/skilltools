@@ -592,14 +592,13 @@ pub fn list_groups(state: State<'_, AppState>) -> Result<Vec<SkillGroup>, Comman
 pub fn create_group(
     state: State<'_, AppState>,
     name: String,
-    order: i32,
     color: Option<String>,
 ) -> Result<SkillGroup, CommandError> {
     state
         .library
         .lock()
         .map_err(|_| state_lock_error())?
-        .create_group(name, order, color)
+        .create_group(name, color)
         .map_err(map_app_error)
 }
 
@@ -1009,13 +1008,8 @@ pub fn migrate_provider_skill(
         .lock()
         .map_err(|_| state_lock_error())?
         .detail(&skill_id)
+        .and_then(batch::require_active_for_migration)
         .map_err(map_app_error)?;
-    if detail.status != crate::model::SkillStatus::Active {
-        return Err(CommandError {
-            code: "IO",
-            message: "请先恢复再迁移已暂停的 Skill".into(),
-        });
-    }
     state
         .library
         .lock()
