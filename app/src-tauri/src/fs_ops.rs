@@ -529,11 +529,7 @@ pub(crate) fn remove_directory_symlink(path: &Path) -> Result<(), AppError> {
 
 fn map_link_remove_error(path: &Path, error: std::io::Error) -> AppError {
     AppError::Io {
-        message: format!(
-            "删除安装链接失败（{}）：{}",
-            path.display(),
-            error
-        ),
+        message: format!("删除安装链接失败（{}）：{}", path.display(), error),
     }
 }
 
@@ -705,7 +701,10 @@ mod tests {
 
         remove_directory_symlink(&link).unwrap();
         assert!(fs::symlink_metadata(&link).is_err());
-        assert!(target.join("SKILL.md").is_file(), "不得删除 junction 目标内容");
+        assert!(
+            target.join("SKILL.md").is_file(),
+            "不得删除 junction 目标内容"
+        );
     }
 
     #[cfg(windows)]
@@ -718,10 +717,9 @@ mod tests {
         fs::write(source.join("SKILL.md"), "# relative").unwrap();
         let link = parent.join("linked");
 
-        if let Err(error) = super::create_directory_link_windows(
-            std::path::Path::new("source"),
-            &link,
-        ) {
+        if let Err(error) =
+            super::create_directory_link_windows(std::path::Path::new("source"), &link)
+        {
             let message = error.to_string();
             if message.contains("特权")
                 || message.contains("privilege")
@@ -733,7 +731,10 @@ mod tests {
             panic!("create_directory_link_windows failed: {message}");
         }
 
-        assert_eq!(fs::read_to_string(link.join("SKILL.md")).unwrap(), "# relative");
+        assert_eq!(
+            fs::read_to_string(link.join("SKILL.md")).unwrap(),
+            "# relative"
+        );
     }
 }
 

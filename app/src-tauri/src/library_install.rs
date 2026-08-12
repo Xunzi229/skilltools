@@ -8,7 +8,7 @@ use crate::error::AppError;
 use crate::fs_ops::{path_is_symlink_link, remove_directory_symlink};
 use crate::library_repository::{
     adopt_existing_installations, create_directory_symlink, ensure_project_path_is_new,
-    project_for_source, prune_missing_installations, provider_order, safe_skill_target,
+    project_for_source, provider_order, prune_missing_installations, safe_skill_target,
     scan_project, sync_installation_statuses, LibraryRepository,
 };
 use crate::model::{
@@ -23,9 +23,7 @@ impl LibraryRepository {
         library_skill_id: &str,
         provider: Provider,
     ) -> Result<SkillInstallation, AppError> {
-        self.install_skill_with_writer(library_skill_id, provider, |index| {
-            self.write_index(index)
-        })
+        self.install_skill_with_writer(library_skill_id, provider, |index| self.write_index(index))
     }
 
     pub(crate) fn install_skill_with_writer<Writer>(
@@ -76,11 +74,12 @@ impl LibraryRepository {
                         path: previous_target.display().to_string(),
                     });
                 }
-                let previous_resolved = previous_target.canonicalize().map_err(|_| {
-                    AppError::TargetConflict {
-                        path: previous_target.display().to_string(),
-                    }
-                })?;
+                let previous_resolved =
+                    previous_target
+                        .canonicalize()
+                        .map_err(|_| AppError::TargetConflict {
+                            path: previous_target.display().to_string(),
+                        })?;
                 if previous_resolved != source_path {
                     return Err(AppError::TargetConflict {
                         path: previous_target.display().to_string(),
@@ -173,11 +172,12 @@ impl LibraryRepository {
         }
         sync_installation_statuses(&mut index);
         if let Err(error) = write_index(&index) {
-            remove_matching_directory_link(&target_path, Some(&installation.source_path))
-                .map_err(|rollback_error| AppError::RollbackFailed {
+            remove_matching_directory_link(&target_path, Some(&installation.source_path)).map_err(
+                |rollback_error| AppError::RollbackFailed {
                     original_error: error.to_string(),
                     rollback_error: rollback_error.to_string(),
-                })?;
+                },
+            )?;
             if let Some(old_target) = old_link {
                 create_directory_symlink(&old_target, &target_path).map_err(|rollback_error| {
                     AppError::RollbackFailed {
@@ -402,10 +402,7 @@ impl LibraryRepository {
                     message: format!("迁移源缺少父目录：{}", source_path.display()),
                 });
             };
-            let tombstone = parent.join(format!(
-                ".skill-migrate-{}.tombstone",
-                Uuid::new_v4()
-            ));
+            let tombstone = parent.join(format!(".skill-migrate-{}.tombstone", Uuid::new_v4()));
             if let Err(error) = self.paths().assert_allowed(&tombstone) {
                 let _ = fs::remove_dir_all(&dest_root);
                 return Err(error);
@@ -564,9 +561,11 @@ fn remove_new_install_link_after_failure(
 }
 
 fn ensure_provider_source_path(source_path: &Path, provider_root: &Path) -> Result<(), AppError> {
-    let parent = source_path.parent().ok_or_else(|| AppError::PathOutsideManagedRoots {
-        path: source_path.display().to_string(),
-    })?;
+    let parent = source_path
+        .parent()
+        .ok_or_else(|| AppError::PathOutsideManagedRoots {
+            path: source_path.display().to_string(),
+        })?;
     let resolved_parent = parent.canonicalize()?;
     let resolved_root = provider_root.canonicalize()?;
     if crate::path_norm::path_is_under(&resolved_parent, &resolved_root) {
@@ -648,9 +647,11 @@ fn remove_matching_directory_link(
         Ok(_) => {}
     }
     if let Some(expected_source) = expected_source {
-        let resolved = target.canonicalize().map_err(|_| AppError::TargetConflict {
-            path: target.display().to_string(),
-        })?;
+        let resolved = target
+            .canonicalize()
+            .map_err(|_| AppError::TargetConflict {
+                path: target.display().to_string(),
+            })?;
         let expected = expected_source
             .canonicalize()
             .unwrap_or_else(|_| expected_source.to_path_buf());

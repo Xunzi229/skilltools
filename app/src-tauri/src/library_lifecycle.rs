@@ -100,9 +100,7 @@ impl LibraryRepository {
         skill_id: &str,
         new_name: String,
     ) -> Result<LibrarySkillSummary, AppError> {
-        self.rename_library_skill_with_writer(skill_id, new_name, |index| {
-            self.write_index(index)
-        })
+        self.rename_library_skill_with_writer(skill_id, new_name, |index| self.write_index(index))
     }
 
     pub(crate) fn rename_library_skill_with_writer<Writer>(
@@ -135,12 +133,9 @@ impl LibraryRepository {
                 message: "请先卸载所有安装后再重命名".into(),
             });
         }
-        let parent = skill
-            .absolute_path
-            .parent()
-            .ok_or_else(|| AppError::Io {
-                message: "无法解析 Skill 父目录".into(),
-            })?;
+        let parent = skill.absolute_path.parent().ok_or_else(|| AppError::Io {
+            message: "无法解析 Skill 父目录".into(),
+        })?;
         let dest = parent.join(&new_name);
         if dest.exists() {
             return Err(AppError::TargetConflict {

@@ -1,5 +1,5 @@
-use crate::library_repository::LibraryRepository;
 use crate::error::AppError;
+use crate::library_repository::LibraryRepository;
 use crate::model::{
     BatchItemResult, BatchItemStatus, BatchResult, Provider, SkillDetail, SkillStatus,
 };
@@ -262,7 +262,10 @@ mod tests {
     fn batch_migration_rejects_paused_skill() {
         let dir = tempdir().unwrap();
         let paths = AppPaths::for_test(dir.path());
-        let source = paths.provider_root(Provider::Cursor).unwrap().join("paused");
+        let source = paths
+            .provider_root(Provider::Cursor)
+            .unwrap()
+            .join("paused");
         std::fs::create_dir_all(&source).unwrap();
         std::fs::write(source.join("SKILL.md"), "# paused").unwrap();
         let skills = SkillRepository::new(paths.clone());

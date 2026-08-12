@@ -98,8 +98,7 @@ impl LibraryRepository {
         );
         project.id = id;
         project.last_synced_at = Some(Utc::now());
-        project.last_updated_at = latest_commit_time(&destination)?
-            .or_else(|| Some(Utc::now()));
+        project.last_updated_at = latest_commit_time(&destination)?.or_else(|| Some(Utc::now()));
         let result = (|| {
             let skills = scan_project(&project, &[])?;
             index.projects.push(project.clone());
@@ -113,7 +112,10 @@ impl LibraryRepository {
         Ok(project)
     }
 
-    pub fn pull_git_project(&self, project_id: &str) -> Result<crate::model::ProjectPullResult, AppError> {
+    pub fn pull_git_project(
+        &self,
+        project_id: &str,
+    ) -> Result<crate::model::ProjectPullResult, AppError> {
         let _guard = lock_app_transaction(&self.paths)?;
         let mut index = self.load_index()?;
         let position = project_position(&index, project_id)?;
@@ -157,14 +159,13 @@ impl LibraryRepository {
                 Some(_) => {
                     let fingerprint =
                         crate::skill_metadata::skill_content_fingerprint(&skill.absolute_path);
-                    if previous_fingerprints
-                        .get(&skill.relative_path)
-                        .is_some_and(|(name, description, prev_fp)| {
+                    if previous_fingerprints.get(&skill.relative_path).is_some_and(
+                        |(name, description, prev_fp)| {
                             name != &skill.name
                                 || description != &skill.description
                                 || prev_fp != &fingerprint
-                        })
-                    {
+                        },
+                    ) {
                         changed.push(skill.clone());
                     }
                 }
@@ -336,7 +337,6 @@ impl LibraryRepository {
         }
     }
 
-
     pub(crate) fn mutate_index<T>(
         &self,
         action: impl FnOnce(&mut LibraryIndex) -> Result<T, AppError>,
@@ -422,7 +422,10 @@ fn canonical_project_path(path: &Path) -> Result<PathBuf, AppError> {
     Ok(canonical)
 }
 
-pub(crate) fn ensure_project_path_is_new(index: &LibraryIndex, path: &Path) -> Result<(), AppError> {
+pub(crate) fn ensure_project_path_is_new(
+    index: &LibraryIndex,
+    path: &Path,
+) -> Result<(), AppError> {
     if index
         .projects
         .iter()
@@ -525,8 +528,8 @@ pub(crate) fn scan_project(
             let metadata = read_skill_metadata(&absolute_path);
             let id = id_for(relative_path);
             let old = previous.iter().find(|skill| skill.id == id);
-            let parent_skill_id = parent_skill_relative(relative_path, &directories)
-                .map(|parent| id_for(&parent));
+            let parent_skill_id =
+                parent_skill_relative(relative_path, &directories).map(|parent| id_for(&parent));
             LibrarySkillSummary {
                 id,
                 project_id: project.id.clone(),
@@ -725,7 +728,9 @@ pub(crate) fn adopt_existing_installations(index: &mut LibraryIndex, paths: &App
 }
 
 pub(crate) fn prune_missing_installations(index: &mut LibraryIndex) {
-    index.installations.retain(|installation| path_is_symlink_link(&installation.target_path));
+    index
+        .installations
+        .retain(|installation| path_is_symlink_link(&installation.target_path));
 }
 
 pub(crate) fn sync_installation_statuses(index: &mut LibraryIndex) {
@@ -1418,9 +1423,10 @@ mod tests {
         repository.write_index(&index).unwrap();
 
         let report = repository.scan_install_health().unwrap();
-        assert!(report.issues.iter().any(|issue| {
-            issue.kind == InstallHealthKind::MissingTarget && issue.repairable
-        }));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| { issue.kind == InstallHealthKind::MissingTarget && issue.repairable }));
 
         let repaired = repository.repair_installations().unwrap();
         assert!(repaired.repaired >= 1);
@@ -1444,7 +1450,9 @@ mod tests {
         assert!(!result.replaced_with_link);
         assert!(skill_dir.join("SKILL.md").is_file());
         let skills = repository.list_library_skills().unwrap();
-        assert!(skills.iter().any(|skill| skill.id == result.library_skill_id));
+        assert!(skills
+            .iter()
+            .any(|skill| skill.id == result.library_skill_id));
         assert!(skills
             .iter()
             .any(|skill| skill.name == "local-skill" && skill.absolute_path.is_dir()));
@@ -1483,7 +1491,10 @@ mod tests {
     fn migrate_provider_skill_rejects_source_from_other_provider_root() {
         let base = tempdir().unwrap();
         let paths = AppPaths::for_test(base.path());
-        let source = paths.provider_root(Provider::Claude).unwrap().join("wrong-root");
+        let source = paths
+            .provider_root(Provider::Claude)
+            .unwrap()
+            .join("wrong-root");
         write_skill(&source, "wrong-root");
         let repository = LibraryRepository::new(paths);
 
@@ -1503,7 +1514,10 @@ mod tests {
         let outside = tempdir().unwrap();
         let paths = AppPaths::for_test(base.path());
         write_skill(&outside.path().join("linked"), "linked");
-        let source = paths.provider_root(Provider::Cursor).unwrap().join("linked");
+        let source = paths
+            .provider_root(Provider::Cursor)
+            .unwrap()
+            .join("linked");
         fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(outside.path().join("linked"), &source).unwrap();
         let repository = LibraryRepository::new(paths);
@@ -1522,7 +1536,10 @@ mod tests {
     fn migrate_replace_index_failure_restores_source_and_removes_copy_and_link() {
         let base = tempdir().unwrap();
         let paths = AppPaths::for_test(base.path());
-        let source = paths.provider_root(Provider::Cursor).unwrap().join("rollback");
+        let source = paths
+            .provider_root(Provider::Cursor)
+            .unwrap()
+            .join("rollback");
         write_skill(&source, "rollback");
         let repository = LibraryRepository::new(paths.clone());
 
@@ -1533,9 +1550,11 @@ mod tests {
                 &source,
                 true,
                 create_directory_symlink,
-                |_| Err(AppError::Io {
-                    message: "injected index failure".into(),
-                }),
+                |_| {
+                    Err(AppError::Io {
+                        message: "injected index failure".into(),
+                    })
+                },
             )
             .unwrap_err();
 

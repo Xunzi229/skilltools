@@ -151,10 +151,7 @@ mod tests {
         let lib = PathBuf::from(r"C:\Users\Demo\library");
         let child = PathBuf::from(r"\\?\C:\Users\Demo\library\projects\abc\skill");
         assert!(path_is_under(&child, &lib));
-        assert!(!path_is_under(
-            &PathBuf::from(r"\\?\D:\other\skill"),
-            &lib
-        ));
+        assert!(!path_is_under(&PathBuf::from(r"\\?\D:\other\skill"), &lib));
     }
 
     #[test]

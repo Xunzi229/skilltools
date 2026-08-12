@@ -381,7 +381,10 @@ mod tests {
         let content = "---\nname: old\ndescription: d\n---\nbody\n";
         let validation = validate_skill_frontmatter(content);
         assert!(validation.ok);
-        assert_eq!(validation.fields.get("name").map(String::as_str), Some("old"));
+        assert_eq!(
+            validation.fields.get("name").map(String::as_str),
+            Some("old")
+        );
         let updated = update_frontmatter_fields(content, Some("new"), Some("desc")).unwrap();
         assert!(updated.contains("name: new"));
         assert!(updated.contains("description: desc"));

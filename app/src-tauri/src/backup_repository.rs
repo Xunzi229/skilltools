@@ -13,9 +13,7 @@ use crate::fs_ops::{
 /// 软链 Skill 删除/备份归档标记：只记录链接目标，恢复时重建链接。
 const SYMLINK_TARGET_MARKER: &str = ".skill-manager-symlink-target";
 use crate::json_store::{read_json, write_json};
-use crate::model::{
-    BackupArchiveKind, BackupReason, BackupRecord, SkillDetail, SkillStatus,
-};
+use crate::model::{BackupArchiveKind, BackupReason, BackupRecord, SkillDetail, SkillStatus};
 use crate::paths::AppPaths;
 use crate::skill_repository::SkillRepository;
 use crate::transaction_lock::{lock_app_transaction, AppTransactionGuard};
@@ -348,8 +346,7 @@ impl BackupRepository {
             None => is_legacy_provider_symlink_archive(&record.archive_path),
         };
         if restore_as_symlink {
-            if let Err(error) = restore_provider_symlink_archive(&record.archive_path, &temp_path)
-            {
+            if let Err(error) = restore_provider_symlink_archive(&record.archive_path, &temp_path) {
                 let _ = remove_restored_skill_path(&temp_path);
                 return Err(error);
             }
@@ -527,10 +524,7 @@ fn is_symlink(path: &Path) -> bool {
 }
 
 /// 备份 provider 根下的 Skill 符号链接：只归档链接目标，不复制原始目录内容。
-fn archive_provider_symlink(
-    source: &Path,
-    target: &Path,
-) -> Result<Vec<ManifestEntry>, AppError> {
+fn archive_provider_symlink(source: &Path, target: &Path) -> Result<Vec<ManifestEntry>, AppError> {
     let link_target = fs::read_link(source)?;
     fs::create_dir_all(target)?;
     fs::write(
