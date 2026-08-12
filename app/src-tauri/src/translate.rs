@@ -714,7 +714,7 @@ fn sanitize_api_error_body(body: &str, max_bytes: usize) -> String {
         body.to_string()
     };
     text = redact_api_tokens(&text);
-    text = text.replace('\n', " ").replace('\r', " ");
+    text = text.replace(['\n', '\r'], " ");
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return "(空响应体)".into();
