@@ -567,7 +567,9 @@ fn ensure_provider_source_path(source_path: &Path, provider_root: &Path) -> Resu
             path: source_path.display().to_string(),
         })?;
     let resolved_parent = parent.canonicalize()?;
-    let resolved_root = provider_root.canonicalize()?;
+    let resolved_root = provider_root
+        .canonicalize()
+        .unwrap_or_else(|_| provider_root.to_path_buf());
     if crate::path_norm::path_is_under(&resolved_parent, &resolved_root) {
         Ok(())
     } else {
