@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::json_store::{read_json_value, write_json_value};
 use crate::model::Provider;
+use crate::secret_store;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -136,18 +137,71 @@ pub fn settings_path(app_data_dir: &Path) -> PathBuf {
 }
 
 pub fn load_settings(app_data_dir: &Path) -> Result<AppSettings, AppError> {
-    read_json_value(
+    let mut settings = read_json_value(
         &settings_path(app_data_dir),
         AppSettings::default,
         |message| AppError::Settings { message },
-    )
+    )?;
+    hydrate_translate_api_key(&mut settings, app_data_dir)?;
+    Ok(settings)
 }
 
 pub fn save_settings(app_data_dir: &Path, settings: &AppSettings) -> Result<(), AppError> {
     std::fs::create_dir_all(app_data_dir)?;
-    write_json_value(&settings_path(app_data_dir), settings, |message| {
+    let mut persisted = settings.clone();
+    persist_translate_api_key(&mut persisted)?;
+    write_json_value(&settings_path(app_data_dir), &persisted, |message| {
         AppError::Settings { message }
     })
+}
+
+/// Load API key from OS keychain into the in-memory settings object.
+/// Migrates any legacy plaintext key still present in settings.json.
+fn hydrate_translate_api_key(
+    settings: &mut AppSettings,
+    app_data_dir: &Path,
+) -> Result<(), AppError> {
+    let legacy = settings.translate.api_key.trim().to_owned();
+    let stored = secret_store::get_translate_api_key()?;
+
+    match (stored, legacy.is_empty()) {
+        (Some(key), _) => {
+            settings.translate.api_key = key;
+            if !legacy.is_empty() {
+                // Remove plaintext copy from disk once keychain has the secret.
+                let mut persisted = settings.clone();
+                persisted.translate.api_key.clear();
+                write_json_value(&settings_path(app_data_dir), &persisted, |message| {
+                    AppError::Settings { message }
+                })?;
+            }
+        }
+        (None, false) => {
+            secret_store::set_translate_api_key(&legacy)?;
+            settings.translate.api_key = legacy;
+            let mut persisted = settings.clone();
+            persisted.translate.api_key.clear();
+            write_json_value(&settings_path(app_data_dir), &persisted, |message| {
+                AppError::Settings { message }
+            })?;
+        }
+        (None, true) => {
+            settings.translate.api_key.clear();
+        }
+    }
+    Ok(())
+}
+
+fn persist_translate_api_key(settings: &mut AppSettings) -> Result<(), AppError> {
+    let key = settings.translate.api_key.trim().to_owned();
+    if key.is_empty() {
+        secret_store::delete_translate_api_key()?;
+    } else {
+        secret_store::set_translate_api_key(&key)?;
+    }
+    // Never write the raw API key into settings.json.
+    settings.translate.api_key.clear();
+    Ok(())
 }
 
 #[cfg(test)]
@@ -157,6 +211,8 @@ mod tests {
 
     #[test]
     fn round_trips_settings() {
+        let _guard = crate::secret_store::test_lock();
+        crate::secret_store::clear_for_test();
         let base = tempdir().unwrap();
         let settings = AppSettings {
             theme: ThemePreference::Dark,
@@ -177,7 +233,36 @@ mod tests {
             },
         };
         save_settings(base.path(), &settings).unwrap();
+        let on_disk = std::fs::read_to_string(settings_path(base.path())).unwrap();
+        assert!(
+            !on_disk.contains("sk-test"),
+            "api key must not be persisted in settings.json: {on_disk}"
+        );
         let loaded = load_settings(base.path()).unwrap();
         assert_eq!(loaded, settings);
+        assert_eq!(loaded.translate.api_key, "sk-test");
+    }
+
+    #[test]
+    fn migrates_legacy_plaintext_api_key_into_secret_store() {
+        let _guard = crate::secret_store::test_lock();
+        crate::secret_store::clear_for_test();
+        let base = tempdir().unwrap();
+        let mut legacy = AppSettings::default();
+        legacy.translate.api_key = "sk-legacy".into();
+        // Simulate old installs that wrote the key into JSON.
+        write_json_value(&settings_path(base.path()), &legacy, |message| {
+            AppError::Settings { message }
+        })
+        .unwrap();
+
+        let loaded = load_settings(base.path()).unwrap();
+        assert_eq!(loaded.translate.api_key, "sk-legacy");
+        let on_disk = std::fs::read_to_string(settings_path(base.path())).unwrap();
+        assert!(!on_disk.contains("sk-legacy"));
+        assert_eq!(
+            crate::secret_store::get_translate_api_key().unwrap().as_deref(),
+            Some("sk-legacy")
+        );
     }
 }

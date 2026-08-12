@@ -20,6 +20,7 @@ mod system_fonts;
 pub mod model;
 pub mod paths;
 pub mod settings;
+mod secret_store;
 pub mod skill_files;
 pub mod skill_repository;
 mod translate;
