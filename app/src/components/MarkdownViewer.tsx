@@ -10,7 +10,7 @@ import rust from "highlight.js/lib/languages/rust";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useI18n } from "../i18n";
 import type { FileContent } from "../model/skill";
@@ -40,6 +40,13 @@ interface MarkdownViewerProps {
   editable?: boolean;
   saving?: boolean;
   onSave?: (content: string) => Promise<void> | void;
+  onTranslateSelection?: (text: string) => void;
+}
+
+interface SelectionPopup {
+  x: number;
+  y: number;
+  text: string;
 }
 
 function highlightCode(content: string, language: string): string {
@@ -87,19 +94,41 @@ export function MarkdownViewer({
   editable = false,
   saving = false,
   onSave,
+  onTranslateSelection,
 }: MarkdownViewerProps) {
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [mdSource, setMdSource] = useState(false);
+  const [selectionPopup, setSelectionPopup] = useState<SelectionPopup | null>(null);
+  const previewBodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setEditing(false);
     setDraft(file?.content ?? "");
     setSaveError(null);
     setMdSource(false);
+    setSelectionPopup(null);
   }, [file?.relativePath, file?.content]);
+
+  useEffect(() => {
+    if (editing) setSelectionPopup(null);
+  }, [editing]);
+
+  useEffect(() => {
+    if (!selectionPopup) return;
+    const hide = () => setSelectionPopup(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") hide();
+    };
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("scroll", hide, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [selectionPopup]);
 
   const canEdit =
     editable &&
@@ -187,7 +216,35 @@ export function MarkdownViewer({
           ) : null}
         </div>
       </div>
-      <div className="file-preview-body min-h-0 flex-1 overflow-auto">
+      <div
+        ref={previewBodyRef}
+        className="file-preview-body min-h-0 flex-1 overflow-auto"
+        onMouseUp={() => {
+          if (!onTranslateSelection || editing) {
+            setSelectionPopup(null);
+            return;
+          }
+          const selection = window.getSelection();
+          const text = selection?.toString().trim() ?? "";
+          const anchor = selection?.anchorNode ?? null;
+          const inPreview =
+            Boolean(anchor) && Boolean(previewBodyRef.current?.contains(anchor));
+          if (!text || !inPreview || !selection || selection.rangeCount === 0) {
+            setSelectionPopup(null);
+            return;
+          }
+          const rect = selection.getRangeAt(0).getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) {
+            setSelectionPopup(null);
+            return;
+          }
+          setSelectionPopup({
+            x: rect.left + rect.width / 2,
+            y: rect.top,
+            text,
+          });
+        }}
+      >
         {loading ? (
           <p className="px-4 py-3 text-[13px] text-ink-3">{t("markdown.loading")}</p>
         ) : errorMessage ? (
@@ -253,6 +310,22 @@ export function MarkdownViewer({
           </pre>
         )}
       </div>
+      {selectionPopup && onTranslateSelection ? (
+        <button
+          type="button"
+          className="translate-selection-pop macos-btn-primary macos-btn-sm"
+          style={{ left: selectionPopup.x, top: selectionPopup.y }}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            const text = selectionPopup.text;
+            setSelectionPopup(null);
+            window.getSelection()?.removeAllRanges();
+            onTranslateSelection(text);
+          }}
+        >
+          {t("translate.selectionButton")}
+        </button>
+      ) : null}
     </article>
   );
 }

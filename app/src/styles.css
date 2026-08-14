@@ -352,6 +352,13 @@
     border-radius: 7px;
   }
 
+  .translate-selection-pop {
+    position: fixed;
+    z-index: 40;
+    transform: translate(-50%, calc(-100% - 8px));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  }
+
   /* 库列表批量操作：三块浅底 + 统一控件高度 */
   .library-batch {
     display: flex;

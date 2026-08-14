@@ -229,6 +229,177 @@ fn join_translated_chunks(chunks: &[String]) -> String {
     chunks.join("")
 }
 
+const CODE_PLACEHOLDER_OPEN: char = '\u{E000}';
+const CODE_PLACEHOLDER_CLOSE: char = '\u{E001}';
+
+struct ProtectedMarkdown {
+    text: String,
+    segments: Vec<String>,
+}
+
+fn code_placeholder(index: usize) -> String {
+    format!("{CODE_PLACEHOLDER_OPEN}{index}{CODE_PLACEHOLDER_CLOSE}")
+}
+
+fn is_line_start(source: &str, index: usize) -> bool {
+    index == 0 || source.as_bytes().get(index - 1) == Some(&b'\n')
+}
+
+fn match_opening_fence(source: &str, mut index: usize) -> Option<(usize, char, usize)> {
+    if !is_line_start(source, index) {
+        return None;
+    }
+    let bytes = source.as_bytes();
+    let mut spaces = 0usize;
+    while index < source.len() && spaces < 3 && bytes[index] == b' ' {
+        index += 1;
+        spaces += 1;
+    }
+    let fence_char = *bytes.get(index)?;
+    if fence_char != b'`' && fence_char != b'~' {
+        return None;
+    }
+    let start_fence = index;
+    while index < source.len() && bytes[index] == fence_char {
+        index += 1;
+    }
+    let count = index - start_fence;
+    if count < 3 {
+        return None;
+    }
+    Some((index, fence_char as char, count))
+}
+
+fn match_fenced_block(source: &str, start: usize) -> Option<usize> {
+    let (mut index, fence_char, count) = match_opening_fence(source, start)?;
+    let fence_byte = fence_char as u8;
+    while index < source.len() && source.as_bytes()[index] != b'\n' {
+        if fence_byte == b'`' && source.as_bytes()[index] == b'`' {
+            return None;
+        }
+        index += 1;
+    }
+    if index < source.len() {
+        index += 1;
+    }
+    let bytes = source.as_bytes();
+    while index < source.len() {
+        let line_start = index;
+        let mut cursor = index;
+        let mut spaces = 0usize;
+        while cursor < source.len() && spaces < 3 && bytes[cursor] == b' ' {
+            cursor += 1;
+            spaces += 1;
+        }
+        let close_start = cursor;
+        while cursor < source.len() && bytes[cursor] == fence_byte {
+            cursor += 1;
+        }
+        let close_count = cursor - close_start;
+        if close_count >= count {
+            while cursor < source.len() && bytes[cursor] == b' ' {
+                cursor += 1;
+            }
+            if cursor >= source.len() || bytes[cursor] == b'\n' {
+                if cursor < source.len() {
+                    cursor += 1;
+                }
+                return Some(cursor);
+            }
+        }
+        index = source[line_start..]
+            .find('\n')
+            .map(|rel| line_start + rel + 1)
+            .unwrap_or(source.len());
+    }
+    None
+}
+
+fn match_inline_code(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if bytes.get(start) != Some(&b'`') {
+        return None;
+    }
+    let mut index = start;
+    while index < source.len() && bytes[index] == b'`' {
+        index += 1;
+    }
+    let count = index - start;
+    if count == 0 {
+        return None;
+    }
+    while index + count <= source.len() {
+        if source.as_bytes()[index] == b'\n' {
+            return None;
+        }
+        if (0..count).all(|offset| source.as_bytes()[index + offset] == b'`')
+            && source.as_bytes().get(index + count) != Some(&b'`')
+        {
+            return Some(index + count);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn protect_markdown_code(source: &str) -> ProtectedMarkdown {
+    let mut text = String::with_capacity(source.len());
+    let mut segments = Vec::new();
+    let mut index = 0usize;
+    while index < source.len() {
+        if let Some(end) = match_fenced_block(source, index) {
+            text.push_str(&code_placeholder(segments.len()));
+            segments.push(source[index..end].to_string());
+            index = end;
+            continue;
+        }
+        if let Some(end) = match_inline_code(source, index) {
+            text.push_str(&code_placeholder(segments.len()));
+            segments.push(source[index..end].to_string());
+            index = end;
+            continue;
+        }
+        let ch = source[index..].chars().next().unwrap_or('\0');
+        text.push(ch);
+        index += ch.len_utf8();
+    }
+    ProtectedMarkdown { text, segments }
+}
+
+fn restore_markdown_code(translated: &str, segments: &[String]) -> String {
+    let mut result = translated.to_string();
+    for index in (0..segments.len()).rev() {
+        let token = code_placeholder(index);
+        result = result.replace(&token, &segments[index]);
+    }
+    result
+}
+
+/// Collect pasted/selected text for translation preview. Read-only; never writes.
+pub fn collect_translate_text(
+    body: String,
+    relative_path: &str,
+) -> Result<CollectedSource, AppError> {
+    if body.trim().is_empty() {
+        return Err(AppError::Translate {
+            message: "没有可翻译的选中文本".into(),
+        });
+    }
+    let relative_path = relative_path.trim().replace('\\', "/");
+    let label = if relative_path.is_empty() {
+        "selection.md".to_string()
+    } else {
+        relative_path
+    };
+    let content_md5 = content_md5_hex(&body);
+    Ok(CollectedSource {
+        prompt_body: body,
+        source_files: vec![label],
+        truncated: false,
+        content_md5,
+    })
+}
+
 /// Hex MD5 of file content bytes (UTF-8). Used as cache key material.
 pub fn content_md5_hex(content: &str) -> String {
     md5_hex(content.as_bytes())
@@ -818,7 +989,8 @@ where
 {
     let target_lang = effective_target_lang(settings);
     let lang_code = google_lang_code(&target_lang);
-    let chunks = split_text_into_byte_chunks(&source.prompt_body, GOOGLE_MAX_CHUNK_BYTES);
+    let protected = protect_markdown_code(&source.prompt_body);
+    let chunks = split_text_into_byte_chunks(&protected.text, GOOGLE_MAX_CHUNK_BYTES);
     if chunks.is_empty() {
         let relative_path = source_relative_path(source);
         return Err(AppError::Translate {
@@ -852,7 +1024,7 @@ where
     }
 
     Ok(TranslatePreview {
-        markdown: join_translated_chunks(&translated_parts),
+        markdown: restore_markdown_code(&join_translated_chunks(&translated_parts), &protected.segments),
         source_files: source.source_files.clone(),
         truncated: false,
         target_lang,
@@ -885,7 +1057,8 @@ where
         .map(|path| path.as_str())
         .unwrap_or("SKILL.md");
     let budget = chunk_content_budget(relative_path);
-    let chunks = split_text_into_byte_chunks(&source.prompt_body, budget);
+    let protected = protect_markdown_code(&source.prompt_body);
+    let chunks = split_text_into_byte_chunks(&protected.text, budget);
     if chunks.is_empty() {
         return Err(AppError::Translate {
             message: format!("「{relative_path}」没有可翻译的文本内容"),
@@ -902,7 +1075,7 @@ where
         translate_prompts_in_batches(settings, &prompts, TRANSLATE_CONCURRENCY, &translate_chunk)?;
 
     Ok(TranslatePreview {
-        markdown: join_translated_chunks(&translated_parts),
+        markdown: restore_markdown_code(&join_translated_chunks(&translated_parts), &protected.segments),
         source_files: source.source_files.clone(),
         truncated: false,
         target_lang,
@@ -1984,5 +2157,43 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("HTTP 429"), "{message}");
         assert!(message.contains("模型服务"), "{message}");
+    }
+
+    #[test]
+    fn protect_markdown_code_skips_fences_and_inline() {
+        let source = "# Hello\n\n```js\nconst msg = \"translate me\";\n```\n\nUse `skip` here.\n";
+        let protected = protect_markdown_code(source);
+        assert!(!protected.text.contains("const msg"));
+        assert!(!protected.text.contains("`skip`"));
+        assert!(protected.text.contains("# Hello"));
+        assert!(protected.text.contains("Use"));
+        assert_eq!(protected.segments.len(), 2);
+        let restored = restore_markdown_code(&protected.text, &protected.segments);
+        assert_eq!(restored, source);
+    }
+
+    #[test]
+    fn google_translate_restores_code_after_mock() {
+        let settings = TranslateSettings {
+            target_lang: "中文".into(),
+            ..TranslateSettings::default()
+        };
+        let body = "# Title\n\n```\nKEEP\n```\n\nHello `x`.\n";
+        let source = sample_source(body);
+        let preview = translate_google_with_chunk_fn(&settings, &source, |_lang, chunk| {
+            Ok(chunk.replace("Hello", "你好").replace("Title", "标题"))
+        })
+        .unwrap();
+        assert!(preview.markdown.contains("```\nKEEP\n```"));
+        assert!(preview.markdown.contains("`x`"));
+        assert!(preview.markdown.contains("你好"));
+        assert!(preview.markdown.contains("标题"));
+        assert!(!preview.markdown.contains("Hello"));
+    }
+
+    #[test]
+    fn collect_translate_text_rejects_blank() {
+        let error = collect_translate_text("   \n".into(), "SKILL.md").unwrap_err();
+        assert!(error.to_string().contains("选中文本"));
     }
 }
