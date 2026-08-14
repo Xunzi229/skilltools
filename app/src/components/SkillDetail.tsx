@@ -8,7 +8,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { FileTree } from "./FileTree";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { SkillMetaForm } from "./SkillMetaForm";
-import { TranslatePreviewButton } from "./TranslatePreviewButton";
+import { TranslatePreviewButton, useTranslatePreview } from "./TranslatePreviewButton";
 import { useI18n } from "../i18n";
 
 interface SkillDetailProps {
@@ -73,6 +73,7 @@ export function SkillDetail({
     source: skill ? { kind: "provider", skillId: skill.id } : null,
     reloadToken: skill?.skillMarkdown,
   });
+  const translate = useTranslatePreview(api, "provider", skill?.id ?? "");
 
   if (loading) {
     return (
@@ -298,9 +299,13 @@ export function SkillDetail({
             editable
             saving={files.saving}
             onSave={files.saveFile}
+            onTranslateSelection={(text) => {
+              translate.run(files.preview?.relativePath ?? "SKILL.md", text);
+            }}
           />
         </div>
       </div>
+      {translate.dialog}
       <ConfirmDialog
         open={deleteOpen}
         title={t("skillDetail.deleteTitle", { name: skill.name })}

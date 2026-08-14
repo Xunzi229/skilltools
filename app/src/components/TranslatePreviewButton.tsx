@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SkillApi } from "../api/skillApi";
 import type { TranslatePreview, TranslateSkillSource } from "../model/skill";
 import { errorMessage } from "../utils/errors";
@@ -49,18 +49,18 @@ function TranslatingPanel() {
   );
 }
 
-export function TranslatePreviewButton({
-  api,
-  source,
-  skillId,
-  relativePath,
-  disabled = false,
-}: TranslatePreviewButtonProps) {
+export function useTranslatePreview(
+  api: SkillApi | null,
+  source: TranslateSkillSource,
+  skillId: string,
+) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TranslatePreview | null>(null);
+  const [pathLabel, setPathLabel] = useState<string>("");
+  const [isSelection, setIsSelection] = useState(false);
   const requestIdRef = useRef(0);
 
   const closePreview = () => {
@@ -69,28 +69,27 @@ export function TranslatePreviewButton({
     setLoading(false);
     setError(null);
     setResult(null);
+    setIsSelection(false);
   };
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      requestIdRef.current += 1;
-      setOpen(false);
-      setLoading(false);
-      setError(null);
-      setResult(null);
+      closePreview();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  const runTranslate = () => {
-    const path = relativePath?.trim();
-    if (!path) return;
+  const run = (relativePath: string, sourceText?: string) => {
+    if (!api || !skillId) return;
+    const path = relativePath.trim() || "SKILL.md";
+    const selected = sourceText?.trim() ?? "";
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    // 先打开预览框并进入「翻译中」，再异步发起请求，避免同步 IPC 卡住首帧。
+    setIsSelection(Boolean(selected));
+    setPathLabel(path);
     setOpen(true);
     setLoading(true);
     setError(null);
@@ -98,7 +97,12 @@ export function TranslatePreviewButton({
     window.setTimeout(() => {
       void (async () => {
         try {
-          const preview = await api.previewTranslateSkill(source, skillId, path);
+          const preview = await api.previewTranslateSkill(
+            source,
+            skillId,
+            path,
+            selected || null,
+          );
           if (requestIdRef.current !== requestId) return;
           setResult(preview);
         } catch (err: unknown) {
@@ -113,6 +117,84 @@ export function TranslatePreviewButton({
     }, 0);
   };
 
+  const dialog: ReactNode = open ? (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-[2px]">
+      <div
+        className="macos-sheet flex h-[min(85vh,720px)] w-full max-w-3xl flex-col overflow-hidden p-0"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="translate-preview-title"
+      >
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-line-strong px-5 py-4">
+          <div className="min-w-0">
+            <h2
+              id="translate-preview-title"
+              className="m-0 text-[15px] font-semibold tracking-tight text-ink"
+            >
+              {isSelection ? t("translate.selectionTitle") : t("translate.previewTitle")}
+            </h2>
+            <p className="mt-1 text-[12px] leading-5 text-ink-3">
+              {loading
+                ? isSelection
+                  ? t("translate.translatingSelection")
+                  : t("translate.translatingFile", {
+                      path: pathLabel || t("translate.currentFile"),
+                    })
+                : t("translate.previewHint")}
+              {!loading && result
+                ? ` · ${result.sourceFiles.join("、")} → ${result.targetLang} · ${result.model}`
+                : null}
+              {!loading && result?.fromCache ? t("translate.fromCache") : null}
+              {!loading && result?.truncated ? t("translate.truncated") : null}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="macos-btn-ghost macos-btn-sm shrink-0"
+            onClick={closePreview}
+          >
+            {t("common.close")}
+          </button>
+        </header>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {loading ? (
+            <TranslatingPanel />
+          ) : (
+            <div className="translate-result-enter flex h-full min-h-0 flex-col overflow-hidden">
+              <MarkdownViewer
+                file={
+                  result
+                    ? {
+                        relativePath: result.sourceFiles[0] ?? t("translate.previewFilename"),
+                        mediaType: "markdown",
+                        content: result.markdown,
+                        message: null,
+                      }
+                    : null
+                }
+                loading={false}
+                errorMessage={error}
+                editable={false}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  return { run, loading, open, dialog };
+}
+
+export function TranslatePreviewButton({
+  api,
+  source,
+  skillId,
+  relativePath,
+  disabled = false,
+}: TranslatePreviewButtonProps) {
+  const { t } = useI18n();
+  const preview = useTranslatePreview(api, source, skillId);
   const hasSelection = Boolean(relativePath?.trim());
 
   return (
@@ -120,80 +202,20 @@ export function TranslatePreviewButton({
       <button
         type="button"
         className="macos-btn-ghost"
-        disabled={disabled || loading || !hasSelection}
+        disabled={disabled || preview.loading || !hasSelection}
         title={
           hasSelection
             ? t("translate.buttonTitle", { path: relativePath ?? "" })
             : t("translate.buttonDisabled")
         }
-        onClick={runTranslate}
+        onClick={() => {
+          const path = relativePath?.trim();
+          if (path) preview.run(path);
+        }}
       >
         {t("translate.button")}
       </button>
-      {open ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 backdrop-blur-[2px]">
-          <div
-            className="macos-sheet flex h-[min(85vh,720px)] w-full max-w-3xl flex-col overflow-hidden p-0"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="translate-preview-title"
-          >
-            <header className="flex shrink-0 items-start justify-between gap-3 border-b border-line-strong px-5 py-4">
-              <div className="min-w-0">
-                <h2
-                  id="translate-preview-title"
-                  className="m-0 text-[15px] font-semibold tracking-tight text-ink"
-                >
-                  {t("translate.previewTitle")}
-                </h2>
-                <p className="mt-1 text-[12px] leading-5 text-ink-3">
-                  {loading
-                    ? t("translate.translatingFile", {
-                        path: relativePath ?? t("translate.currentFile"),
-                      })
-                    : t("translate.previewHint")}
-                  {!loading && result
-                    ? ` · ${result.sourceFiles.join("、")} → ${result.targetLang} · ${result.model}`
-                    : null}
-                  {!loading && result?.fromCache ? t("translate.fromCache") : null}
-                  {!loading && result?.truncated ? t("translate.truncated") : null}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="macos-btn-ghost macos-btn-sm shrink-0"
-                onClick={closePreview}
-              >
-                {t("common.close")}
-              </button>
-            </header>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              {loading ? (
-                <TranslatingPanel />
-              ) : (
-                <div className="translate-result-enter flex h-full min-h-0 flex-col overflow-hidden">
-                  <MarkdownViewer
-                    file={
-                      result
-                        ? {
-                            // 保留原扩展名，避免「.md（译文）」被识别成 Text 且布局异常
-                            relativePath: result.sourceFiles[0] ?? t("translate.previewFilename"),
-                            mediaType: "markdown",
-                            content: result.markdown,
-                            message: null,
-                          }
-                        : null
-                    }
-                    loading={false}
-                    errorMessage={error}
-                    editable={false}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {preview.dialog}
     </>
   );
 }

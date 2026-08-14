@@ -134,6 +134,7 @@ export interface SkillApi {
     source: TranslateSkillSource,
     skillId: string,
     relativePath: string,
+    sourceText?: string | null,
   ): Promise<TranslatePreview>;
   suggestSkillGroups(
     skillIds: string[],
@@ -267,8 +268,13 @@ export const tauriSkillApi: SkillApi = {
   getSettings: () => call("get_settings"),
   listSystemFonts: () => call("list_system_fonts"),
   saveSettings: (settings) => call("save_settings", { next: settings }),
-  previewTranslateSkill: (source, skillId, relativePath) =>
-    call("preview_translate_skill", { source, skillId, relativePath }),
+  previewTranslateSkill: (source, skillId, relativePath, sourceText) =>
+    call("preview_translate_skill", {
+      source,
+      skillId,
+      relativePath,
+      sourceText: sourceText ?? null,
+    }),
   suggestSkillGroups: (skillIds, options) =>
     call("suggest_skill_groups", {
       skillIds,
