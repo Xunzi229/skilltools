@@ -1031,9 +1031,7 @@ fn translate_prompt_http(
         ],
     });
 
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .build()
+    let client = crate::proxy::blocking_client(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .map_err(|error| AppError::Translate {
             message: format!("创建 HTTP 客户端失败：{error}"),
         })?;
@@ -1127,9 +1125,7 @@ pub fn parse_google_translate_response(
 }
 
 fn translate_google_chunk_http(lang_code: &str, text: &str) -> Result<String, AppError> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(GOOGLE_HTTP_TIMEOUT_SECS))
-        .build()
+    let client = crate::proxy::blocking_client(Duration::from_secs(GOOGLE_HTTP_TIMEOUT_SECS))
         .map_err(|error| AppError::Translate {
             message: format!("创建 HTTP 客户端失败：{error}"),
         })?;

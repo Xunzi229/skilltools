@@ -731,6 +731,7 @@ pub fn save_settings(
 ) -> Result<AppSettings, CommandError> {
     let paths = current_paths(state.inner())?;
     settings::save_settings(&paths.app_data_dir, &next).map_err(map_app_error)?;
+    crate::proxy::apply_runtime(&next.proxy);
     let rebuilt = AppPaths::discover_with_overrides(
         paths.app_data_dir.clone(),
         state.home_dir.clone(),

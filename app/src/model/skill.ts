@@ -256,6 +256,19 @@ export interface TranslateSettings {
   targetLang: string;
 }
 
+export type ProxyType = "http" | "https" | "socks5";
+
+export interface ProxySettings {
+  /** 关闭后走系统/环境变量自动检测 */
+  enabled: boolean;
+  proxyType: ProxyType;
+  host: string;
+  port: number;
+  authEnabled: boolean;
+  username: string;
+  password: string;
+}
+
 export type TranslateSkillSource = "provider" | "library";
 
 export interface TranslatePreview {
@@ -300,6 +313,7 @@ export interface AppSettings {
   previewFontFamily: string;
   previewFontSize: number;
   translate: TranslateSettings;
+  proxy: ProxySettings;
 }
 
 export interface AppPathsInfo {

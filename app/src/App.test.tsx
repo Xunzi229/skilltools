@@ -337,6 +337,15 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
         model: "",
         targetLang: "中文",
       },
+      proxy: {
+        enabled: false,
+        proxyType: "socks5",
+        host: "",
+        port: 0,
+        authEnabled: false,
+        username: "",
+        password: "",
+      },
     }),
     saveSettings: async (settings) => settings,
     previewTranslateSkill: unavailable,
@@ -1405,6 +1414,15 @@ describe("Skill Manager", () => {
         apiKey: "test-key",
         model: "test-model",
         targetLang: "中文",
+      },
+      proxy: {
+        enabled: false,
+        proxyType: "socks5" as const,
+        host: "",
+        port: 0,
+        authEnabled: false,
+        username: "",
+        password: "",
       },
     };
     const taggedSkills = librarySkills.map((skill) =>

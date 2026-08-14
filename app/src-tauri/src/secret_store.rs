@@ -1,4 +1,4 @@
-//! OS keychain storage for sensitive settings (translate API key).
+//! OS keychain storage for sensitive settings (translate API key, proxy password).
 //!
 //! Under `cfg(test)` uses an in-memory map so unit tests do not depend on
 //! platform credential stores.
@@ -7,13 +7,14 @@ use crate::error::AppError;
 
 const SERVICE: &str = "com.skilltools.manager";
 const TRANSLATE_API_KEY_ACCOUNT: &str = "translate_api_key";
+const PROXY_PASSWORD_ACCOUNT: &str = "proxy_password";
 
 #[cfg(test)]
 mod memory {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use super::{AppError, SERVICE, TRANSLATE_API_KEY_ACCOUNT};
+    use super::{AppError, SERVICE};
 
     static STORE: Mutex<Option<HashMap<(String, String), String>>> = Mutex::new(None);
 
@@ -25,31 +26,31 @@ mod memory {
         f(guard.as_mut().expect("initialized"))
     }
 
-    pub fn get_translate_api_key() -> Result<Option<String>, AppError> {
+    pub fn get_secret(account: &str) -> Result<Option<String>, AppError> {
         Ok(with_store(|store| {
             store
-                .get(&(SERVICE.to_owned(), TRANSLATE_API_KEY_ACCOUNT.to_owned()))
+                .get(&(SERVICE.to_owned(), account.to_owned()))
                 .cloned()
         }))
     }
 
-    pub fn set_translate_api_key(api_key: &str) -> Result<(), AppError> {
-        let trimmed = api_key.trim();
+    pub fn set_secret(account: &str, value: &str) -> Result<(), AppError> {
+        let trimmed = value.trim();
         if trimmed.is_empty() {
-            return delete_translate_api_key();
+            return delete_secret(account);
         }
         with_store(|store| {
             store.insert(
-                (SERVICE.to_owned(), TRANSLATE_API_KEY_ACCOUNT.to_owned()),
+                (SERVICE.to_owned(), account.to_owned()),
                 trimmed.to_owned(),
             );
         });
         Ok(())
     }
 
-    pub fn delete_translate_api_key() -> Result<(), AppError> {
+    pub fn delete_secret(account: &str) -> Result<(), AppError> {
         with_store(|store| {
-            store.remove(&(SERVICE.to_owned(), TRANSLATE_API_KEY_ACCOUNT.to_owned()));
+            store.remove(&(SERVICE.to_owned(), account.to_owned()));
         });
         Ok(())
     }
@@ -68,7 +69,7 @@ mod memory {
 mod keychain {
     use keyring::Entry;
 
-    use super::{AppError, SERVICE, TRANSLATE_API_KEY_ACCOUNT};
+    use super::{AppError, SERVICE};
 
     fn map_error(error: keyring::Error) -> AppError {
         AppError::Settings {
@@ -76,12 +77,12 @@ mod keychain {
         }
     }
 
-    fn entry() -> Result<Entry, AppError> {
-        Entry::new(SERVICE, TRANSLATE_API_KEY_ACCOUNT).map_err(map_error)
+    fn entry(account: &str) -> Result<Entry, AppError> {
+        Entry::new(SERVICE, account).map_err(map_error)
     }
 
-    pub fn get_translate_api_key() -> Result<Option<String>, AppError> {
-        match entry()?.get_password() {
+    pub fn get_secret(account: &str) -> Result<Option<String>, AppError> {
+        match entry(account)?.get_password() {
             Ok(value) => {
                 let trimmed = value.trim().to_owned();
                 if trimmed.is_empty() {
@@ -95,16 +96,16 @@ mod keychain {
         }
     }
 
-    pub fn set_translate_api_key(api_key: &str) -> Result<(), AppError> {
-        let trimmed = api_key.trim();
+    pub fn set_secret(account: &str, value: &str) -> Result<(), AppError> {
+        let trimmed = value.trim();
         if trimmed.is_empty() {
-            return delete_translate_api_key();
+            return delete_secret(account);
         }
-        entry()?.set_password(trimmed).map_err(map_error)
+        entry(account)?.set_password(trimmed).map_err(map_error)
     }
 
-    pub fn delete_translate_api_key() -> Result<(), AppError> {
-        match entry()?.delete_credential() {
+    pub fn delete_secret(account: &str) -> Result<(), AppError> {
+        match entry(account)?.delete_credential() {
             Ok(()) => Ok(()),
             Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(map_error(error)),
@@ -113,9 +114,33 @@ mod keychain {
 }
 
 #[cfg(test)]
-pub use memory::{
-    clear_for_test, delete_translate_api_key, get_translate_api_key, set_translate_api_key,
-    test_lock,
-};
+use memory::{delete_secret, get_secret, set_secret};
 #[cfg(not(test))]
-pub use keychain::{delete_translate_api_key, get_translate_api_key, set_translate_api_key};
+use keychain::{delete_secret, get_secret, set_secret};
+
+#[cfg(test)]
+pub use memory::{clear_for_test, test_lock};
+
+pub fn get_translate_api_key() -> Result<Option<String>, AppError> {
+    get_secret(TRANSLATE_API_KEY_ACCOUNT)
+}
+
+pub fn set_translate_api_key(api_key: &str) -> Result<(), AppError> {
+    set_secret(TRANSLATE_API_KEY_ACCOUNT, api_key)
+}
+
+pub fn delete_translate_api_key() -> Result<(), AppError> {
+    delete_secret(TRANSLATE_API_KEY_ACCOUNT)
+}
+
+pub fn get_proxy_password() -> Result<Option<String>, AppError> {
+    get_secret(PROXY_PASSWORD_ACCOUNT)
+}
+
+pub fn set_proxy_password(password: &str) -> Result<(), AppError> {
+    set_secret(PROXY_PASSWORD_ACCOUNT, password)
+}
+
+pub fn delete_proxy_password() -> Result<(), AppError> {
+    delete_secret(PROXY_PASSWORD_ACCOUNT)
+}

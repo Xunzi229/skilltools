@@ -157,7 +157,7 @@ pub(crate) fn pull_fast_forward(repository: &Path) -> Result<(), AppError> {
 
 pub(crate) fn latest_commit_time(repository: &Path) -> Result<Option<DateTime<Utc>>, AppError> {
     let path = path_text(repository)?;
-    let output = Command::new("git")
+    let output = git_command()
         .args(["-C", path, "log", "-1", "--format=%cI"])
         .output()
         .map_err(|error| {
@@ -189,8 +189,14 @@ fn path_text(path: &Path) -> Result<&str, AppError> {
     })
 }
 
-fn run_git<const N: usize>(args: [&str; N], destination: Option<&Path>) -> Result<(), AppError> {
+fn git_command() -> Command {
     let mut command = Command::new("git");
+    crate::proxy::apply_to_command(&mut command);
+    command
+}
+
+fn run_git<const N: usize>(args: [&str; N], destination: Option<&Path>) -> Result<(), AppError> {
+    let mut command = git_command();
     command.args(args);
     if let Some(destination) = destination {
         command.arg(destination);

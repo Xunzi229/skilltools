@@ -27,6 +27,11 @@ import {
   isModelServiceConfigured,
   normalizeTranslateSettings,
 } from "../utils/translateSettings";
+import {
+  PROXY_TYPE_OPTIONS,
+  normalizeProxySettings,
+  proxySettingsError,
+} from "../utils/proxySettings";
 
 interface SettingsPanelProps {
   api: SkillApi;
@@ -45,6 +50,33 @@ function asCommandError(err: unknown, fallback: string): CommandError {
   return typeof err === "object" && err && "message" in err
     ? (err as CommandError)
     : { code: "UNKNOWN", message: fallback };
+}
+
+function MacSwitch({
+  checked,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      className="macos-switch"
+      data-on={checked ? "true" : undefined}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="macos-switch-knob" />
+    </button>
+  );
 }
 
 export function SettingsPanel({
@@ -79,6 +111,7 @@ export function SettingsPanel({
         const normalized = {
           ...nextSettings,
           translate: normalizeTranslateSettings(nextSettings.translate),
+          proxy: normalizeProxySettings(nextSettings.proxy),
         };
         setSettings(normalized);
         setPaths(nextPaths);
@@ -427,6 +460,203 @@ export function SettingsPanel({
                     ? t("settings.modelConfigured")
                     : t("settings.modelNotConfigured")}
                 </span>
+              </div>
+            </section>
+            <section className="macos-card mb-6 p-4">
+              <div className="macos-settings-row">
+                <h3 className="macos-section-title">{t("settings.proxy")}</h3>
+                <MacSwitch
+                  checked={Boolean(settings?.proxy?.enabled)}
+                  disabled={saving || !settings}
+                  label={t("settings.proxy")}
+                  onChange={(enabled) => {
+                    if (!settings) return;
+                    setSettings({
+                      ...settings,
+                      proxy: {
+                        ...normalizeProxySettings(settings.proxy),
+                        enabled,
+                      },
+                    });
+                  }}
+                />
+              </div>
+              <p className="mt-2 text-[12px] text-ink-3">{t("settings.proxyHint")}</p>
+              <div
+                className="mt-3"
+                style={{
+                  opacity: settings?.proxy?.enabled ? 1 : 0.55,
+                }}
+              >
+                <div className="macos-settings-row">
+                  <span className="macos-settings-label">{t("settings.proxyMode")}</span>
+                  <select
+                    className="macos-select"
+                    value="manual"
+                    disabled={saving || !settings || !settings.proxy.enabled}
+                    onChange={() => undefined}
+                  >
+                    <option value="manual">{t("settings.proxyModeManual")}</option>
+                  </select>
+                </div>
+                <div className="macos-settings-row">
+                  <span className="macos-settings-label">{t("settings.proxyType")}</span>
+                  <select
+                    className="macos-select"
+                    value={settings?.proxy?.proxyType ?? "socks5"}
+                    disabled={saving || !settings || !settings.proxy.enabled}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      setSettings({
+                        ...settings,
+                        proxy: {
+                          ...normalizeProxySettings(settings.proxy),
+                          proxyType: event.target.value as (typeof PROXY_TYPE_OPTIONS)[number],
+                        },
+                      });
+                    }}
+                  >
+                    {PROXY_TYPE_OPTIONS.map((type) => (
+                      <option key={type} value={type}>
+                        {type === "http"
+                          ? t("settings.proxyTypeHttp")
+                          : type === "https"
+                            ? t("settings.proxyTypeHttps")
+                            : t("settings.proxyTypeSocks5")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="macos-settings-row">
+                  <span className="macos-settings-label">{t("settings.proxyHost")}</span>
+                  <input
+                    type="text"
+                    className="macos-input px-2.5"
+                    placeholder={t("settings.proxyHostPlaceholder")}
+                    autoComplete="off"
+                    value={settings?.proxy?.host ?? ""}
+                    disabled={saving || !settings || !settings.proxy.enabled}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      setSettings({
+                        ...settings,
+                        proxy: {
+                          ...normalizeProxySettings(settings.proxy),
+                          host: event.target.value,
+                        },
+                      });
+                    }}
+                  />
+                </div>
+                <div className="macos-settings-row">
+                  <span className="macos-settings-label">{t("settings.proxyPort")}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    className="macos-input px-2.5"
+                    placeholder={t("settings.proxyPortPlaceholder")}
+                    value={settings?.proxy?.port ? settings.proxy.port : ""}
+                    disabled={saving || !settings || !settings.proxy.enabled}
+                    onChange={(event) => {
+                      if (!settings) return;
+                      const raw = event.target.value.trim();
+                      setSettings({
+                        ...settings,
+                        proxy: {
+                          ...normalizeProxySettings(settings.proxy),
+                          port: raw === "" ? 0 : Number(raw),
+                        },
+                      });
+                    }}
+                  />
+                </div>
+                <div className="macos-settings-row">
+                  <span className="macos-settings-label">{t("settings.proxyAuth")}</span>
+                  <MacSwitch
+                    checked={Boolean(settings?.proxy?.authEnabled)}
+                    disabled={saving || !settings || !settings.proxy.enabled}
+                    label={t("settings.proxyAuth")}
+                    onChange={(authEnabled) => {
+                      if (!settings) return;
+                      setSettings({
+                        ...settings,
+                        proxy: {
+                          ...normalizeProxySettings(settings.proxy),
+                          authEnabled,
+                        },
+                      });
+                    }}
+                  />
+                </div>
+                <div className="macos-settings-row">
+                  <span className="macos-settings-label">{t("settings.proxyUsername")}</span>
+                  <input
+                    type="text"
+                    className="macos-input px-2.5"
+                    autoComplete="off"
+                    value={settings?.proxy?.username ?? ""}
+                    disabled={
+                      saving || !settings || !settings.proxy.enabled || !settings.proxy.authEnabled
+                    }
+                    onChange={(event) => {
+                      if (!settings) return;
+                      setSettings({
+                        ...settings,
+                        proxy: {
+                          ...normalizeProxySettings(settings.proxy),
+                          username: event.target.value,
+                        },
+                      });
+                    }}
+                  />
+                </div>
+                <div className="macos-settings-row">
+                  <span className="macos-settings-label">{t("settings.proxyPassword")}</span>
+                  <input
+                    type="password"
+                    className="macos-input px-2.5"
+                    autoComplete="off"
+                    value={settings?.proxy?.password ?? ""}
+                    disabled={
+                      saving || !settings || !settings.proxy.enabled || !settings.proxy.authEnabled
+                    }
+                    onChange={(event) => {
+                      if (!settings) return;
+                      setSettings({
+                        ...settings,
+                        proxy: {
+                          ...normalizeProxySettings(settings.proxy),
+                          password: event.target.value,
+                        },
+                      });
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="mt-3">
+                <button
+                  type="button"
+                  className="macos-btn-ghost"
+                  disabled={saving || !settings}
+                  onClick={() => {
+                    if (!settings) return;
+                    const proxy = normalizeProxySettings(settings.proxy);
+                    const invalid = proxySettingsError(proxy, {
+                      hostRequired: t("settings.proxyHostRequired"),
+                      portRequired: t("settings.proxyPortRequired"),
+                      usernameRequired: t("settings.proxyUsernameRequired"),
+                    });
+                    if (invalid) {
+                      setError({ code: "SETTINGS", message: invalid });
+                      setMessage(null);
+                      return;
+                    }
+                    void save({ ...settings, proxy });
+                  }}
+                >
+                  {t("settings.saveProxy")}
+                </button>
               </div>
             </section>
             <section className="macos-card mb-6 p-4">

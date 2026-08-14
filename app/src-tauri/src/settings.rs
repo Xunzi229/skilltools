@@ -83,6 +83,126 @@ impl TranslateSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ProxyType {
+    Http,
+    Https,
+    #[default]
+    Socks5,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxySettings {
+    /// Custom proxy master switch. Off = auto-detect system/env proxy.
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub proxy_type: ProxyType,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub port: u16,
+    #[serde(default)]
+    pub auth_enabled: bool,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+}
+
+impl Default for ProxySettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            proxy_type: ProxyType::default(),
+            host: String::new(),
+            port: 0,
+            auth_enabled: false,
+            username: String::new(),
+            password: String::new(),
+        }
+    }
+}
+
+impl ProxySettings {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.host.trim().is_empty() {
+            return Err(AppError::Settings {
+                message: "请填写代理服务器地址".into(),
+            });
+        }
+        if self.port == 0 {
+            return Err(AppError::Settings {
+                message: "请填写有效的代理端口（1–65535）".into(),
+            });
+        }
+        if self.auth_enabled && self.username.trim().is_empty() {
+            return Err(AppError::Settings {
+                message: "已启用代理认证，请填写用户名".into(),
+            });
+        }
+        Ok(())
+    }
+
+    fn scheme(&self) -> &'static str {
+        match self.proxy_type {
+            ProxyType::Http => "http",
+            ProxyType::Https => "https",
+            // socks5h: resolve DNS through the proxy (typical for local clash/v2ray).
+            ProxyType::Socks5 => "socks5h",
+        }
+    }
+
+    /// `scheme://host:port` without credentials (safe to log).
+    pub fn base_url(&self) -> Option<String> {
+        if !self.enabled {
+            return None;
+        }
+        let host = self.host.trim();
+        if host.is_empty() || self.port == 0 {
+            return None;
+        }
+        Some(format!("{}://{}:{}", self.scheme(), host, self.port))
+    }
+
+    /// Env-var URL, including encoded userinfo when auth is on. Do not log.
+    pub fn env_url(&self) -> Option<String> {
+        let base = self.base_url()?;
+        if !self.auth_enabled {
+            return Some(base);
+        }
+        let user = self.username.trim();
+        if user.is_empty() {
+            return Some(base);
+        }
+        let scheme = self.scheme();
+        let rest = base.strip_prefix(&format!("{scheme}://"))?;
+        Some(format!(
+            "{scheme}://{}:{}@{rest}",
+            encode_userinfo(user),
+            encode_userinfo(&self.password)
+        ))
+    }
+}
+
+fn encode_userinfo(value: &str) -> String {
+    let mut out = String::new();
+    for &byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -102,6 +222,8 @@ pub struct AppSettings {
     pub preview_font_size: u32,
     #[serde(default)]
     pub translate: TranslateSettings,
+    #[serde(default)]
+    pub proxy: ProxySettings,
 }
 
 impl Default for AppSettings {
@@ -114,6 +236,7 @@ impl Default for AppSettings {
             preview_font_family: default_preview_font_family(),
             preview_font_size: default_preview_font_size(),
             translate: TranslateSettings::default(),
+            proxy: ProxySettings::default(),
         }
     }
 }
@@ -144,6 +267,7 @@ pub fn load_settings(app_data_dir: &Path) -> Result<AppSettings, AppError> {
         |message| AppError::Settings { message },
     )?;
     hydrate_translate_api_key(&mut settings, app_data_dir)?;
+    hydrate_proxy_password(&mut settings, app_data_dir)?;
     Ok(settings)
 }
 
@@ -151,6 +275,7 @@ pub fn save_settings(app_data_dir: &Path, settings: &AppSettings) -> Result<(), 
     std::fs::create_dir_all(app_data_dir)?;
     let mut persisted = settings.clone();
     persist_translate_api_key(&mut persisted)?;
+    persist_proxy_password(&mut persisted)?;
     write_json_value(&settings_path(app_data_dir), &persisted, |message| {
         AppError::Settings { message }
     })
@@ -171,7 +296,7 @@ fn hydrate_translate_api_key(
             if !legacy.is_empty() {
                 // Remove plaintext copy from disk once keychain has the secret.
                 let mut persisted = settings.clone();
-                persisted.translate.api_key.clear();
+                strip_secrets_for_disk(&mut persisted);
                 write_json_value(&settings_path(app_data_dir), &persisted, |message| {
                     AppError::Settings { message }
                 })?;
@@ -181,7 +306,7 @@ fn hydrate_translate_api_key(
             secret_store::set_translate_api_key(&legacy)?;
             settings.translate.api_key = legacy;
             let mut persisted = settings.clone();
-            persisted.translate.api_key.clear();
+            strip_secrets_for_disk(&mut persisted);
             write_json_value(&settings_path(app_data_dir), &persisted, |message| {
                 AppError::Settings { message }
             })?;
@@ -202,6 +327,56 @@ fn persist_translate_api_key(settings: &mut AppSettings) -> Result<(), AppError>
     }
     // Never write the raw API key into settings.json.
     settings.translate.api_key.clear();
+    Ok(())
+}
+
+fn strip_secrets_for_disk(settings: &mut AppSettings) {
+    settings.translate.api_key.clear();
+    settings.proxy.password.clear();
+}
+
+fn hydrate_proxy_password(
+    settings: &mut AppSettings,
+    app_data_dir: &Path,
+) -> Result<(), AppError> {
+    let legacy = settings.proxy.password.trim().to_owned();
+    let stored = secret_store::get_proxy_password()?;
+
+    match (stored, legacy.is_empty()) {
+        (Some(password), _) => {
+            settings.proxy.password = password;
+            if !legacy.is_empty() {
+                let mut persisted = settings.clone();
+                strip_secrets_for_disk(&mut persisted);
+                write_json_value(&settings_path(app_data_dir), &persisted, |message| {
+                    AppError::Settings { message }
+                })?;
+            }
+        }
+        (None, false) => {
+            secret_store::set_proxy_password(&legacy)?;
+            settings.proxy.password = legacy;
+            let mut persisted = settings.clone();
+            strip_secrets_for_disk(&mut persisted);
+            write_json_value(&settings_path(app_data_dir), &persisted, |message| {
+                AppError::Settings { message }
+            })?;
+        }
+        (None, true) => {
+            settings.proxy.password.clear();
+        }
+    }
+    Ok(())
+}
+
+fn persist_proxy_password(settings: &mut AppSettings) -> Result<(), AppError> {
+    let password = settings.proxy.password.trim().to_owned();
+    if password.is_empty() {
+        secret_store::delete_proxy_password()?;
+    } else {
+        secret_store::set_proxy_password(&password)?;
+    }
+    settings.proxy.password.clear();
     Ok(())
 }
 
@@ -232,6 +407,15 @@ mod tests {
                 model: "gpt-4o-mini".into(),
                 target_lang: "中文".into(),
             },
+            proxy: ProxySettings {
+                enabled: true,
+                proxy_type: ProxyType::Socks5,
+                host: "127.0.0.1".into(),
+                port: 11080,
+                auth_enabled: true,
+                username: "alice".into(),
+                password: "p@ss".into(),
+            },
         };
         save_settings(base.path(), &settings).unwrap();
         let on_disk = std::fs::read_to_string(settings_path(base.path())).unwrap();
@@ -239,9 +423,57 @@ mod tests {
             !on_disk.contains("sk-test"),
             "api key must not be persisted in settings.json: {on_disk}"
         );
+        assert!(
+            !on_disk.contains("p@ss"),
+            "proxy password must not be persisted in settings.json: {on_disk}"
+        );
         let loaded = load_settings(base.path()).unwrap();
         assert_eq!(loaded, settings);
         assert_eq!(loaded.translate.api_key, "sk-test");
+        assert_eq!(loaded.proxy.password, "p@ss");
+    }
+
+    #[test]
+    fn proxy_env_url_encodes_userinfo_and_uses_socks5h() {
+        let proxy = ProxySettings {
+            enabled: true,
+            proxy_type: ProxyType::Socks5,
+            host: "127.0.0.1".into(),
+            port: 11080,
+            auth_enabled: true,
+            username: "u:sr".into(),
+            password: "p@ss".into(),
+        };
+        assert_eq!(proxy.base_url().as_deref(), Some("socks5h://127.0.0.1:11080"));
+        assert_eq!(
+            proxy.env_url().as_deref(),
+            Some("socks5h://u%3Asr:p%40ss@127.0.0.1:11080")
+        );
+    }
+
+    #[test]
+    fn disabled_proxy_has_no_url() {
+        let mut proxy = ProxySettings {
+            enabled: false,
+            proxy_type: ProxyType::Http,
+            host: "127.0.0.1".into(),
+            port: 8080,
+            auth_enabled: false,
+            username: String::new(),
+            password: String::new(),
+        };
+        assert_eq!(proxy.base_url(), None);
+        proxy.enabled = true;
+        assert_eq!(proxy.base_url().as_deref(), Some("http://127.0.0.1:8080"));
+    }
+
+    #[test]
+    fn rejects_enabled_proxy_without_host() {
+        let proxy = ProxySettings {
+            enabled: true,
+            ..ProxySettings::default()
+        };
+        assert!(proxy.validate().is_err());
     }
 
     #[test]
@@ -265,5 +497,38 @@ mod tests {
             crate::secret_store::get_translate_api_key().unwrap().as_deref(),
             Some("sk-legacy")
         );
+    }
+
+    #[test]
+    fn migrates_legacy_plaintext_proxy_password_into_secret_store() {
+        let _guard = crate::secret_store::test_lock();
+        crate::secret_store::clear_for_test();
+        let base = tempdir().unwrap();
+        let mut legacy = AppSettings::default();
+        legacy.proxy.password = "proxy-secret".into();
+        write_json_value(&settings_path(base.path()), &legacy, |message| {
+            AppError::Settings { message }
+        })
+        .unwrap();
+
+        let loaded = load_settings(base.path()).unwrap();
+        assert_eq!(loaded.proxy.password, "proxy-secret");
+        let on_disk = std::fs::read_to_string(settings_path(base.path())).unwrap();
+        assert!(!on_disk.contains("proxy-secret"));
+        assert_eq!(
+            crate::secret_store::get_proxy_password().unwrap().as_deref(),
+            Some("proxy-secret")
+        );
+    }
+
+    #[test]
+    fn missing_proxy_field_uses_default() {
+        let _guard = crate::secret_store::test_lock();
+        crate::secret_store::clear_for_test();
+        let base = tempdir().unwrap();
+        std::fs::write(settings_path(base.path()), r#"{"theme":"dark"}"#).unwrap();
+        let loaded = load_settings(base.path()).unwrap();
+        assert_eq!(loaded.theme, ThemePreference::Dark);
+        assert_eq!(loaded.proxy, ProxySettings::default());
     }
 }

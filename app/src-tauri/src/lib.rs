@@ -14,6 +14,7 @@ mod library_lifecycle;
 pub mod library_repository;
 mod library_taxonomy;
 mod path_norm;
+mod proxy;
 mod skill_detect;
 mod skill_metadata;
 mod system_fonts;
@@ -57,6 +58,7 @@ pub fn run() {
             let home_dir = app.path().home_dir()?;
             let paths = AppPaths::discover(app_data_dir, home_dir.clone());
             let settings = settings::load_settings(&paths.app_data_dir).unwrap_or_default();
+            crate::proxy::apply_runtime(&settings.proxy);
             if let Err(error) = BackupRepository::new(paths.clone()).cleanup_backups(
                 settings.backup_retention_days,
                 settings.backup_max_count,

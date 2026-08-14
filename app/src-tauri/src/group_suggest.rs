@@ -167,9 +167,7 @@ pub fn suggest_groups_with_openai_compatible(
         ],
     });
 
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .build()
+    let client = crate::proxy::blocking_client(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .map_err(|error| AppError::Translate {
             message: format!("创建 HTTP 客户端失败：{error}"),
         })?;

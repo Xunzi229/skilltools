@@ -123,6 +123,74 @@
     color: var(--color-ink);
   }
 
+  .macos-switch {
+    position: relative;
+    width: 42px;
+    height: 26px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 999px;
+    padding: 2px;
+    background: #d2d2d7;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .macos-switch[data-on="true"] {
+    background: var(--color-brand);
+  }
+
+  .macos-switch:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .macos-switch-knob {
+    display: block;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+    transform: translateX(0);
+    transition: transform 0.15s ease;
+  }
+
+  .macos-switch[data-on="true"] .macos-switch-knob {
+    transform: translateX(16px);
+  }
+
+  :root[data-theme="dark"] .macos-switch {
+    background: #39393d;
+  }
+
+  :root[data-theme="dark"] .macos-switch[data-on="true"] {
+    background: var(--color-brand);
+  }
+
+  .macos-settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 36px;
+  }
+
+  .macos-settings-row + .macos-settings-row {
+    margin-top: 6px;
+  }
+
+  .macos-settings-row label,
+  .macos-settings-row .macos-settings-label {
+    font-size: 13px;
+    color: var(--color-ink-2);
+  }
+
+  .macos-settings-row .macos-input,
+  .macos-settings-row .macos-select {
+    width: min(100%, 220px);
+  }
+
   .macos-card {
     border: 1px solid var(--color-line);
     border-radius: 12px;
