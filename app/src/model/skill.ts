@@ -264,7 +264,7 @@ export interface TranslatePreview {
   truncated: boolean;
   targetLang: string;
   model: string;
-  /** 命中本地内容哈希缓存，未调用模型 */
+  /** 命中本地内容哈希缓存，未发起翻译请求 */
   fromCache?: boolean;
 }
 

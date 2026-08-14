@@ -805,10 +805,11 @@ pub async fn preview_translate_skill(
         };
         let collected = translate::collect_translate_source(&skill_root, &relative_path)
             .map_err(map_app_error)?;
-        translate::preview_translate_with_cache(
+        translate::preview_translate_prefer_google(
             &paths.app_data_dir,
             &settings.translate,
             &collected,
+            translate::translate_with_google_public,
             translate::translate_with_openai_compatible,
         )
         .map_err(map_app_error)

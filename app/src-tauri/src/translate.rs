@@ -22,6 +22,12 @@ const HTTP_TIMEOUT_SECS: u64 = 120;
 const ERROR_BODY_SNIPPET_BYTES: usize = 400;
 const TRANSLATE_CACHE_MAX_ENTRIES: usize = 200;
 const TRANSLATE_CACHE_FILE: &str = "translate-cache.json";
+const DEFAULT_TARGET_LANG: &str = "中文";
+const GOOGLE_MODEL_LABEL: &str = "google-translate";
+const GOOGLE_TRANSLATE_URL: &str = "https://translate.googleapis.com/translate_a/single";
+const GOOGLE_MAX_CHUNK_BYTES: usize = 4_500;
+const GOOGLE_HTTP_TIMEOUT_SECS: u64 = 30;
+const GOOGLE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -372,6 +378,52 @@ pub fn translate_cache_key(
     format!("v2:{}", sha256_hex(material.as_bytes()))
 }
 
+pub fn google_translate_cache_key(md5: &str, target_lang: &str, relative_path: &str) -> String {
+    let lang = target_lang.trim();
+    let path = relative_path.trim().replace('\\', "/");
+    let parts = [md5, lang, path.as_str()];
+    let mut material = String::from("google-public-v1");
+    for part in parts {
+        material.push(':');
+        material.push_str(&part.len().to_string());
+        material.push(':');
+        material.push_str(part);
+    }
+    format!("g1:{}", sha256_hex(material.as_bytes()))
+}
+
+pub fn effective_target_lang(settings: &TranslateSettings) -> String {
+    let trimmed = settings.target_lang.trim();
+    if trimmed.is_empty() {
+        DEFAULT_TARGET_LANG.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Map UI language names to Google `tl` codes.
+pub fn google_lang_code(target_lang: &str) -> String {
+    let trimmed = target_lang.trim();
+    if trimmed.is_empty() {
+        return "zh-CN".into();
+    }
+    match trimmed.to_lowercase().as_str() {
+        "中文" | "简体中文" | "汉语" | "chinese" | "zh" | "zh-cn" | "zh_cn" => {
+            "zh-CN".into()
+        }
+        "繁體中文" | "繁体中文" | "traditional chinese" | "zh-tw" | "zh_tw" => {
+            "zh-TW".into()
+        }
+        "english" | "英文" | "en" => "en".into(),
+        "日本語" | "日文" | "japanese" | "ja" => "ja".into(),
+        "한국어" | "韩语" | "韓語" | "korean" | "ko" => "ko".into(),
+        "français" | "francais" | "french" | "法语" | "法文" | "fr" => "fr".into(),
+        "deutsch" | "german" | "德语" | "德文" | "de" => "de".into(),
+        "español" | "espanol" | "spanish" | "西班牙语" | "es" => "es".into(),
+        other => other.replace('_', "-"),
+    }
+}
+
 fn sha256_hex(value: &[u8]) -> String {
     Sha256::digest(value)
         .iter()
@@ -417,6 +469,133 @@ fn evict_oldest_if_needed(store: &mut TranslateCacheStore) {
     }
 }
 
+fn source_relative_path(source: &CollectedSource) -> String {
+    source
+        .source_files
+        .first()
+        .map(|path| path.trim().replace('\\', "/"))
+        .unwrap_or_default()
+}
+
+fn lookup_cached_preview(
+    app_data_dir: &Path,
+    key: &str,
+    source: &CollectedSource,
+    target_lang: &str,
+    relative_path: &str,
+    model: &str,
+) -> Option<TranslatePreview> {
+    let store = load_translate_cache(app_data_dir).ok()?;
+    let entry = store.entries.get(key)?;
+    if entry.md5 == source.content_md5
+        && entry.target_lang == target_lang
+        && entry.relative_path == relative_path
+        && entry.model == model
+    {
+        Some(TranslatePreview {
+            markdown: entry.translated.clone(),
+            source_files: source.source_files.clone(),
+            truncated: source.truncated,
+            target_lang: target_lang.to_string(),
+            model: entry.model.clone(),
+            from_cache: true,
+        })
+    } else {
+        None
+    }
+}
+
+fn store_cached_preview(
+    app_data_dir: &Path,
+    key: String,
+    source: &CollectedSource,
+    target_lang: &str,
+    relative_path: &str,
+    model: &str,
+    translated: &str,
+) {
+    let mut store = load_translate_cache(app_data_dir).unwrap_or_default();
+    store.entries.insert(
+        key,
+        TranslateCacheEntry {
+            md5: source.content_md5.clone(),
+            target_lang: target_lang.to_string(),
+            relative_path: relative_path.to_string(),
+            translated: translated.to_string(),
+            model: model.to_string(),
+            updated_at: Utc::now().to_rfc3339(),
+        },
+    );
+    evict_oldest_if_needed(&mut store);
+    let _ = save_translate_cache(app_data_dir, &store);
+}
+
+fn translate_error_detail(error: &AppError) -> String {
+    match error {
+        AppError::Translate { message } => message.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Default: Google public translate. Model is used only when Google fails and is configured.
+pub fn preview_translate_prefer_google<G, M>(
+    app_data_dir: &Path,
+    settings: &TranslateSettings,
+    source: &CollectedSource,
+    google_fn: G,
+    model_fn: M,
+) -> Result<TranslatePreview, AppError>
+where
+    G: FnOnce(&TranslateSettings, &CollectedSource) -> Result<TranslatePreview, AppError>,
+    M: FnOnce(&TranslateSettings, &CollectedSource) -> Result<TranslatePreview, AppError>,
+{
+    let target_lang = effective_target_lang(settings);
+    let normalized_path = source_relative_path(source);
+    let google_key =
+        google_translate_cache_key(&source.content_md5, &target_lang, &normalized_path);
+
+    if let Some(hit) = lookup_cached_preview(
+        app_data_dir,
+        &google_key,
+        source,
+        &target_lang,
+        &normalized_path,
+        GOOGLE_MODEL_LABEL,
+    ) {
+        return Ok(hit);
+    }
+
+    match google_fn(settings, source) {
+        Ok(mut preview) => {
+            preview.from_cache = false;
+            preview.model = GOOGLE_MODEL_LABEL.to_string();
+            preview.target_lang = target_lang.clone();
+            store_cached_preview(
+                app_data_dir,
+                google_key,
+                source,
+                &target_lang,
+                &normalized_path,
+                GOOGLE_MODEL_LABEL,
+                &preview.markdown,
+            );
+            Ok(preview)
+        }
+        Err(google_error) => {
+            if settings.is_configured() {
+                preview_translate_with_cache(app_data_dir, settings, source, model_fn)
+            } else {
+                Err(AppError::Translate {
+                    message: format!(
+                        "{}（公共翻译失败，可在设置中配置模型服务作为备用）",
+                        translate_error_detail(&google_error)
+                    ),
+                })
+            }
+        }
+    }
+}
+
 /// Preview translate with local content-hash cache. Cache hit skips `translate_fn`.
 pub fn preview_translate_with_cache<F>(
     app_data_dir: &Path,
@@ -434,12 +613,7 @@ where
     }
 
     let target_lang = settings.target_lang.trim().to_string();
-    let relative_path = source
-        .source_files
-        .first()
-        .map(|s| s.as_str())
-        .unwrap_or("");
-    let normalized_path = relative_path.trim().replace('\\', "/");
+    let normalized_path = source_relative_path(source);
     let model = settings.model.trim().to_string();
     let key = translate_cache_key(
         &source.content_md5,
@@ -450,44 +624,28 @@ where
         &settings.api_key,
     );
 
-    if let Ok(store) = load_translate_cache(app_data_dir) {
-        if let Some(entry) = store.entries.get(&key) {
-            if entry.md5 == source.content_md5
-                && entry.target_lang == target_lang
-                && entry.relative_path == normalized_path
-                && entry.model == model
-            {
-                return Ok(TranslatePreview {
-                    markdown: entry.translated.clone(),
-                    source_files: source.source_files.clone(),
-                    truncated: source.truncated,
-                    target_lang,
-                    model: entry.model.clone(),
-                    from_cache: true,
-                });
-            }
-        }
+    if let Some(hit) = lookup_cached_preview(
+        app_data_dir,
+        &key,
+        source,
+        &target_lang,
+        &normalized_path,
+        &model,
+    ) {
+        return Ok(hit);
     }
 
     let mut preview = translate_fn(settings, source)?;
     preview.from_cache = false;
-
-    let mut store = load_translate_cache(app_data_dir).unwrap_or_default();
-    store.entries.insert(
+    store_cached_preview(
+        app_data_dir,
         key,
-        TranslateCacheEntry {
-            md5: source.content_md5.clone(),
-            target_lang,
-            relative_path: normalized_path,
-            translated: preview.markdown.clone(),
-            model,
-            updated_at: Utc::now().to_rfc3339(),
-        },
+        source,
+        &target_lang,
+        &normalized_path,
+        &model,
+        &preview.markdown,
     );
-    evict_oldest_if_needed(&mut store);
-    // Cache write failure must not fail the preview response.
-    let _ = save_translate_cache(app_data_dir, &store);
-
     Ok(preview)
 }
 
@@ -641,6 +799,66 @@ pub fn translate_with_openai_compatible(
     source: &CollectedSource,
 ) -> Result<TranslatePreview, AppError> {
     translate_with_chunk_fn(settings, source, translate_prompt_http)
+}
+
+pub fn translate_with_google_public(
+    settings: &TranslateSettings,
+    source: &CollectedSource,
+) -> Result<TranslatePreview, AppError> {
+    translate_google_with_chunk_fn(settings, source, translate_google_chunk_http)
+}
+
+pub fn translate_google_with_chunk_fn<F>(
+    settings: &TranslateSettings,
+    source: &CollectedSource,
+    translate_chunk: F,
+) -> Result<TranslatePreview, AppError>
+where
+    F: Fn(&str, &str) -> Result<String, AppError>,
+{
+    let target_lang = effective_target_lang(settings);
+    let lang_code = google_lang_code(&target_lang);
+    let chunks = split_text_into_byte_chunks(&source.prompt_body, GOOGLE_MAX_CHUNK_BYTES);
+    if chunks.is_empty() {
+        let relative_path = source_relative_path(source);
+        return Err(AppError::Translate {
+            message: format!("「{relative_path}」没有可翻译的文本内容"),
+        });
+    }
+
+    let mut translated_parts = Vec::with_capacity(chunks.len());
+    for chunk in &chunks {
+        let mut last_error = None;
+        let mut translated = None;
+        for attempt in 1..=TRANSLATE_CHUNK_MAX_ATTEMPTS {
+            match translate_chunk(&lang_code, chunk) {
+                Ok(text) => {
+                    translated = Some(text);
+                    break;
+                }
+                Err(error) => {
+                    last_error = Some(error);
+                    if attempt < TRANSLATE_CHUNK_MAX_ATTEMPTS {
+                        continue;
+                    }
+                }
+            }
+        }
+        translated_parts.push(translated.ok_or_else(|| {
+            last_error.unwrap_or_else(|| AppError::Translate {
+                message: "Google 公共翻译失败".into(),
+            })
+        })?);
+    }
+
+    Ok(TranslatePreview {
+        markdown: join_translated_chunks(&translated_parts),
+        source_files: source.source_files.clone(),
+        truncated: false,
+        target_lang,
+        model: GOOGLE_MODEL_LABEL.to_string(),
+        from_cache: false,
+    })
 }
 
 /// Translate a collected source by splitting large bodies and running up to two chunk
@@ -839,6 +1057,104 @@ fn translate_prompt_http(
         message: format!("读取翻译响应失败：{error}"),
     })?;
     parse_translate_api_response(status, &response_text)
+}
+
+fn percent_encode(value: &str, space_as_plus: bool) -> String {
+    let mut out = String::new();
+    for &byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            b' ' if space_as_plus => out.push('+'),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+fn encode_form_q(value: &str) -> String {
+    format!("q={}", percent_encode(value, true))
+}
+
+pub fn parse_google_translate_response(
+    status: u16,
+    response_text: &str,
+) -> Result<String, AppError> {
+    if !(200..300).contains(&status) {
+        let snippet = sanitize_api_error_body(response_text, ERROR_BODY_SNIPPET_BYTES);
+        return Err(AppError::Translate {
+            message: format!("Google 公共翻译返回 HTTP {status}：{snippet}"),
+        });
+    }
+
+    let mut trimmed = response_text.trim();
+    if let Some(rest) = trimmed.strip_prefix(")]}'") {
+        trimmed = rest.trim();
+    }
+    if trimmed.is_empty() {
+        return Err(AppError::Translate {
+            message: "Google 公共翻译返回空响应".into(),
+        });
+    }
+
+    let value: serde_json::Value = serde_json::from_str(trimmed).map_err(|error| {
+        let snippet = sanitize_api_error_body(trimmed, ERROR_BODY_SNIPPET_BYTES);
+        AppError::Translate {
+            message: format!("Google 公共翻译响应解析失败：{error}。片段：{snippet}"),
+        }
+    })?;
+
+    let Some(sentences) = value.get(0).and_then(|item| item.as_array()) else {
+        let snippet = sanitize_api_error_body(trimmed, ERROR_BODY_SNIPPET_BYTES);
+        return Err(AppError::Translate {
+            message: format!("Google 公共翻译响应格式无效。片段：{snippet}"),
+        });
+    };
+
+    let mut out = String::new();
+    for sentence in sentences {
+        if let Some(text) = sentence.get(0).and_then(|item| item.as_str()) {
+            out.push_str(text);
+        }
+    }
+    if out.trim().is_empty() {
+        return Err(AppError::Translate {
+            message: "Google 公共翻译返回内容为空".into(),
+        });
+    }
+    Ok(out)
+}
+
+fn translate_google_chunk_http(lang_code: &str, text: &str) -> Result<String, AppError> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(GOOGLE_HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|error| AppError::Translate {
+            message: format!("创建 HTTP 客户端失败：{error}"),
+        })?;
+
+    let tl = percent_encode(lang_code, false);
+    let url = format!("{GOOGLE_TRANSLATE_URL}?client=gtx&sl=auto&tl={tl}&dt=t&ie=UTF-8&oe=UTF-8");
+    let response = client
+        .post(&url)
+        .header("User-Agent", GOOGLE_USER_AGENT)
+        .header("Accept", "application/json")
+        .header(
+            "Content-Type",
+            "application/x-www-form-urlencoded;charset=UTF-8",
+        )
+        .body(encode_form_q(text))
+        .send()
+        .map_err(|error| AppError::Translate {
+            message: format!("请求 Google 公共翻译失败：{error}"),
+        })?;
+
+    let status = response.status().as_u16();
+    let response_text = response.text().map_err(|error| AppError::Translate {
+        message: format!("读取 Google 公共翻译响应失败：{error}"),
+    })?;
+    parse_google_translate_response(status, &response_text)
 }
 
 fn truncate_utf8_to_max_bytes(value: &mut String, max_bytes: usize) -> bool {
@@ -1503,5 +1819,174 @@ mod tests {
         }
         let store = load_translate_cache(dir.path()).unwrap();
         assert!(store.entries.len() <= TRANSLATE_CACHE_MAX_ENTRIES);
+    }
+
+    fn sample_source(body: &str) -> CollectedSource {
+        CollectedSource {
+            prompt_body: body.into(),
+            source_files: vec!["SKILL.md".into()],
+            truncated: false,
+            content_md5: content_md5_hex(body),
+        }
+    }
+
+    #[test]
+    fn maps_google_lang_codes() {
+        assert_eq!(google_lang_code("中文"), "zh-CN");
+        assert_eq!(google_lang_code("English"), "en");
+        assert_eq!(google_lang_code("日本語"), "ja");
+        assert_eq!(google_lang_code("zh_tw"), "zh-TW");
+        assert_eq!(google_lang_code("it"), "it");
+        assert_eq!(effective_target_lang(&TranslateSettings::default()), "中文");
+    }
+
+    #[test]
+    fn parses_google_single_response() {
+        let body = r#"[[["你好","Hello",null,null,10],["世界","World",null,null,0]],null,"en"]"#;
+        assert_eq!(
+            parse_google_translate_response(200, body).unwrap(),
+            "你好世界"
+        );
+
+        let prefixed = ")]}'\n[[[\"bonjour\",\"hello\",null,null,1]]]";
+        assert_eq!(
+            parse_google_translate_response(200, prefixed).unwrap(),
+            "bonjour"
+        );
+
+        let err = parse_google_translate_response(429, "rate limit").unwrap_err();
+        assert!(err.to_string().contains("HTTP 429"));
+    }
+
+    #[test]
+    fn google_chunks_are_translated_in_order() {
+        let settings = TranslateSettings {
+            target_lang: "中文".into(),
+            ..TranslateSettings::default()
+        };
+        let body = format!("{}{}", "a".repeat(3_000), "b".repeat(3_000));
+        let source = sample_source(&body);
+        let preview = translate_google_with_chunk_fn(&settings, &source, |lang, chunk| {
+            assert_eq!(lang, "zh-CN");
+            Ok(format!("[{}]", chunk.len()))
+        })
+        .unwrap();
+        assert_eq!(preview.model, GOOGLE_MODEL_LABEL);
+        assert!(preview.markdown.starts_with('['));
+        assert!(preview.markdown.contains("][") || preview.markdown.matches('[').count() == 1);
+        assert_eq!(
+            preview.markdown.matches('[').count(),
+            preview.markdown.matches(']').count()
+        );
+        assert!(preview.markdown.matches('[').count() >= 2);
+    }
+
+    #[test]
+    fn prefer_google_uses_google_even_when_model_is_configured() {
+        let dir = tempdir().unwrap();
+        let settings = TranslateSettings {
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "sk-x".into(),
+            model: "gpt-4o-mini".into(),
+            target_lang: "中文".into(),
+        };
+        let source = sample_source("# Hello");
+        let mut google_calls = 0_u32;
+        let mut model_calls = 0_u32;
+        let preview = preview_translate_prefer_google(
+            dir.path(),
+            &settings,
+            &source,
+            |_s, src| {
+                google_calls += 1;
+                Ok(TranslatePreview {
+                    markdown: "# 你好".into(),
+                    source_files: src.source_files.clone(),
+                    truncated: false,
+                    target_lang: "中文".into(),
+                    model: "ignored".into(),
+                    from_cache: false,
+                })
+            },
+            |_s, _src| {
+                model_calls += 1;
+                panic!("model must not run when google succeeds");
+            },
+        )
+        .unwrap();
+        assert_eq!(google_calls, 1);
+        assert_eq!(model_calls, 0);
+        assert_eq!(preview.markdown, "# 你好");
+        assert_eq!(preview.model, GOOGLE_MODEL_LABEL);
+        assert!(!preview.from_cache);
+
+        let cached = preview_translate_prefer_google(
+            dir.path(),
+            &settings,
+            &source,
+            |_s, _src| panic!("google must not run on cache hit"),
+            |_s, _src| panic!("model must not run on google cache hit"),
+        )
+        .unwrap();
+        assert!(cached.from_cache);
+        assert_eq!(cached.markdown, "# 你好");
+    }
+
+    #[test]
+    fn prefer_google_falls_back_to_model_when_google_fails() {
+        let dir = tempdir().unwrap();
+        let settings = TranslateSettings {
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "sk-x".into(),
+            model: "gpt-4o-mini".into(),
+            target_lang: "中文".into(),
+        };
+        let source = sample_source("# Hello");
+        let preview = preview_translate_prefer_google(
+            dir.path(),
+            &settings,
+            &source,
+            |_s, _src| {
+                Err(AppError::Translate {
+                    message: "Google down".into(),
+                })
+            },
+            |s, src| {
+                Ok(TranslatePreview {
+                    markdown: "# model".into(),
+                    source_files: src.source_files.clone(),
+                    truncated: false,
+                    target_lang: s.target_lang.clone(),
+                    model: s.model.clone(),
+                    from_cache: false,
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(preview.markdown, "# model");
+        assert_eq!(preview.model, "gpt-4o-mini");
+        assert!(!preview.from_cache);
+    }
+
+    #[test]
+    fn prefer_google_without_model_returns_google_error() {
+        let dir = tempdir().unwrap();
+        let settings = TranslateSettings::default();
+        let source = sample_source("# Hello");
+        let error = preview_translate_prefer_google(
+            dir.path(),
+            &settings,
+            &source,
+            |_s, _src| {
+                Err(AppError::Translate {
+                    message: "HTTP 429".into(),
+                })
+            },
+            |_s, _src| panic!("model must not run when unconfigured"),
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("HTTP 429"), "{message}");
+        assert!(message.contains("模型服务"), "{message}");
     }
 }

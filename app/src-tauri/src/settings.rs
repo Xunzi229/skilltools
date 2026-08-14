@@ -57,7 +57,8 @@ fn default_preview_font_size() -> u32 {
     14
 }
 
-/// OpenAI-compatible translation API settings (preview only; never writes skill files).
+/// Translation settings. Target language is used by Google public translate;
+/// Base URL / API Key / model are the OpenAI-compatible fallback (and smart grouping).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TranslateSettings {

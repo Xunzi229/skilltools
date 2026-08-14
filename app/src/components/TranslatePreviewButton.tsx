@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SkillApi } from "../api/skillApi";
 import type { TranslatePreview, TranslateSkillSource } from "../model/skill";
-import { useModelServiceConfigured } from "../hooks/useModelServiceConfigured";
 import { errorMessage } from "../utils/errors";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { useI18n } from "../i18n";
@@ -58,7 +57,6 @@ export function TranslatePreviewButton({
   disabled = false,
 }: TranslatePreviewButtonProps) {
   const { t } = useI18n();
-  const configured = useModelServiceConfigured(api);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,10 +84,6 @@ export function TranslatePreviewButton({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
-
-  if (!configured) {
-    return null;
-  }
 
   const runTranslate = () => {
     const path = relativePath?.trim();
@@ -159,7 +153,7 @@ export function TranslatePreviewButton({
                       })
                     : t("translate.previewHint")}
                   {!loading && result
-                    ? ` · ${result.sourceFiles.join("、")} → ${result.targetLang}`
+                    ? ` · ${result.sourceFiles.join("、")} → ${result.targetLang} · ${result.model}`
                     : null}
                   {!loading && result?.fromCache ? t("translate.fromCache") : null}
                   {!loading && result?.truncated ? t("translate.truncated") : null}
