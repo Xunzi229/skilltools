@@ -191,6 +191,12 @@ fn path_text(path: &Path) -> Result<&str, AppError> {
 
 fn git_command() -> Command {
     let mut command = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     crate::proxy::apply_to_command(&mut command);
     command
 }

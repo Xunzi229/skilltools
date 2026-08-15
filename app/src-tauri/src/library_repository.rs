@@ -660,7 +660,7 @@ pub(crate) fn safe_skill_target(root: &Path, name: &str) -> Result<PathBuf, AppE
     let mut components = path.components();
     let valid = matches!(components.next(), Some(std::path::Component::Normal(_)))
         && components.next().is_none();
-    if !valid {
+    if !valid || crate::path_norm::is_forbidden_skill_dir_name(name) {
         return Err(AppError::PathOutsideManagedRoots {
             path: root.join(path).display().to_string(),
         });
@@ -1393,6 +1393,21 @@ mod tests {
 
         assert!(matches!(
             repository.install_skill(&skill_id, Provider::Codex),
+            Err(AppError::PathOutsideManagedRoots { .. })
+        ));
+    }
+
+    #[test]
+    fn install_rejects_windows_reserved_skill_name() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("reserved"), "NUL");
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+
+        assert!(matches!(
+            repository.install_skill(&skill_id, Provider::Cursor),
             Err(AppError::PathOutsideManagedRoots { .. })
         ));
     }

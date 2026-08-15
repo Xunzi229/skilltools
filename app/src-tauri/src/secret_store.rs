@@ -92,7 +92,22 @@ mod keychain {
                 }
             }
             Err(keyring::Error::NoEntry) => Ok(None),
+            // Linux 无 gnome-keyring / Secret Service 时仍允许打开应用。
+            Err(keyring::Error::NoStorageAccess(_)) | Err(keyring::Error::PlatformFailure(_)) => {
+                Ok(None)
+            }
             Err(error) => Err(map_error(error)),
+        }
+    }
+
+    fn map_write_error(error: keyring::Error) -> AppError {
+        match error {
+            keyring::Error::NoStorageAccess(_) | keyring::Error::PlatformFailure(_) => {
+                AppError::Settings {
+                    message: "当前系统没有可用的密钥环（Linux 需 gnome-keyring / KWallet 等 Secret Service）。翻译 API Key 与代理密码无法安全保存。".into(),
+                }
+            }
+            other => map_error(other),
         }
     }
 
@@ -101,13 +116,16 @@ mod keychain {
         if trimmed.is_empty() {
             return delete_secret(account);
         }
-        entry(account)?.set_password(trimmed).map_err(map_error)
+        entry(account)?.set_password(trimmed).map_err(map_write_error)
     }
 
     pub fn delete_secret(account: &str) -> Result<(), AppError> {
         match entry(account)?.delete_credential() {
             Ok(()) => Ok(()),
             Err(keyring::Error::NoEntry) => Ok(()),
+            Err(keyring::Error::NoStorageAccess(_)) | Err(keyring::Error::PlatformFailure(_)) => {
+                Ok(())
+            }
             Err(error) => Err(map_error(error)),
         }
     }

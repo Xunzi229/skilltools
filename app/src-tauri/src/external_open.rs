@@ -95,18 +95,45 @@ fn detect_editors() -> Vec<DetectedEditor> {
         find_named_exe(&[
             "Programs/Microsoft VS Code Insiders/Code - Insiders.exe",
             "Microsoft VS Code Insiders/Code - Insiders.exe",
-        ]),
+        ])
+        .or_else(|| {
+            first_existing_file(
+                macos_app_binaries(&[("Visual Studio Code - Insiders", "Electron")])
+                    .into_iter()
+                    .chain(which_exe("code-insiders")),
+            )
+        }),
     );
-    push("idea", "IntelliJ IDEA", find_jetbrains("idea64.exe", "IntelliJ IDEA"));
-    push("pycharm", "PyCharm", find_jetbrains("pycharm64.exe", "PyCharm"));
-    push("goland", "GoLand", find_jetbrains("goland64.exe", "GoLand"));
+    push(
+        "idea",
+        "IntelliJ IDEA",
+        find_jetbrains(&["idea64.exe", "idea.exe"], "IntelliJ IDEA"),
+    );
+    push(
+        "pycharm",
+        "PyCharm",
+        find_jetbrains(&["pycharm64.exe", "pycharm.exe"], "PyCharm"),
+    );
+    push(
+        "goland",
+        "GoLand",
+        find_jetbrains(&["goland64.exe", "goland.exe"], "GoLand"),
+    );
     push(
         "webstorm",
         "WebStorm",
-        find_jetbrains("webstorm64.exe", "WebStorm"),
+        find_jetbrains(&["webstorm64.exe", "webstorm.exe"], "WebStorm"),
     );
-    push("clion", "CLion", find_jetbrains("clion64.exe", "CLion"));
-    push("rider", "Rider", find_jetbrains("rider64.exe", "Rider"));
+    push(
+        "clion",
+        "CLion",
+        find_jetbrains(&["clion64.exe", "clion.exe"], "CLion"),
+    );
+    push(
+        "rider",
+        "Rider",
+        find_jetbrains(&["rider64.exe", "rider.exe"], "Rider"),
+    );
     push(
         "notepadpp",
         "Notepad++",
@@ -131,45 +158,56 @@ fn detect_editors() -> Vec<DetectedEditor> {
 
 fn find_cursor() -> Option<PathBuf> {
     first_existing_file(
-        program_roots()
-            .into_iter()
-            .flat_map(|root| {
-                [
-                    root.join("cursor/Cursor.exe"),
-                    root.join("Cursor/Cursor.exe"),
-                    root.join("Programs/cursor/Cursor.exe"),
-                    root.join("Programs/Cursor/Cursor.exe"),
-                ]
-            })
-            .chain(which_exe("Cursor"))
-            .chain(which_exe("cursor")),
+        windows_rel_exes(&[
+            "cursor/Cursor.exe",
+            "Cursor/Cursor.exe",
+            "Programs/cursor/Cursor.exe",
+            "Programs/Cursor/Cursor.exe",
+        ])
+        .into_iter()
+        .chain(macos_app_binaries(&[("Cursor", "Cursor")]))
+        .chain(linux_abs_bins(&[
+            "/usr/share/cursor/cursor",
+            "/usr/bin/cursor",
+            "/opt/Cursor/cursor",
+            "/opt/cursor/cursor",
+            "/snap/bin/cursor",
+        ]))
+        .chain(home_rel_bins(&[
+            ".local/share/cursor/cursor",
+            ".local/bin/cursor",
+        ]))
+        .chain(which_exe("cursor"))
+        .chain(which_exe("Cursor")),
     )
 }
 
 fn find_vscode() -> Option<PathBuf> {
     first_existing_file(
-        program_roots()
-            .into_iter()
-            .flat_map(|root| {
-                [
-                    root.join("Microsoft VS Code/Code.exe"),
-                    root.join("Programs/Microsoft VS Code/Code.exe"),
-                ]
-            })
-            .chain(resolve_cli_sibling("code", "Code.exe"))
-            .chain(which_exe("Code")),
+        windows_rel_exes(&[
+            "Microsoft VS Code/Code.exe",
+            "Programs/Microsoft VS Code/Code.exe",
+        ])
+        .into_iter()
+        .chain(resolve_cli_sibling("code", "Code.exe"))
+        .chain(macos_app_binaries(&[("Visual Studio Code", "Electron")]))
+        .chain(linux_abs_bins(&[
+            "/usr/share/code/code",
+            "/usr/bin/code",
+            "/snap/bin/code",
+            "/var/lib/flatpak/exports/bin/com.visualstudio.code",
+        ]))
+        .chain(home_rel_bins(&[".local/bin/code"]))
+        .chain(which_exe("code"))
+        .chain(which_exe("Code")),
     )
 }
 
 fn find_named_exe(relative_paths: &[&str]) -> Option<PathBuf> {
-    first_existing_file(
-        program_roots()
-            .into_iter()
-            .flat_map(|root| relative_paths.iter().map(move |rel| root.join(rel))),
-    )
+    first_existing_file(windows_rel_exes(relative_paths))
 }
 
-fn find_jetbrains(exe_name: &str, product_prefix: &str) -> Option<PathBuf> {
+fn find_jetbrains(exe_names: &[&str], product_prefix: &str) -> Option<PathBuf> {
     let mut matches = Vec::new();
     for root in program_roots() {
         let jetbrains = root.join("JetBrains");
@@ -182,22 +220,60 @@ fn find_jetbrains(exe_name: &str, product_prefix: &str) -> Option<PathBuf> {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            if !name.to_ascii_lowercase().contains(&product_prefix.to_ascii_lowercase()) {
+            if !name
+                .to_ascii_lowercase()
+                .contains(&product_prefix.to_ascii_lowercase())
+            {
                 continue;
             }
-            let exe = path.join("bin").join(exe_name);
-            if exe.is_file() {
-                matches.push((name, exe));
+            for exe_name in exe_names {
+                let exe = path.join("bin").join(exe_name);
+                if exe.is_file() {
+                    matches.push((name.clone(), exe));
+                    break;
+                }
             }
         }
     }
 
-    // Prefer the lexicographically latest install directory (usually newest version).
     matches.sort_by(|left, right| right.0.cmp(&left.0));
-    matches.into_iter().next().map(|(_, path)| path)
+    matches
+        .into_iter()
+        .next()
+        .map(|(_, path)| path)
+        .or_else(|| {
+            first_existing_file(macos_app_binaries(&jetbrains_macos_apps(product_prefix)))
+        })
+}
+
+fn jetbrains_macos_apps(product_prefix: &str) -> Vec<(&'static str, &'static str)> {
+    match product_prefix {
+        "IntelliJ IDEA" => vec![
+            ("IntelliJ IDEA", "idea"),
+            ("IntelliJ IDEA CE", "idea"),
+        ],
+        "PyCharm" => vec![("PyCharm", "pycharm"), ("PyCharm CE", "pycharm")],
+        "GoLand" => vec![("GoLand", "goland")],
+        "WebStorm" => vec![("WebStorm", "webstorm")],
+        "CLion" => vec![("CLion", "clion")],
+        "Rider" => vec![("Rider", "rider")],
+        _ => vec![],
+    }
 }
 
 fn open_with_app(app: PathBuf, path: &Path) -> Result<(), AppError> {
+    #[cfg(target_os = "macos")]
+    if let Some(bundle) = app_bundle_from_binary(&app) {
+        return Command::new("open")
+            .args(["-a"])
+            .arg(bundle)
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| AppError::Io {
+                message: format!("打开失败：{error}"),
+            });
+    }
     let mut command = spawn_command_for(&app);
     command
         .arg(path)
@@ -206,6 +282,23 @@ fn open_with_app(app: PathBuf, path: &Path) -> Result<(), AppError> {
         .map_err(|error| AppError::Io {
             message: format!("打开失败：{error}"),
         })
+}
+
+#[cfg(target_os = "macos")]
+fn app_bundle_from_binary(binary: &Path) -> Option<PathBuf> {
+    let macos_dir = binary.parent()?;
+    if macos_dir.file_name()?.to_str()? != "MacOS" {
+        return None;
+    }
+    let contents = macos_dir.parent()?;
+    if contents.file_name()?.to_str()? != "Contents" {
+        return None;
+    }
+    let bundle = contents.parent()?;
+    if bundle.extension()?.to_str()? != "app" {
+        return None;
+    }
+    Some(bundle.to_path_buf())
 }
 
 fn spawn_command_for(app: &Path) -> Command {
@@ -330,7 +423,7 @@ fn reveal_in_file_manager(path: &Path) -> Result<(), AppError> {
     let absolute = path
         .canonicalize()
         .unwrap_or_else(|_| path.to_path_buf());
-    let display = strip_windows_verbatim_for_explorer(&absolute);
+    let display = crate::path_norm::strip_windows_verbatim(&absolute.to_string_lossy());
     let select_arg = format!("/select,\"{display}\"");
     Command::new("explorer")
         .raw_arg(select_arg)
@@ -339,18 +432,6 @@ fn reveal_in_file_manager(path: &Path) -> Result<(), AppError> {
         .map_err(|error| AppError::Io {
             message: format!("打开资源管理器失败：{error}"),
         })
-}
-
-#[cfg(windows)]
-fn strip_windows_verbatim_for_explorer(path: &Path) -> String {
-    let text = path.to_string_lossy();
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
-        rest.to_owned()
-    } else {
-        text.into_owned()
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -387,6 +468,63 @@ fn notepad_available() -> bool {
     false
 }
 
+fn windows_rel_exes(relative_paths: &[&str]) -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        program_roots()
+            .into_iter()
+            .flat_map(|root| relative_paths.iter().map(move |rel| root.join(rel)))
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = relative_paths;
+        Vec::new()
+    }
+}
+
+fn macos_app_binaries(apps: &[(&str, &str)]) -> Vec<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut roots = vec![PathBuf::from("/Applications")];
+        if let Some(home) = env::var_os("HOME") {
+            roots.push(PathBuf::from(home).join("Applications"));
+        }
+        let mut out = Vec::new();
+        for root in roots {
+            for (app, binary) in apps {
+                out.push(root.join(format!("{app}.app/Contents/MacOS/{binary}")));
+            }
+        }
+        out
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = apps;
+        Vec::new()
+    }
+}
+
+fn linux_abs_bins(paths: &[&str]) -> Vec<PathBuf> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        paths.iter().map(PathBuf::from).collect()
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let _ = paths;
+        Vec::new()
+    }
+}
+
+fn home_rel_bins(relative_paths: &[&str]) -> Vec<PathBuf> {
+    let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")) else {
+        return Vec::new();
+    };
+    let home = PathBuf::from(home);
+    relative_paths.iter().map(|rel| home.join(rel)).collect()
+}
+
 fn program_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     let mut push_root = |path: PathBuf| {
@@ -405,6 +543,10 @@ fn program_roots() -> Vec<PathBuf> {
     }
     if let Some(pf86) = env::var_os("ProgramFiles(x86)") {
         push_root(PathBuf::from(pf86));
+    }
+
+    if let Some(w6432) = env::var_os("ProgramW6432") {
+        push_root(PathBuf::from(w6432));
     }
 
     // Also scan common alternate install drives (e.g. D:\Program Files).
@@ -476,7 +618,9 @@ fn resolve_cli_sibling(cli_name: &str, exe_name: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_editors, list_external_editors};
+    use super::list_external_editors;
+    #[cfg(windows)]
+    use super::detect_editors;
 
     #[test]
     fn always_includes_default_and_reveal() {
@@ -500,6 +644,27 @@ mod tests {
                 item.editor.id,
                 item.path.display()
             );
+        }
+    }
+
+    #[test]
+    fn linux_and_macos_candidate_lists_are_platform_gated() {
+        let linux = super::linux_abs_bins(&["/usr/bin/code"]);
+        let mac = super::macos_app_binaries(&[("Cursor", "Cursor")]);
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            assert_eq!(linux.len(), 1);
+            assert!(mac.is_empty());
+        }
+        #[cfg(target_os = "macos")]
+        {
+            assert!(linux.is_empty());
+            assert!(!mac.is_empty());
+        }
+        #[cfg(windows)]
+        {
+            assert!(linux.is_empty());
+            assert!(mac.is_empty());
         }
     }
 }

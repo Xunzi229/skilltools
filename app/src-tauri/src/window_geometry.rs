@@ -7,6 +7,8 @@ use tauri::{LogicalSize, Manager, Size};
 
 const DEFAULT_WIDTH: u32 = 1200;
 const DEFAULT_HEIGHT: u32 = 800;
+const MIN_WIDTH: u32 = 960;
+const MIN_HEIGHT: u32 = 640;
 
 static LAST: Mutex<Option<WindowGeometry>> = Mutex::new(None);
 
@@ -90,15 +92,42 @@ fn previous_or_default() -> WindowGeometry {
         .unwrap_or_default()
 }
 
+pub(crate) fn clamp_logical_size(
+    width: u32,
+    height: u32,
+    work_width: u32,
+    work_height: u32,
+) -> (u32, u32) {
+    let max_w = work_width.max(1);
+    let max_h = work_height.max(1);
+    let min_w = MIN_WIDTH.min(max_w);
+    let min_h = MIN_HEIGHT.min(max_h);
+    (width.clamp(min_w, max_w), height.clamp(min_h, max_h))
+}
+
+fn size_for_restore(window: &tauri::WebviewWindow, state: &WindowGeometry) -> (u32, u32) {
+    match window.current_monitor() {
+        Ok(Some(monitor)) => {
+            let scale = monitor.scale_factor().max(0.1);
+            let area = monitor.work_area();
+            let work_w = (f64::from(area.size.width) / scale).round() as u32;
+            let work_h = (f64::from(area.size.height) / scale).round() as u32;
+            clamp_logical_size(state.width, state.height, work_w, work_h)
+        }
+        _ => (state.width.max(1), state.height.max(1)),
+    }
+}
+
 pub fn restore(window: &tauri::WebviewWindow) {
     let Ok(dir) = window.app_handle().path().app_data_dir() else {
         return;
     };
     let state = load_from_disk(&dir);
     remember(state.clone());
+    let (width, height) = size_for_restore(window, &state);
     let _ = window.set_size(Size::Logical(LogicalSize::new(
-        f64::from(state.width),
-        f64::from(state.height),
+        f64::from(width),
+        f64::from(height),
     )));
     if state.maximized {
         let _ = window.maximize();
@@ -172,6 +201,13 @@ mod tests {
         };
         let next = merge_geometry(previous.clone(), 0, 0, false, true);
         assert_eq!(next, previous);
+    }
+
+    #[test]
+    fn clamp_fits_smaller_monitor_and_respects_minimum() {
+        assert_eq!(clamp_logical_size(2560, 1440, 1280, 800), (1280, 800));
+        assert_eq!(clamp_logical_size(800, 500, 1920, 1080), (960, 640));
+        assert_eq!(clamp_logical_size(1200, 800, 800, 600), (800, 600));
     }
 
     #[test]

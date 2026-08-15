@@ -97,7 +97,54 @@ pub(crate) fn same_windows_volume(left: &Path, right: &Path) -> bool {
     }
 }
 
-fn strip_windows_verbatim(raw: &str) -> String {
+/// Windows 保留设备名（CON/PRN 等），在任意平台拒绝，避免库同步到 Windows 后无法安装。
+pub(crate) fn is_forbidden_skill_dir_name(name: &str) -> bool {
+    if name.is_empty() || name == "." || name == ".." {
+        return true;
+    }
+    if cfg!(windows) && (name.ends_with(' ') || name.ends_with('.')) {
+        return true;
+    }
+    let stem = name.split('.').next().unwrap_or(name);
+    matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
+/// Junction 的 NT 设备路径：`\??\C:\...` 或 `\??\UNC\server\share\...`。
+#[cfg(any(windows, test))]
+pub(crate) fn windows_nt_device_path_str(raw: &str) -> String {
+    let stripped = strip_windows_verbatim(raw);
+    if let Some(rest) = stripped.strip_prefix(r"\\") {
+        format!(r"\??\UNC\{rest}")
+    } else {
+        format!(r"\??\{stripped}")
+    }
+}
+
+pub(crate) fn strip_windows_verbatim(raw: &str) -> String {
     if raw
         .get(..8)
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case(r"\\?\UNC\"))
@@ -177,6 +224,31 @@ mod tests {
         assert_eq!(
             normalize_path_key_str(r"C:\Users\Demo\ÄSkill"),
             "c:/users/demo/Äskill"
+        );
+    }
+
+    #[test]
+    fn rejects_windows_reserved_device_names() {
+        assert!(is_forbidden_skill_dir_name("CON"));
+        assert!(is_forbidden_skill_dir_name("nul.txt"));
+        assert!(is_forbidden_skill_dir_name("com1"));
+        assert!(!is_forbidden_skill_dir_name("console"));
+        assert!(!is_forbidden_skill_dir_name("alpha"));
+    }
+
+    #[test]
+    fn nt_device_path_covers_drive_and_unc() {
+        assert_eq!(
+            windows_nt_device_path_str(r"C:\Users\测试\library"),
+            r"\??\C:\Users\测试\library"
+        );
+        assert_eq!(
+            windows_nt_device_path_str(r"\\?\C:\Users\Demo"),
+            r"\??\C:\Users\Demo"
+        );
+        assert_eq!(
+            windows_nt_device_path_str(r"\\?\UNC\server\share\skills"),
+            r"\??\UNC\server\share\skills"
         );
     }
 }

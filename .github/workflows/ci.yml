@@ -2,6 +2,7 @@ name: ci
 
 # 发版前拦住平台 cfg / 编译问题：不用完整 tauri build，只做 check + 单测。
 # Windows ARM 仍由 release.yml 覆盖（cfg(windows) 在 windows-latest 即可发现）。
+# Linux aarch64 用 ubuntu-22.04-arm 拦住 syscall / libc 架构差异。
 
 on:
   push:
@@ -43,6 +44,7 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-22.04
+          - platform: ubuntu-22.04-arm
           - platform: macos-latest
           - platform: windows-latest
     runs-on: ${{ matrix.platform }}

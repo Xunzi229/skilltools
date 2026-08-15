@@ -273,6 +273,7 @@ impl LibraryRepository {
     pub fn rebuild_installations(&self) -> Result<InstallHealthReport, AppError> {
         let issues = self.scan_install_health()?.issues;
         let mut rebuilt = 0usize;
+        let mut last_error: Option<AppError> = None;
         for issue in &issues {
             if !crate::install_health::is_rebuildable(issue) {
                 continue;
@@ -283,8 +284,9 @@ impl LibraryRepository {
             let Some(skill_id) = issue.library_skill_id.as_deref() else {
                 continue;
             };
-            if self.install_skill(skill_id, issue.provider).is_ok() {
-                rebuilt += 1;
+            match self.install_skill(skill_id, issue.provider) {
+                Ok(_) => rebuilt += 1,
+                Err(error) => last_error = Some(error),
             }
         }
 
@@ -302,6 +304,11 @@ impl LibraryRepository {
         }
 
         let remaining = self.scan_install_health()?;
+        if rebuilt == 0 {
+            if let Some(error) = last_error {
+                return Err(error);
+            }
+        }
         Ok(InstallHealthReport {
             issues: remaining.issues,
             repaired: rebuilt,

@@ -459,41 +459,155 @@ fn is_privilege_not_held(error: &std::io::Error) -> bool {
 
 #[cfg(windows)]
 fn create_directory_junction(source: &Path, target: &Path) -> Result<(), AppError> {
+    match create_directory_junction_win32(source, target) {
+        Ok(()) => Ok(()),
+        Err(win32_error) => create_directory_junction_mklink(source, target).map_err(|mklink_error| {
+            AppError::Io {
+                message: format!("创建 junction 失败：{win32_error}；mklink 回退：{mklink_error}"),
+            }
+        }),
+    }
+}
+
+#[cfg(windows)]
+fn create_directory_junction_win32(source: &Path, target: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateDirectoryW(
+            lp_path_name: *const u16,
+            lp_security_attributes: *mut core::ffi::c_void,
+        ) -> i32;
+        fn CreateFileW(
+            lp_file_name: *const u16,
+            dw_desired_access: u32,
+            dw_share_mode: u32,
+            lp_security_attributes: *mut core::ffi::c_void,
+            dw_creation_disposition: u32,
+            dw_flags_and_attributes: u32,
+            h_template_file: *mut core::ffi::c_void,
+        ) -> *mut core::ffi::c_void;
+        fn DeviceIoControl(
+            h_device: *mut core::ffi::c_void,
+            dw_io_control_code: u32,
+            lp_in_buffer: *mut core::ffi::c_void,
+            n_in_buffer_size: u32,
+            lp_out_buffer: *mut core::ffi::c_void,
+            n_out_buffer_size: u32,
+            lp_bytes_returned: *mut u32,
+            lp_overlapped: *mut core::ffi::c_void,
+        ) -> i32;
+        fn CloseHandle(h_object: *mut core::ffi::c_void) -> i32;
+        fn RemoveDirectoryW(lp_path_name: *const u16) -> i32;
+    }
+
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    const FILE_SHARE_DELETE: u32 = 0x4;
+    const OPEN_EXISTING: u32 = 3;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FSCTL_SET_REPARSE_POINT: u32 = 0x0009_00A4;
+    const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
+    const INVALID_HANDLE_VALUE: isize = -1;
+
+    let substitute = crate::path_norm::windows_nt_device_path_str(&strip_verbatim_prefix(source));
+    let print_name = strip_verbatim_prefix(source);
+    let substitute_wide: Vec<u16> = substitute.encode_utf16().chain(Some(0)).collect();
+    let print_wide: Vec<u16> = print_name.encode_utf16().chain(Some(0)).collect();
+    let subst_bytes = (substitute_wide.len() - 1) * 2;
+    let print_bytes = (print_wide.len() - 1) * 2;
+    let path_buf_bytes = subst_bytes + 2 + print_bytes + 2;
+    let reparse_data_length = 8 + path_buf_bytes;
+    let mut buffer = vec![0u8; 8 + reparse_data_length];
+    buffer[0..4].copy_from_slice(&IO_REPARSE_TAG_MOUNT_POINT.to_le_bytes());
+    buffer[4..6].copy_from_slice(&(reparse_data_length as u16).to_le_bytes());
+    buffer[8..10].copy_from_slice(&0u16.to_le_bytes());
+    buffer[10..12].copy_from_slice(&(subst_bytes as u16).to_le_bytes());
+    buffer[12..14].copy_from_slice(&((subst_bytes + 2) as u16).to_le_bytes());
+    buffer[14..16].copy_from_slice(&(print_bytes as u16).to_le_bytes());
+    let path_start = 16;
+    for (index, unit) in substitute_wide.iter().enumerate() {
+        let offset = path_start + index * 2;
+        buffer[offset..offset + 2].copy_from_slice(&unit.to_le_bytes());
+    }
+    let print_start = path_start + subst_bytes + 2;
+    for (index, unit) in print_wide.iter().enumerate() {
+        let offset = print_start + index * 2;
+        buffer[offset..offset + 2].copy_from_slice(&unit.to_le_bytes());
+    }
+
+    let target_wide: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    unsafe {
+        if CreateDirectoryW(target_wide.as_ptr(), std::ptr::null_mut()) == 0 {
+            return Err(format!("CreateDirectoryW：{}", std::io::Error::last_os_error()));
+        }
+        let handle = CreateFileW(
+            target_wide.as_ptr(),
+            GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null_mut(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
+        );
+        if handle.is_null() || handle as isize == INVALID_HANDLE_VALUE {
+            let error = std::io::Error::last_os_error();
+            let _ = RemoveDirectoryW(target_wide.as_ptr());
+            return Err(format!("CreateFileW：{error}"));
+        }
+        let mut returned = 0u32;
+        let ok = DeviceIoControl(
+            handle,
+            FSCTL_SET_REPARSE_POINT,
+            buffer.as_mut_ptr().cast(),
+            buffer.len() as u32,
+            std::ptr::null_mut(),
+            0,
+            &mut returned,
+            std::ptr::null_mut(),
+        );
+        CloseHandle(handle);
+        if ok == 0 {
+            let error = std::io::Error::last_os_error();
+            let _ = RemoveDirectoryW(target_wide.as_ptr());
+            return Err(format!("FSCTL_SET_REPARSE_POINT：{error}"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn create_directory_junction_mklink(source: &Path, target: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
 
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let source_arg = strip_verbatim_prefix(source);
     let target_arg = strip_verbatim_prefix(target);
     let output = Command::new("cmd")
         .args(["/C", "mklink", "/J", &target_arg, &source_arg])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
-        .map_err(|error| AppError::Io {
-            message: format!("创建 junction 失败：{error}"),
-        })?;
+        .map_err(|error| format!("启动 mklink 失败：{error}"))?;
     if output.status.success() {
         return Ok(());
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Err(AppError::Io {
-        message: format!(
-            "mklink /J 失败（{}）：{}{}",
-            output.status,
-            stderr.trim(),
-            stdout.trim()
-        ),
-    })
+    Err(format!(
+        "mklink /J 失败（{}）：{}{}",
+        output.status,
+        stderr.trim(),
+        stdout.trim()
+    ))
 }
 
 #[cfg(windows)]
 fn strip_verbatim_prefix(path: &Path) -> String {
-    let text = path.to_string_lossy();
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
-        rest.to_owned()
-    } else {
-        text.into_owned()
-    }
+    crate::path_norm::strip_windows_verbatim(&path.to_string_lossy())
 }
 
 /// 删除目录/文件符号链接（或 Windows junction）本身，绝不跟随到目标内容。
@@ -620,6 +734,7 @@ fn copy_symlink(source: &Path, target: &Path, _metadata: &fs::Metadata) -> Resul
 mod tests {
     use super::{dispatch_symlink_copy, remove_directory_symlink, SymlinkKind};
     use crate::error::AppError;
+    #[cfg(windows)]
     use std::fs;
     use tempfile::tempdir;
 
