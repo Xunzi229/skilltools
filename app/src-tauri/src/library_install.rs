@@ -269,6 +269,45 @@ impl LibraryRepository {
         })
     }
 
+    /// Recreate managed symlinks from library sources; adopt disk orphans into the index.
+    pub fn rebuild_installations(&self) -> Result<InstallHealthReport, AppError> {
+        let issues = self.scan_install_health()?.issues;
+        let mut rebuilt = 0usize;
+        for issue in &issues {
+            if !crate::install_health::is_rebuildable(issue) {
+                continue;
+            }
+            if issue.kind == crate::model::InstallHealthKind::DiskOrphan {
+                continue;
+            }
+            let Some(skill_id) = issue.library_skill_id.as_deref() else {
+                continue;
+            };
+            if self.install_skill(skill_id, issue.provider).is_ok() {
+                rebuilt += 1;
+            }
+        }
+
+        {
+            let _guard = lock_app_transaction(self.paths())?;
+            let mut index = self.load_index()?;
+            let before = index.installations.len();
+            crate::library_repository::adopt_existing_installations(&mut index, self.paths());
+            crate::library_repository::sync_installation_statuses(&mut index);
+            let adopted = index.installations.len().saturating_sub(before);
+            if adopted > 0 {
+                self.write_index(&index)?;
+                rebuilt += adopted;
+            }
+        }
+
+        let remaining = self.scan_install_health()?;
+        Ok(InstallHealthReport {
+            issues: remaining.issues,
+            repaired: rebuilt,
+        })
+    }
+
     /// Copy a provider skill directory into the library and optionally replace it with a managed link.
     pub fn migrate_provider_skill(
         &self,

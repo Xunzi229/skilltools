@@ -101,6 +101,14 @@ export function useInstallations(api: SkillApi) {
     }, t("hooks.repairFailed"), true);
   };
 
+  const rebuild = async (): Promise<InstallHealthReport | null> => {
+    return runOperation("health:rebuild", async () => {
+      const report = await api.rebuildInstallations();
+      await refresh({ silent: true });
+      return report;
+    }, t("hooks.rebuildFailed"), true);
+  };
+
   const migrateUnmanaged = (skillId: string, replaceWithLink: boolean) =>
     runOperation(`migrate:${skillId}`, async () => {
       await api.migrateProviderSkill(skillId, replaceWithLink);
@@ -146,6 +154,7 @@ export function useInstallations(api: SkillApi) {
     uninstall,
     scanHealth,
     repair,
+    rebuild,
     migrateUnmanaged,
     savePreset,
     deletePreset,

@@ -174,3 +174,13 @@ pub fn repair_index(
         },
     ))
 }
+
+pub fn is_rebuildable(issue: &InstallHealthIssue) -> bool {
+    match issue.kind {
+        InstallHealthKind::MissingTarget
+        | InstallHealthKind::BrokenLink
+        | InstallHealthKind::SourceMismatch => issue.library_skill_id.is_some(),
+        InstallHealthKind::DiskOrphan => true,
+        InstallHealthKind::NotSymlink | InstallHealthKind::IndexOrphan => false,
+    }
+}

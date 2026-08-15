@@ -170,6 +170,7 @@ pub fn run() {
             commands::get_install_overview,
             commands::scan_install_health,
             commands::repair_installations,
+            commands::rebuild_installations,
             commands::migrate_provider_skill,
             commands::create_library_skill,
             commands::rename_library_skill,

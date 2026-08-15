@@ -283,6 +283,7 @@ function createApi(overrides: Partial<SkillApi> = {}): SkillApi {
     }),
     scanInstallHealth: async () => ({ issues: [], repaired: 0 }),
     repairInstallations: async () => ({ issues: [], repaired: 0 }),
+    rebuildInstallations: async () => ({ issues: [], repaired: 0 }),
     migrateProviderSkill: unavailable,
     listInstallPresets: async () => [],
     saveInstallPreset: unavailable,
@@ -471,6 +472,37 @@ describe("Skill Manager", () => {
     expect(screen.getByRole("heading", { name: "Skill 库" })).toBeInTheDocument();
     expect(screen.getAllByText("reviewer").length).toBeGreaterThan(0);
     expect(screen.getByRole("tab", { name: /全部/ })).toBeInTheDocument();
+  });
+
+  it("启动发现安装问题时显示横幅，去处理进入安装页", async () => {
+    await renderLibrary(
+      createApi({
+        getInstallOverview: async () => ({
+          managed: [],
+          unmanaged: [],
+          duplicates: [],
+          health: {
+            issues: [
+              {
+                kind: "missingTarget",
+                provider: "cursor",
+                librarySkillId: "library-reviewer",
+                targetPath: "/tmp/.cursor/skills/reviewer",
+                message: "索引中的安装目标不存在",
+                repairable: true,
+              },
+            ],
+            repaired: 0,
+          },
+        }),
+      }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("发现 1 项安装问题");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "去处理" }));
+    expect(await screen.findByRole("region", { name: "安装总览" })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重建链接（1）" })).toBeEnabled();
   });
 
   it("库详情展示 git 来源并支持按来源搜索", async () => {

@@ -20,6 +20,7 @@ import {
   skillIdForProviderFilter,
   skillMemberIds,
   skillProviders,
+  issueIsRebuildable,
   type Provider,
 } from "./model/skill";
 import {
@@ -84,6 +85,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
     "skilltools.ui.listCollapsed",
     false,
   );
+  const [healthBannerDismissed, setHealthBannerDismissed] = useState(false);
   const {
     batchBusy,
     batchResult,
@@ -129,6 +131,12 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
   } = useSkills(api);
   const library = useLibrary(api);
   const installations = useInstallations(api);
+
+  useEffect(() => {
+    if ((installations.overview?.health.issues.length ?? 0) === 0) {
+      setHealthBannerDismissed(false);
+    }
+  }, [installations.overview?.health.issues.length]);
 
   /** 库/安装/Provider 任一源变更后静默同步：侧栏计数、列表徽章、安装总览等，不闪整页 loading */
   const syncAfterLibraryChange = () => {
@@ -333,14 +341,63 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
 
   const sidebarWidth = sidebarCollapsed ? 52 : 240;
   const listWidth = listCollapsed ? 44 : 340;
+  const healthIssueCount = installations.overview?.health.issues.length ?? 0;
+  const rebuildableCount =
+    installations.overview?.health.issues.filter(issueIsRebuildable).length ?? 0;
+  const showHealthBanner =
+    healthIssueCount > 0 && !healthBannerDismissed && filter !== "installations";
 
   return (
     <main
-      className="grid h-screen min-h-[600px] w-screen grid-rows-[minmax(0,1fr)] overflow-hidden bg-panel"
+      className="grid h-screen min-h-[600px] w-screen overflow-hidden bg-panel"
       style={{
         gridTemplateColumns: `${sidebarWidth}px ${listWidth}px minmax(0,1fr)`,
+        gridTemplateRows: showHealthBanner ? "auto minmax(0,1fr)" : "minmax(0,1fr)",
       }}
     >
+      {showHealthBanner ? (
+        <div
+          className="macos-alert-warn z-10 flex flex-wrap items-center gap-2 px-3 py-2"
+          style={{ gridColumn: "1 / -1" }}
+          role="status"
+        >
+          <span className="min-w-0 flex-1">
+            {t("installations.healthBanner", { count: healthIssueCount })}
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {rebuildableCount > 0 ? (
+              <button
+                type="button"
+                className="macos-btn-primary macos-btn-sm"
+                disabled={installations.healthBusy}
+                onClick={() => {
+                  void installations.rebuild().then((result) => {
+                    if (result) syncAfterLibraryChange();
+                  });
+                }}
+              >
+                {installations.healthBusy
+                  ? t("common.processing")
+                  : t("installations.rebuildLinks", { count: rebuildableCount })}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="macos-btn-ghost macos-btn-sm"
+              onClick={() => setFilter("installations")}
+            >
+              {t("installations.goFix")}
+            </button>
+            <button
+              type="button"
+              className="macos-btn-ghost macos-btn-sm"
+              onClick={() => setHealthBannerDismissed(true)}
+            >
+              {t("common.close")}
+            </button>
+          </div>
+        </div>
+      ) : null}
       <Sidebar
         skills={skills}
         librarySkills={library.librarySkills}
@@ -349,6 +406,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
         projectCount={library.projects.length}
         backupCount={backups.length}
         installationCount={installations.installationCount}
+        healthIssueCount={healthIssueCount}
         activeFilter={filter}
         libraryQuery={libraryQuery}
         loading={listLoading || library.loading}

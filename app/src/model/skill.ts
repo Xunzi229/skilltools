@@ -346,6 +346,16 @@ export interface InstallHealthIssue {
   repairable: boolean;
 }
 
+export function issueIsRebuildable(issue: InstallHealthIssue): boolean {
+  if (issue.kind === "diskOrphan") return true;
+  return (
+    Boolean(issue.librarySkillId) &&
+    (issue.kind === "missingTarget" ||
+      issue.kind === "brokenLink" ||
+      issue.kind === "sourceMismatch")
+  );
+}
+
 export interface InstallHealthReport {
   issues: InstallHealthIssue[];
   repaired: number;
