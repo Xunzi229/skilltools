@@ -488,8 +488,7 @@ export const en: Messages = {
     currentFile: "current file",
     previewFilename: "translation-preview.md",
     selectionButton: "Translate selection",
-    selectionTitle: "Selection translation preview",
-    translatingSelection: "Translating selected text…",
+    translatingInline: "Translating…",
   },
   targetSelector: {
     region: "Install targets",

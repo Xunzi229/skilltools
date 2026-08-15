@@ -10,10 +10,17 @@ import rust from "highlight.js/lib/languages/rust";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { useI18n } from "../i18n";
 import type { FileContent } from "../model/skill";
+import { errorMessage } from "../utils/errors";
+import {
+  pairSentences,
+  segmentWithTranslations,
+  splitSentences,
+  type SentenceTranslation,
+} from "../utils/inlineTranslate";
 import {
   languageLabel,
   languageOf,
@@ -40,7 +47,7 @@ interface MarkdownViewerProps {
   editable?: boolean;
   saving?: boolean;
   onSave?: (content: string) => Promise<void> | void;
-  onTranslateSelection?: (text: string) => void;
+  translateSelection?: (text: string) => Promise<string>;
 }
 
 interface SelectionPopup {
@@ -48,6 +55,8 @@ interface SelectionPopup {
   y: number;
   text: string;
 }
+
+type BlockTag = "p" | "li" | "h1" | "h2" | "h3" | "blockquote";
 
 function highlightCode(content: string, language: string): string {
   try {
@@ -58,6 +67,61 @@ function highlightCode(content: string, language: string): string {
     // fall through
   }
   return hljs.highlightAuto(content).value;
+}
+
+function flattenText(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(flattenText).join("");
+  if (typeof node === "object" && "props" in node) {
+    return flattenText((node as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return "";
+}
+
+function segmentNodes(
+  segments: NonNullable<ReturnType<typeof segmentWithTranslations>>,
+  pendingLabel: string,
+): ReactNode {
+  return segments.map((segment, index) =>
+    segment.type === "text" ? (
+      <span key={index}>{segment.text}</span>
+    ) : (
+      <span key={index} className="md-sentence-unit">
+        {segment.original}
+        <span
+          className={
+            segment.pending
+              ? "md-sentence-trans is-pending"
+              : segment.error
+                ? "md-sentence-trans is-error"
+                : "md-sentence-trans"
+          }
+        >
+          {segment.pending ? pendingLabel : (segment.error ?? segment.translation)}
+        </span>
+      </span>
+    ),
+  );
+}
+
+function InlineTransTag({
+  tag: Tag,
+  pairs,
+  pendingLabel,
+  children,
+}: {
+  tag: BlockTag;
+  pairs: SentenceTranslation[];
+  pendingLabel: string;
+  children?: ReactNode;
+}) {
+  const text = flattenText(children);
+  const segments = segmentWithTranslations(text, pairs);
+  if (!segments) {
+    return <Tag>{children}</Tag>;
+  }
+  return <Tag>{segmentNodes(segments, pendingLabel)}</Tag>;
 }
 
 function CodePanel({
@@ -90,11 +154,11 @@ function CodePanel({
 export function MarkdownViewer({
   file,
   loading,
-  errorMessage,
+  errorMessage: errorText,
   editable = false,
   saving = false,
   onSave,
-  onTranslateSelection,
+  translateSelection,
 }: MarkdownViewerProps) {
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
@@ -102,7 +166,9 @@ export function MarkdownViewer({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [mdSource, setMdSource] = useState(false);
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopup | null>(null);
+  const [inlinePairs, setInlinePairs] = useState<SentenceTranslation[] | null>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
+  const translateRequestRef = useRef(0);
 
   useEffect(() => {
     setEditing(false);
@@ -110,6 +176,8 @@ export function MarkdownViewer({
     setSaveError(null);
     setMdSource(false);
     setSelectionPopup(null);
+    setInlinePairs(null);
+    translateRequestRef.current += 1;
   }, [file?.relativePath, file?.content]);
 
   useEffect(() => {
@@ -142,6 +210,101 @@ export function MarkdownViewer({
   const language = file ? languageOf(file.relativePath) : "plaintext";
   const markdown =
     kind === "markdown" ? stripMarkdownFrontmatter(file?.content ?? "") : "";
+
+  const markdownComponents = useMemo(() => {
+    const code = ({
+      className,
+      children,
+      ...props
+    }: {
+      className?: string;
+      children?: ReactNode;
+    }) => {
+      const text = String(children).replace(/\n$/, "");
+      const match = /language-(\w+)/.exec(className ?? "");
+      const isBlock = Boolean(match) || text.includes("\n");
+      if (!isBlock) {
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
+      }
+      const lang = match?.[1] ?? "plaintext";
+      const highlighted = highlightCode(text, lang);
+      return (
+        <pre className="md-code-block">
+          <div className="md-code-lang">{languageLabel(lang)}</div>
+          <code
+            className={`hljs language-${lang}`}
+            dangerouslySetInnerHTML={{ __html: highlighted }}
+          />
+        </pre>
+      );
+    };
+    const withTrans = (tag: BlockTag) =>
+      function TransBlock({ children }: { children?: ReactNode }) {
+        if (!inlinePairs || inlinePairs.length === 0) {
+          const Tag = tag;
+          return <Tag>{children}</Tag>;
+        }
+        return (
+          <InlineTransTag
+            tag={tag}
+            pairs={inlinePairs}
+            pendingLabel={t("translate.translatingInline")}
+          >
+            {children}
+          </InlineTransTag>
+        );
+      };
+    return {
+      img: () => null,
+      code,
+      p: withTrans("p"),
+      li: withTrans("li"),
+      h1: withTrans("h1"),
+      h2: withTrans("h2"),
+      h3: withTrans("h3"),
+      blockquote: withTrans("blockquote"),
+    };
+  }, [inlinePairs, t]);
+
+  const runInlineTranslate = (text: string) => {
+    if (!translateSelection) return;
+    const originals = splitSentences(text);
+    const pending: SentenceTranslation[] = (originals.length > 0 ? originals : [text]).map(
+      (original) => ({
+        original,
+        translation: null,
+        pending: true,
+      }),
+    );
+    const requestId = translateRequestRef.current + 1;
+    translateRequestRef.current = requestId;
+    setInlinePairs(pending);
+    void translateSelection(text)
+      .then((translated) => {
+        if (translateRequestRef.current !== requestId) return;
+        setInlinePairs(
+          pairSentences(text, translated).map((pair) => ({
+            ...pair,
+            pending: false,
+          })),
+        );
+      })
+      .catch((err: unknown) => {
+        if (translateRequestRef.current !== requestId) return;
+        setInlinePairs([
+          {
+            original: originals[0] ?? text,
+            translation: null,
+            pending: false,
+            error: errorMessage(err, t("translate.failed")),
+          },
+        ]);
+      });
+  };
 
   return (
     <article className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel">
@@ -220,7 +383,7 @@ export function MarkdownViewer({
         ref={previewBodyRef}
         className="file-preview-body min-h-0 flex-1 overflow-auto"
         onMouseUp={() => {
-          if (!onTranslateSelection || editing) {
+          if (!translateSelection || editing) {
             setSelectionPopup(null);
             return;
           }
@@ -247,8 +410,8 @@ export function MarkdownViewer({
       >
         {loading ? (
           <p className="px-4 py-3 text-[13px] text-ink-3">{t("markdown.loading")}</p>
-        ) : errorMessage ? (
-          <p className="macos-alert-error m-3">{errorMessage}</p>
+        ) : errorText ? (
+          <p className="macos-alert-error m-3">{errorText}</p>
         ) : saveError ? (
           <p className="macos-alert-error m-3">{saveError}</p>
         ) : !file ? (
@@ -268,36 +431,7 @@ export function MarkdownViewer({
           </p>
         ) : kind === "markdown" && !mdSource ? (
           <div className="markdown-body">
-            <ReactMarkdown
-              components={{
-                img: () => null,
-                code({ className, children, ...props }) {
-                  const text = String(children).replace(/\n$/, "");
-                  const match = /language-(\w+)/.exec(className ?? "");
-                  const isBlock = Boolean(match) || text.includes("\n");
-                  if (!isBlock) {
-                    return (
-                      <code className={className} {...props}>
-                        {children}
-                      </code>
-                    );
-                  }
-                  const lang = match?.[1] ?? "plaintext";
-                  const highlighted = highlightCode(text, lang);
-                  return (
-                    <pre className="md-code-block">
-                      <div className="md-code-lang">{languageLabel(lang)}</div>
-                      <code
-                        className={`hljs language-${lang}`}
-                        dangerouslySetInnerHTML={{ __html: highlighted }}
-                      />
-                    </pre>
-                  );
-                },
-              }}
-            >
-              {markdown}
-            </ReactMarkdown>
+            <ReactMarkdown components={markdownComponents}>{markdown}</ReactMarkdown>
           </div>
         ) : kind === "code" || mdSource ? (
           <CodePanel
@@ -306,11 +440,18 @@ export function MarkdownViewer({
           />
         ) : (
           <pre className="file-preview-text m-0 overflow-auto px-4 py-3 whitespace-pre-wrap text-ink">
-            {file.content ?? ""}
+            {(() => {
+              if (!inlinePairs || inlinePairs.length === 0) {
+                return file.content ?? "";
+              }
+              const segments = segmentWithTranslations(file.content ?? "", inlinePairs);
+              if (!segments) return file.content ?? "";
+              return segmentNodes(segments, t("translate.translatingInline"));
+            })()}
           </pre>
         )}
       </div>
-      {selectionPopup && onTranslateSelection ? (
+      {selectionPopup && translateSelection ? (
         <button
           type="button"
           className="translate-selection-pop macos-btn-primary macos-btn-sm"
@@ -320,7 +461,7 @@ export function MarkdownViewer({
             const text = selectionPopup.text;
             setSelectionPopup(null);
             window.getSelection()?.removeAllRanges();
-            onTranslateSelection(text);
+            runInlineTranslate(text);
           }}
         >
           {t("translate.selectionButton")}

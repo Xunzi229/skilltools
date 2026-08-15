@@ -60,7 +60,6 @@ export function useTranslatePreview(
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TranslatePreview | null>(null);
   const [pathLabel, setPathLabel] = useState<string>("");
-  const [isSelection, setIsSelection] = useState(false);
   const requestIdRef = useRef(0);
 
   const closePreview = () => {
@@ -69,7 +68,6 @@ export function useTranslatePreview(
     setLoading(false);
     setError(null);
     setResult(null);
-    setIsSelection(false);
   };
 
   useEffect(() => {
@@ -82,13 +80,11 @@ export function useTranslatePreview(
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  const run = (relativePath: string, sourceText?: string) => {
+  const run = (relativePath: string) => {
     if (!api || !skillId) return;
     const path = relativePath.trim() || "SKILL.md";
-    const selected = sourceText?.trim() ?? "";
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    setIsSelection(Boolean(selected));
     setPathLabel(path);
     setOpen(true);
     setLoading(true);
@@ -97,12 +93,7 @@ export function useTranslatePreview(
     window.setTimeout(() => {
       void (async () => {
         try {
-          const preview = await api.previewTranslateSkill(
-            source,
-            skillId,
-            path,
-            selected || null,
-          );
+          const preview = await api.previewTranslateSkill(source, skillId, path);
           if (requestIdRef.current !== requestId) return;
           setResult(preview);
         } catch (err: unknown) {
@@ -131,15 +122,13 @@ export function useTranslatePreview(
               id="translate-preview-title"
               className="m-0 text-[15px] font-semibold tracking-tight text-ink"
             >
-              {isSelection ? t("translate.selectionTitle") : t("translate.previewTitle")}
+              {t("translate.previewTitle")}
             </h2>
             <p className="mt-1 text-[12px] leading-5 text-ink-3">
               {loading
-                ? isSelection
-                  ? t("translate.translatingSelection")
-                  : t("translate.translatingFile", {
-                      path: pathLabel || t("translate.currentFile"),
-                    })
+                ? t("translate.translatingFile", {
+                    path: pathLabel || t("translate.currentFile"),
+                  })
                 : t("translate.previewHint")}
               {!loading && result
                 ? ` · ${result.sourceFiles.join("、")} → ${result.targetLang} · ${result.model}`

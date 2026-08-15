@@ -479,8 +479,7 @@ export const zh = {
     currentFile: "当前文件",
     previewFilename: "翻译预览.md",
     selectionButton: "翻译选中",
-    selectionTitle: "选中内容翻译预览",
-    translatingSelection: "正在翻译选中内容，请稍候…",
+    translatingInline: "翻译中…",
   },
   targetSelector: {
     region: "安装目标",

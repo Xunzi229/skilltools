@@ -17,7 +17,7 @@ import { NameDialog } from "./NameDialog";
 import { SkillMetaForm } from "./SkillMetaForm";
 import { TagColorDot } from "./TagColorPicker";
 import { TargetSelector } from "./TargetSelector";
-import { TranslatePreviewButton, useTranslatePreview } from "./TranslatePreviewButton";
+import { TranslatePreviewButton } from "./TranslatePreviewButton";
 import { useI18n } from "../i18n";
 
 interface LibraryDetailProps {
@@ -88,7 +88,6 @@ export function LibraryDetail({
     source: skill ? { kind: "library", skillId: skill.id } : null,
     reloadToken: skill?.skillMarkdown,
   });
-  const translate = useTranslatePreview(api, "library", skill?.id ?? "");
 
   if (loading) {
     return (
@@ -365,13 +364,19 @@ export function LibraryDetail({
             editable
             saving={files.saving}
             onSave={files.saveFile}
-            onTranslateSelection={(text) => {
-              translate.run(files.preview?.relativePath ?? "SKILL.md", text);
-            }}
+            translateSelection={(text) =>
+              api
+                .previewTranslateSkill(
+                  "library",
+                  skill.id,
+                  files.preview?.relativePath ?? "SKILL.md",
+                  text,
+                )
+                .then((preview) => preview.markdown)
+            }
           />
         </div>
       </div>
-      {translate.dialog}
 
       <NameDialog
         open={nameDialog !== null}
