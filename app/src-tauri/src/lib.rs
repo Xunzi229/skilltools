@@ -26,14 +26,21 @@ pub mod skill_files;
 pub mod skill_repository;
 mod translate;
 mod transaction_lock;
+mod window_geometry;
 mod zip_ops;
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use backup_repository::BackupRepository;
 use commands::AppState;
 use library_repository::LibraryRepository;
 use paths::AppPaths;
 use skill_repository::SkillRepository;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
+
+static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
 
 fn focus_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -41,6 +48,44 @@ fn focus_main_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+fn request_quit(app: &tauri::AppHandle) {
+    ALLOW_EXIT.store(true, Ordering::SeqCst);
+    app.exit(0);
+}
+
+fn install_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show = MenuItem::with_id(app, "show", "打开", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| std::io::Error::other("缺少托盘图标"))?;
+
+    let _tray = TrayIconBuilder::with_id("main-tray")
+        .icon(icon)
+        .tooltip("Skill Manager")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => focus_main_window(app),
+            "quit" => request_quit(app),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                focus_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -74,7 +119,23 @@ pub fn run() {
             if !managed {
                 return Err(std::io::Error::other("应用状态初始化失败").into());
             }
+            if let Some(window) = app.get_webview_window("main") {
+                window_geometry::restore(&window);
+            }
+            install_tray(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Resized(_) => window_geometry::persist(window),
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                window_geometry::persist(window);
+                if ALLOW_EXIT.load(Ordering::SeqCst) {
+                    return;
+                }
+                let _ = window.hide();
+                api.prevent_close();
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::scan_skills,
