@@ -12,8 +12,8 @@ use crate::library_repository::{
     scan_project, sync_installation_statuses, LibraryRepository,
 };
 use crate::model::{
-    DuplicateSkillGroup, InstallHealthReport, InstallOverview, MigrateResult, ProjectSourceType,
-    Provider, SkillInstallation, SkillSummary, UnmanagedSkill,
+    DuplicateSkillGroup, InstallHealthKind, InstallHealthReport, InstallOverview, MigrateResult,
+    ProjectSourceType, Provider, SkillInstallation, SkillSummary, UnmanagedSkill,
 };
 use crate::transaction_lock::lock_app_transaction;
 
@@ -80,7 +80,7 @@ impl LibraryRepository {
                         .map_err(|_| AppError::TargetConflict {
                             path: previous_target.display().to_string(),
                         })?;
-                if previous_resolved != source_path {
+                if !crate::path_norm::paths_eq(&previous_resolved, &source_path) {
                     return Err(AppError::TargetConflict {
                         path: previous_target.display().to_string(),
                     });
@@ -266,6 +266,59 @@ impl LibraryRepository {
         Ok(InstallHealthReport {
             issues: report.issues,
             repaired,
+        })
+    }
+
+    /// Recreate managed symlinks from library sources; adopt disk orphans into the index.
+    pub fn rebuild_installations(&self) -> Result<InstallHealthReport, AppError> {
+        let issues = self.scan_install_health()?.issues;
+        let mut installed = 0usize;
+        let mut last_error: Option<AppError> = None;
+        for issue in &issues {
+            if !crate::install_health::is_rebuildable(issue)
+                || issue.kind == InstallHealthKind::DiskOrphan
+            {
+                continue;
+            }
+            let Some(skill_id) = issue.library_skill_id.as_deref() else {
+                continue;
+            };
+            // 失效/指错的旧链接先拆掉，避免 install 在「根目录已变」时把损坏链接当成冲突。
+            if matches!(
+                issue.kind,
+                InstallHealthKind::BrokenLink | InstallHealthKind::SourceMismatch
+            ) && path_is_symlink_link(&issue.target_path)
+            {
+                let _ = remove_directory_symlink(&issue.target_path);
+            }
+            match self.install_skill(skill_id, issue.provider) {
+                Ok(_) => installed += 1,
+                Err(error) => last_error = Some(error),
+            }
+        }
+
+        let adopted = {
+            let _guard = lock_app_transaction(self.paths())?;
+            let mut index = self.load_index()?;
+            let before = index.installations.len();
+            crate::library_repository::adopt_existing_installations(&mut index, self.paths());
+            crate::library_repository::sync_installation_statuses(&mut index);
+            let adopted = index.installations.len().saturating_sub(before);
+            if adopted > 0 {
+                self.write_index(&index)?;
+            }
+            adopted
+        };
+
+        let remaining = self.scan_install_health()?;
+        if installed == 0 {
+            if let Some(error) = last_error {
+                return Err(error);
+            }
+        }
+        Ok(InstallHealthReport {
+            issues: remaining.issues,
+            repaired: installed + adopted,
         })
     }
 
@@ -484,7 +537,7 @@ impl LibraryRepository {
                     return false;
                 }
                 if let Some(resolved) = &skill.resolved_path {
-                    if crate::path_norm::path_is_under(resolved, library_dir) {
+                    if crate::path_norm::path_is_under_resolved(resolved, library_dir) {
                         return false;
                     }
                 }

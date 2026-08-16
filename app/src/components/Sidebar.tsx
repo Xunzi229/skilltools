@@ -39,6 +39,7 @@ interface SidebarProps {
   projectCount: number;
   backupCount: number;
   installationCount: number;
+  healthIssueCount?: number;
   activeFilter: SkillFilter;
   libraryQuery: LibraryTaxonomyQuery;
   loading: boolean;
@@ -100,6 +101,7 @@ export function Sidebar({
   projectCount,
   backupCount,
   installationCount,
+  healthIssueCount = 0,
   activeFilter,
   libraryQuery,
   loading,
@@ -142,13 +144,17 @@ export function Sidebar({
         key={id}
         type="button"
         className={[
-          "flex w-full flex-col items-center rounded-[8px] px-1 py-2 text-[11px] leading-tight transition-colors",
+          "relative flex w-full flex-col items-center rounded-[8px] px-1 py-2 text-[11px] leading-tight transition-colors",
           activeFilter === id && !isLibraryQueryActive(libraryQuery)
             ? rowActive
             : rowIdle,
         ].join(" ")}
         aria-pressed={activeFilter === id}
-        aria-label={title}
+        aria-label={
+          id === "installations" && healthIssueCount > 0
+            ? `${title}，${t("installations.healthBadge", { count: healthIssueCount })}`
+            : title
+        }
         title={title}
         onClick={() => {
           if (id === "library") selectLibraryHome();
@@ -159,6 +165,12 @@ export function Sidebar({
         }}
       >
         <span className="font-medium">{label}</span>
+        {id === "installations" && healthIssueCount > 0 ? (
+          <span
+            className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-[#ff9500]"
+            aria-hidden="true"
+          />
+        ) : null}
       </button>
     );
 
@@ -216,7 +228,17 @@ export function Sidebar({
       }}
     >
       <span className="truncate">{label}</span>
-      <span className={countClass}>{count}</span>
+      <span className="flex items-center gap-1.5">
+        {id === "installations" && healthIssueCount > 0 ? (
+          <span
+            className="rounded-full bg-[#ff9500] px-1.5 text-[10px] font-medium text-white"
+            title={t("installations.healthBadge", { count: healthIssueCount })}
+          >
+            {healthIssueCount}
+          </span>
+        ) : null}
+        <span className={countClass}>{count}</span>
+      </span>
     </button>
   );
 

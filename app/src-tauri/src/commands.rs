@@ -965,6 +965,18 @@ pub fn repair_installations(
 }
 
 #[tauri::command]
+pub fn rebuild_installations(
+    state: State<'_, AppState>,
+) -> Result<InstallHealthReport, CommandError> {
+    state
+        .library
+        .lock()
+        .map_err(|_| state_lock_error())?
+        .rebuild_installations()
+        .map_err(map_app_error)
+}
+
+#[tauri::command]
 pub fn create_library_skill(
     state: State<'_, AppState>,
     name: String,

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { useInstallations } from "../hooks/useInstallations";
 import type { LibrarySkillSummary, Provider } from "../model/skill";
+import { issueIsRebuildable } from "../model/skill";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useI18n } from "../i18n";
 
@@ -48,6 +49,7 @@ export function InstallationsPanel({
     uninstall,
     scanHealth,
     repair,
+    rebuild,
     migrateUnmanaged,
     savePreset,
     deletePreset,
@@ -66,6 +68,8 @@ export function InstallationsPanel({
 
   const repairableCount =
     overview?.health.issues.filter((issue) => issue.repairable).length ?? 0;
+  const rebuildableCount =
+    overview?.health.issues.filter(issueIsRebuildable).length ?? 0;
   const anyBusy = busyKey !== null || healthBusy;
 
   const toggleProvider = (provider: Provider) => {
@@ -104,6 +108,18 @@ export function InstallationsPanel({
             </button>
             <button
               type="button"
+              className="macos-btn-primary"
+              disabled={anyBusy || rebuildableCount === 0}
+              onClick={() =>
+                void rebuild().then((result) => {
+                  if (result) onChanged();
+                })
+              }
+            >
+              {t("installations.rebuildLinks", { count: rebuildableCount })}
+            </button>
+            <button
+              type="button"
               className="macos-btn-ghost"
               disabled={anyBusy || repairableCount === 0}
               onClick={() =>
@@ -115,6 +131,9 @@ export function InstallationsPanel({
               {t("installations.safeRepair", { count: repairableCount })}
             </button>
           </div>
+          <p className="mb-3 text-[11px] text-ink-3">
+            {t("installations.healthHint")}
+          </p>
           {overview && (
             <div className="macos-card px-3 py-3 text-[12px] text-ink-2">
               {t("installations.issueCount", { count: overview.health.issues.length })}
@@ -129,6 +148,9 @@ export function InstallationsPanel({
                     <li key={`${issue.kind}:${issue.targetPath}`}>
                       [{providerLabels[issue.provider]}]{" "}
                       {healthKindLabel(t, issue.kind)}：{issue.message}
+                      {issue.kind === "notSymlink"
+                        ? ` ${t("installations.notSymlinkHint")}`
+                        : ""}
                     </li>
                   ))}
                 </ul>

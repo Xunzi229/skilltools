@@ -660,7 +660,7 @@ pub(crate) fn safe_skill_target(root: &Path, name: &str) -> Result<PathBuf, AppE
     let mut components = path.components();
     let valid = matches!(components.next(), Some(std::path::Component::Normal(_)))
         && components.next().is_none();
-    if !valid {
+    if !valid || crate::path_norm::is_forbidden_skill_dir_name(name) {
         return Err(AppError::PathOutsideManagedRoots {
             path: root.join(path).display().to_string(),
         });
@@ -1398,6 +1398,21 @@ mod tests {
     }
 
     #[test]
+    fn install_rejects_windows_reserved_skill_name() {
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("reserved"), "NUL");
+        let repository = LibraryRepository::new(AppPaths::for_test(base.path()));
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+
+        assert!(matches!(
+            repository.install_skill(&skill_id, Provider::Cursor),
+            Err(AppError::PathOutsideManagedRoots { .. })
+        ));
+    }
+
+    #[test]
     fn scan_install_health_detects_missing_target_and_repair_trims_index() {
         use crate::model::SkillInstallation;
         use chrono::Utc;
@@ -1432,6 +1447,157 @@ mod tests {
         assert!(repaired.repaired >= 1);
         assert!(repository.list_installations().unwrap().is_empty());
         assert!(!missing_target.exists());
+    }
+
+    #[test]
+    fn rebuild_recreates_missing_target_link_and_keeps_index() {
+        use crate::fs_ops::path_is_symlink_link;
+        use crate::model::SkillInstallation;
+        use chrono::Utc;
+
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill_id = repository.list_library_skills().unwrap()[0].id.clone();
+        let missing_target = paths.provider_root(Provider::Cursor).unwrap().join("Alpha");
+        fs::create_dir_all(missing_target.parent().unwrap()).unwrap();
+
+        let mut index = repository.load_index().unwrap();
+        index.installations.push(SkillInstallation {
+            library_skill_id: skill_id,
+            provider: Provider::Cursor,
+            source_path: source.path().join("alpha"),
+            target_path: missing_target.clone(),
+            installed_at: Utc::now(),
+        });
+        repository.write_index(&index).unwrap();
+
+        let rebuilt = repository.rebuild_installations().unwrap();
+        assert!(rebuilt.repaired >= 1);
+        assert!(rebuilt.issues.is_empty());
+        assert!(path_is_symlink_link(&missing_target));
+        assert_eq!(repository.list_installations().unwrap().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rebuild_replaces_broken_symlink() {
+        use crate::fs_ops::path_is_symlink_link;
+        use crate::model::SkillInstallation;
+        use chrono::Utc;
+
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill = repository.list_library_skills().unwrap()[0].clone();
+        let target = paths.provider_root(Provider::Cursor).unwrap().join("Alpha");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("/nonexistent-skill-source", &target).unwrap();
+
+        let mut index = repository.load_index().unwrap();
+        index.installations.push(SkillInstallation {
+            library_skill_id: skill.id.clone(),
+            provider: Provider::Cursor,
+            source_path: skill.absolute_path.clone(),
+            target_path: target.clone(),
+            installed_at: Utc::now(),
+        });
+        repository.write_index(&index).unwrap();
+
+        let report = repository.scan_install_health().unwrap();
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|issue| issue.kind == InstallHealthKind::BrokenLink)
+        );
+
+        let rebuilt = repository.rebuild_installations().unwrap();
+        assert!(rebuilt.repaired >= 1);
+        assert!(path_is_symlink_link(&target));
+        assert_eq!(
+            fs::canonicalize(&target).unwrap(),
+            skill.absolute_path.canonicalize().unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rebuild_replaces_broken_symlink_at_stale_target_path() {
+        use crate::fs_ops::path_is_symlink_link;
+        use crate::model::SkillInstallation;
+        use chrono::Utc;
+
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill = repository.list_library_skills().unwrap()[0].clone();
+        let stale = paths
+            .provider_root(Provider::Cursor)
+            .unwrap()
+            .join("OldName");
+        fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("/nonexistent-skill-source", &stale).unwrap();
+
+        let mut index = repository.load_index().unwrap();
+        index.installations.push(SkillInstallation {
+            library_skill_id: skill.id.clone(),
+            provider: Provider::Cursor,
+            source_path: skill.absolute_path.clone(),
+            target_path: stale.clone(),
+            installed_at: Utc::now(),
+        });
+        repository.write_index(&index).unwrap();
+
+        let rebuilt = repository.rebuild_installations().unwrap();
+        assert!(rebuilt.repaired >= 1);
+        assert!(fs::symlink_metadata(&stale).is_err());
+        let current = paths.provider_root(Provider::Cursor).unwrap().join("Alpha");
+        assert!(path_is_symlink_link(&current));
+        assert_eq!(
+            fs::canonicalize(&current).unwrap(),
+            skill.absolute_path.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn rebuild_adopts_disk_orphan_library_link() {
+        let base = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths);
+        let skill = repository
+            .create_library_skill("Alpha".into(), "Alpha 描述".into(), None)
+            .unwrap();
+        repository
+            .install_skill(&skill.id, Provider::Cursor)
+            .unwrap();
+
+        let mut index = repository.load_index().unwrap();
+        index.installations.clear();
+        repository.write_index(&index).unwrap();
+
+        let report = repository.scan_install_health().unwrap();
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|issue| issue.kind == InstallHealthKind::DiskOrphan)
+        );
+
+        let rebuilt = repository.rebuild_installations().unwrap();
+        assert!(rebuilt.repaired >= 1);
+        assert!(repository.list_installations().unwrap().iter().any(|item| {
+            item.library_skill_id == skill.id && item.provider == Provider::Cursor
+        }));
     }
 
     #[test]

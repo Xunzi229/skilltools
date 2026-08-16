@@ -78,6 +78,7 @@ export interface SkillApi {
   getInstallOverview(): Promise<InstallOverview>;
   scanInstallHealth(): Promise<InstallHealthReport>;
   repairInstallations(): Promise<InstallHealthReport>;
+  rebuildInstallations(): Promise<InstallHealthReport>;
   migrateProviderSkill(
     skillId: string,
     replaceWithLink: boolean,
@@ -233,6 +234,7 @@ export const tauriSkillApi: SkillApi = {
   getInstallOverview: () => call("get_install_overview"),
   scanInstallHealth: () => call("scan_install_health"),
   repairInstallations: () => call("repair_installations"),
+  rebuildInstallations: () => call("rebuild_installations"),
   migrateProviderSkill: (skillId, replaceWithLink) =>
     call("migrate_provider_skill", { skillId, replaceWithLink }),
   listInstallPresets: () => call("list_install_presets"),

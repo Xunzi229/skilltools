@@ -252,7 +252,16 @@ export const en: Messages = {
     health: "Health",
     scanning: "Scanning…",
     scan: "Scan",
-    safeRepair: "Safe repair ({count})",
+    rebuildLinks: "Rebuild links ({count})",
+    safeRepair: "Safe cleanup ({count})",
+    healthBanner:
+      "Found {count} install issue(s). Cursor / Claude / Codex may not see these Skills.",
+    goFix: "Review",
+    healthBadge: "{count} install issue(s)",
+    notSymlinkHint:
+      "This is a real directory and cannot be rebuilt automatically. Back it up and move it aside, then install or rebuild the link.",
+    healthHint:
+      "Rebuild recreates symlinks from the library source. Safe cleanup only removes stale index rows and orphan links.",
     issueCount: "{count} issue(s)",
     repairedSuffix: ", repaired {count} this run",
     noIssues: "No issues found",
@@ -617,6 +626,7 @@ export const en: Messages = {
     uninstallFailed: "Uninstall failed",
     healthScanFailed: "Health scan failed",
     repairFailed: "Repair failed",
+    rebuildFailed: "Rebuild links failed",
     migrateFailed: "Move to library failed",
     savePresetFailed: "Failed to save preset",
     deletePresetFailed: "Failed to delete preset",

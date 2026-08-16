@@ -37,7 +37,9 @@ use library_repository::LibraryRepository;
 use paths::AppPaths;
 use skill_repository::SkillRepository;
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::tray::TrayIconBuilder;
+#[cfg(not(target_os = "linux"))]
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::Manager;
 
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
@@ -64,17 +66,19 @@ fn install_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .cloned()
         .ok_or_else(|| std::io::Error::other("缺少托盘图标"))?;
 
+    // Linux AppIndicator 左键 Click 不稳定，改为弹出菜单；Win/macOS 左键打开窗口。
     let _tray = TrayIconBuilder::with_id("main-tray")
         .icon(icon)
         .tooltip("Skill Manager")
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        .show_menu_on_left_click(cfg!(target_os = "linux"))
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => focus_main_window(app),
             "quit" => request_quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
+            #[cfg(not(target_os = "linux"))]
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
@@ -83,6 +87,8 @@ fn install_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             {
                 focus_main_window(tray.app_handle());
             }
+            #[cfg(target_os = "linux")]
+            let _ = (tray, event);
         })
         .build(app)?;
     Ok(())
@@ -170,6 +176,7 @@ pub fn run() {
             commands::get_install_overview,
             commands::scan_install_health,
             commands::repair_installations,
+            commands::rebuild_installations,
             commands::migrate_provider_skill,
             commands::create_library_skill,
             commands::rename_library_skill,
@@ -216,6 +223,17 @@ pub fn run() {
             commands::update_skill_metadata,
             commands::update_library_skill_metadata,
         ])
-        .run(tauri::generate_context!())
-        .unwrap_or_else(|error| eprintln!("应用运行失败：{error}"));
+        .build(tauri::generate_context!())
+        .unwrap_or_else(|error| {
+            eprintln!("应用启动失败：{error}");
+            std::process::exit(1);
+        })
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                focus_main_window(app);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }
