@@ -129,7 +129,7 @@ export const zh = {
     deleteOneConfirm: "删除",
     removeLinksTitle: "移除 {count} 个安装链接？",
     removeLinksMessage:
-      "仅移除软链，不删除库/原始目录中的文件。会写入「删除前」事件备份，之后可按原样恢复链接。",
+      "仅移除库链接（符号链接 / junction），不删除库/原始目录中的文件。会写入「删除前」事件备份，之后可按原样恢复链接。",
     removeLinksConfirm: "移除链接",
     deleteBodiesTitle: "删除 {count} 个 Skill？",
     deleteBodiesMessage:
@@ -137,7 +137,7 @@ export const zh = {
     deleteBodiesConfirm: "备份并删除",
     deleteMixedTitle: "删除 {total} 项？",
     deleteMixedMessage:
-      "其中软链 {linkCount} 个仅移除链接，本体 {bodyCount} 个先备份再删除；均写入「删除前」事件，单项失败不中断其余项。",
+      "其中库链接 {linkCount} 个仅移除链接，本体 {bodyCount} 个先备份再删除；均写入「删除前」事件，单项失败不中断其余项。",
     deleteMixedConfirm: "确认删除",
     migrateTitle: "迁入 {count} 个 Skill 到中央库？",
     migrateMessage: "将复制真实目录到库中登记为本地项目。冲突时不会覆盖现有内容。",
@@ -230,7 +230,7 @@ export const zh = {
     warningsTitle: "需要注意",
     deleteTitle: "删除 {name}？",
     deleteLinkMessage:
-      "该 Skill 是符号链接：只会移除链接，不删除原始目录。会写入「删除前」事件备份，之后可按原样恢复链接。",
+      "该 Skill 是库链接（符号链接 / junction）：只会移除链接，不删除原始目录。会写入「删除前」事件备份，之后可按原样恢复链接。",
     deleteBodyMessage:
       "此操作会先自动备份再删除 Skill（「删除前」事件），删除后可从备份记录恢复。",
     removeLink: "移除链接",
@@ -253,7 +253,7 @@ export const zh = {
     goFix: "去处理",
     healthBadge: "{count} 项安装问题",
     notSymlinkHint: "这是真实目录，不能自动重建。请先备份并移走该目录，再安装或重建链接。",
-    healthHint: "重建链接会从库源重新创建符号链接；安全清理只删除失效索引和孤儿链接。",
+    healthHint: "重建链接会从库源重新创建库链接（符号链接 / junction）；安全清理只删除失效索引和孤儿链接。",
     issueCount: "共 {count} 项问题",
     repairedSuffix: "，本次已修复 {count}",
     noIssues: "未发现问题",
@@ -286,7 +286,7 @@ export const zh = {
     replaceMessage: "将删除本机真实目录并替换为库链接。冲突的真实目录不会被覆盖。",
     replaceConfirm: "替换",
     issueMissingTarget: "目标缺失",
-    issueNotSymlink: "非符号链接",
+    issueNotSymlink: "非库链接",
     issueBrokenLink: "断链",
     issueSourceMismatch: "源不匹配",
     issueIndexOrphan: "索引孤儿",

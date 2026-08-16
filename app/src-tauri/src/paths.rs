@@ -98,7 +98,7 @@ impl AppPaths {
             let Ok(resolved_root) = resolve_path(root) else {
                 continue;
             };
-            if requested.starts_with(&resolved_root) {
+            if crate::path_norm::path_is_under(&requested, &resolved_root) {
                 return Ok(());
             }
         }
@@ -130,7 +130,7 @@ impl AppPaths {
         };
         self.skill_roots.iter().any(|root| {
             resolve_path(&root.path)
-                .is_ok_and(|resolved_root| resolved_root == parent_resolved)
+                .is_ok_and(|resolved_root| crate::path_norm::paths_eq(&resolved_root, &parent_resolved))
         })
     }
 
@@ -147,7 +147,9 @@ impl AppPaths {
     pub fn assert_within(&self, path: &Path, root: &Path) -> Result<(), AppError> {
         let requested = resolve_path(path)?;
         let resolved_root = resolve_path(root)?;
-        if requested.starts_with(&resolved_root) && requested != resolved_root {
+        if crate::path_norm::path_is_under(&requested, &resolved_root)
+            && !crate::path_norm::paths_eq(&requested, &resolved_root)
+        {
             return Ok(());
         }
         Err(AppError::PathOutsideManagedRoots {
@@ -386,5 +388,32 @@ mod tests {
             app_data_dir.join("library/projects")
         );
         assert_eq!(paths.library_index, app_data_dir.join("library-index.json"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn assert_allowed_ignores_windows_path_case() {
+        let base = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        fs::create_dir_all(&paths.library_dir).unwrap();
+        let child = paths.library_dir.join("example");
+        fs::create_dir_all(&child).unwrap();
+        let mixed = PathBuf::from(child.to_string_lossy().to_ascii_uppercase());
+
+        assert!(paths.assert_allowed(&mixed).is_ok());
+        assert!(paths.assert_within(&mixed, &paths.library_dir).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn skill_access_matches_provider_root_case() {
+        let base = tempdir().unwrap();
+        let paths = AppPaths::for_test(base.path());
+        fs::create_dir_all(&paths.skill_roots[0].path).unwrap();
+        let link = paths.skill_roots[0].path.join("linked-skill");
+        crate::fs_ops::create_directory_link(base.path(), &link).unwrap();
+        let mixed_link = PathBuf::from(link.to_string_lossy().to_ascii_uppercase());
+
+        assert!(paths.assert_skill_access(&mixed_link).is_ok());
     }
 }

@@ -82,21 +82,13 @@ pub(crate) fn map_app_error(error: AppError) -> CommandError {
 }
 
 fn apply_paths(state: &AppState, paths: AppPaths) -> Result<(), CommandError> {
-    state
-        .skills
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .set_paths(paths.clone());
-    state
-        .backups
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .set_paths(paths.clone());
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .set_paths(paths);
+    // 先按 skills → backups → library 拿齐锁再写入，避免中途失败导致三仓路径不一致。
+    let mut skills = state.skills.lock().map_err(|_| state_lock_error())?;
+    let mut backups = state.backups.lock().map_err(|_| state_lock_error())?;
+    let mut library = state.library.lock().map_err(|_| state_lock_error())?;
+    skills.set_paths(paths.clone());
+    backups.set_paths(paths.clone());
+    library.set_paths(paths);
     Ok(())
 }
 

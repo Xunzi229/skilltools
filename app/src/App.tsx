@@ -344,6 +344,8 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
   const healthIssueCount = installations.overview?.health.issues.length ?? 0;
   const rebuildableCount =
     installations.overview?.health.issues.filter(issueIsRebuildable).length ?? 0;
+  const repairableCount =
+    installations.overview?.health.issues.filter((issue) => issue.repairable).length ?? 0;
   const showHealthBanner =
     healthIssueCount > 0 && !healthBannerDismissed && filter !== "installations";
 
@@ -382,6 +384,22 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
                 {installations.healthBusy
                   ? t("common.processing")
                   : t("installations.rebuildLinks", { count: rebuildableCount })}
+              </button>
+            ) : null}
+            {repairableCount > 0 && rebuildableCount === 0 ? (
+              <button
+                type="button"
+                className="macos-btn-primary macos-btn-sm"
+                disabled={installations.healthBusy}
+                onClick={() => {
+                  void installations.repair().then((result) => {
+                    if (result) syncAfterLibraryChange();
+                  });
+                }}
+              >
+                {installations.healthBusy
+                  ? t("common.processing")
+                  : t("installations.safeRepair", { count: repairableCount })}
               </button>
             ) : null}
             <button

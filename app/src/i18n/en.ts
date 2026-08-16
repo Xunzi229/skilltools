@@ -131,7 +131,7 @@ export const en: Messages = {
     deleteOneConfirm: "Delete",
     removeLinksTitle: "Remove {count} install link(s)?",
     removeLinksMessage:
-      "Only removes symlinks; library/source files stay. A before-delete backup is written so links can be restored.",
+      "Only removes library links (symlink / junction); library/source files stay. A before-delete backup is written so links can be restored.",
     removeLinksConfirm: "Remove links",
     deleteBodiesTitle: "Delete {count} Skill(s)?",
     deleteBodiesMessage:
@@ -139,13 +139,13 @@ export const en: Messages = {
     deleteBodiesConfirm: "Backup and delete",
     deleteMixedTitle: "Delete {total} item(s)?",
     deleteMixedMessage:
-      "{linkCount} symlink(s) will only remove links; {bodyCount} body(ies) will be backed up then deleted. All write before-delete events; one failure does not stop the rest.",
+      "{linkCount} library link(s) will only remove links; {bodyCount} body(ies) will be backed up then deleted. All write before-delete events; one failure does not stop the rest.",
     deleteMixedConfirm: "Confirm delete",
     migrateTitle: "Move {count} Skill(s) into the central library?",
     migrateMessage:
       "Real directories will be copied into the library as local projects. Existing content is never overwritten on conflict.",
     migrateConfirm: "Start migrate",
-    replaceWithLibraryLink: "Replace with library symlink after migrate",
+    replaceWithLibraryLink: "Replace with library link after migrate",
     scanWarningAria: "Scan directory warnings",
     partialScan: "Some directories were not scanned",
   },
@@ -233,7 +233,7 @@ export const en: Messages = {
     warningsTitle: "Attention",
     deleteTitle: "Delete {name}?",
     deleteLinkMessage:
-      "This Skill is a symlink: only the link is removed; the original directory stays. A before-delete backup is written so the link can be restored.",
+      "This Skill is a library link (symlink / junction): only the link is removed; the original directory stays. A before-delete backup is written so the link can be restored.",
     deleteBodyMessage:
       "This backs up the Skill first (before-delete event), then deletes it. You can restore from Backups later.",
     removeLink: "Remove link",
@@ -242,7 +242,7 @@ export const en: Messages = {
     migrateMessage:
       "Copies this Skill directory into the library as a local project. Existing content is never overwritten on conflict.",
     migrateConfirm: "Start migrate",
-    replaceWithLibraryLink: "Replace with library symlink after migrate",
+    replaceWithLibraryLink: "Replace with library link after migrate",
   },
   installations: {
     region: "Installations overview",
@@ -261,7 +261,7 @@ export const en: Messages = {
     notSymlinkHint:
       "This is a real directory and cannot be rebuilt automatically. Back it up and move it aside, then install or rebuild the link.",
     healthHint:
-      "Rebuild recreates symlinks from the library source. Safe cleanup only removes stale index rows and orphan links.",
+      "Rebuild recreates library links (symlink / junction) from the library source. Safe cleanup only removes stale index rows and orphan links.",
     issueCount: "{count} issue(s)",
     repairedSuffix: ", repaired {count} this run",
     noIssues: "No issues found",
@@ -296,7 +296,7 @@ export const en: Messages = {
       "Deletes the real local directory and replaces it with a library link. Conflicting real directories are not overwritten.",
     replaceConfirm: "Replace",
     issueMissingTarget: "Missing target",
-    issueNotSymlink: "Not a symlink",
+    issueNotSymlink: "Not a library link",
     issueBrokenLink: "Broken link",
     issueSourceMismatch: "Source mismatch",
     issueIndexOrphan: "Index orphan",

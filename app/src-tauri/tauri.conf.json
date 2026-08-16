@@ -39,6 +39,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM4OTRDRTZCRTgzNzhCMTIKUldRU2l6Zm9hODZVT0FzOU1FQWx5dlNTN3grck5MSHJyRWh6dWZzK2VvQk9VMXhyZitwcEJIWHoK",
       "endpoints": [
+        "https://github.com/Xunzi229/skilltools/releases/download/preview/latest.json",
         "https://github.com/Xunzi229/skilltools/releases/latest/download/latest.json"
       ],
       "windows": {

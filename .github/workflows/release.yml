@@ -124,3 +124,24 @@ jobs:
           Copy-Item -LiteralPath $src -Destination $asset -Force
           gh release upload $tag $asset --clobber
           Write-Host "Uploaded $asset from $src"
+
+  # GitHub /releases/latest 忽略 prerelease；rc 期间把 latest.json 滚到 preview 通道，
+  # 正式版也会同步，避免预览通道用户停在旧 rc。
+  publish-preview-updater:
+    needs: publish-tauri
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Mirror latest.json to preview channel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/updater
+          gh release download "${{ github.ref_name }}" --pattern "latest.json" --dir /tmp/updater
+          if ! gh release view preview >/dev/null 2>&1; then
+            gh release create preview --prerelease --title "Preview updater channel" --notes "Rolling latest.json for in-app updater. Not a versioned app release."
+          fi
+          gh release upload preview /tmp/updater/latest.json --clobber
+          echo "Mirrored latest.json from ${{ github.ref_name }} to preview"

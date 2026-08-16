@@ -259,9 +259,7 @@ export function InstallationsPanel({
           )}
         </section>
 
-        {loading || !overview ? (
-          <p className="text-[13px] text-ink-3">{t("installations.loading")}</p>
-        ) : (
+        {overview ? (
           <>
             <section className="mb-8">
               <h3 className="m-0 mb-3 text-[15px] font-semibold text-ink">
@@ -384,7 +382,9 @@ export function InstallationsPanel({
               )}
             </section>
           </>
-        )}
+        ) : loading ? (
+          <p className="text-[13px] text-ink-3">{t("installations.loading")}</p>
+        ) : null}
       </div>
     </section>
     <ConfirmDialog

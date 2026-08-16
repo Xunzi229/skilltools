@@ -505,6 +505,34 @@ describe("Skill Manager", () => {
     expect(screen.getByRole("button", { name: "重建链接（1）" })).toBeEnabled();
   });
 
+  it("仅索引孤儿时横幅提供安全清理", async () => {
+    await renderLibrary(
+      createApi({
+        getInstallOverview: async () => ({
+          managed: [],
+          unmanaged: [],
+          duplicates: [],
+          health: {
+            issues: [
+              {
+                kind: "indexOrphan",
+                provider: "cursor",
+                librarySkillId: "library-reviewer",
+                targetPath: "/tmp/.cursor/skills/reviewer",
+                message: "索引残留",
+                repairable: true,
+              },
+            ],
+            repaired: 0,
+          },
+        }),
+      }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("发现 1 项安装问题");
+    expect(screen.getByRole("button", { name: "安全清理（1）" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /重建链接/ })).not.toBeInTheDocument();
+  });
+
   it("横幅重建失败时展示错误信息", async () => {
     await renderLibrary(
       createApi({
