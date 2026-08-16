@@ -505,6 +505,43 @@ describe("Skill Manager", () => {
     expect(screen.getByRole("button", { name: "重建链接（1）" })).toBeEnabled();
   });
 
+  it("横幅重建失败时展示错误信息", async () => {
+    await renderLibrary(
+      createApi({
+        getInstallOverview: async () => ({
+          managed: [],
+          unmanaged: [],
+          duplicates: [],
+          health: {
+            issues: [
+              {
+                kind: "missingTarget",
+                provider: "cursor",
+                librarySkillId: "library-reviewer",
+                targetPath: "/tmp/.cursor/skills/reviewer",
+                message: "索引中的安装目标不存在",
+                repairable: true,
+              },
+            ],
+            repaired: 0,
+          },
+        }),
+        rebuildInstallations: async () => {
+          throw {
+            code: "IO",
+            message: "需要启用 Windows「开发人员模式」",
+          };
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "重建链接（1）" }));
+    expect(
+      await screen.findByText("需要启用 Windows「开发人员模式」"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
   it("库详情展示 git 来源并支持按来源搜索", async () => {
     await renderLibrary();
     const user = userEvent.setup();

@@ -363,6 +363,9 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
         >
           <span className="min-w-0 flex-1">
             {t("installations.healthBanner", { count: healthIssueCount })}
+            {installations.error ? (
+              <span className="mt-1 block text-[12px]">{installations.error.message}</span>
+            ) : null}
           </span>
           <div className="flex flex-wrap items-center gap-1.5">
             {rebuildableCount > 0 ? (

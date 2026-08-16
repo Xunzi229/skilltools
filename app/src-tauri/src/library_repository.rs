@@ -1527,6 +1527,48 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rebuild_replaces_broken_symlink_at_stale_target_path() {
+        use crate::fs_ops::path_is_symlink_link;
+        use crate::model::SkillInstallation;
+        use chrono::Utc;
+
+        let base = tempdir().unwrap();
+        let source = tempdir().unwrap();
+        write_skill(&source.path().join("alpha"), "Alpha");
+        let paths = AppPaths::for_test(base.path());
+        let repository = LibraryRepository::new(paths.clone());
+        repository.add_local_project(source.path()).unwrap();
+        let skill = repository.list_library_skills().unwrap()[0].clone();
+        let stale = paths
+            .provider_root(Provider::Cursor)
+            .unwrap()
+            .join("OldName");
+        fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("/nonexistent-skill-source", &stale).unwrap();
+
+        let mut index = repository.load_index().unwrap();
+        index.installations.push(SkillInstallation {
+            library_skill_id: skill.id.clone(),
+            provider: Provider::Cursor,
+            source_path: skill.absolute_path.clone(),
+            target_path: stale.clone(),
+            installed_at: Utc::now(),
+        });
+        repository.write_index(&index).unwrap();
+
+        let rebuilt = repository.rebuild_installations().unwrap();
+        assert!(rebuilt.repaired >= 1);
+        assert!(fs::symlink_metadata(&stale).is_err());
+        let current = paths.provider_root(Provider::Cursor).unwrap().join("Alpha");
+        assert!(path_is_symlink_link(&current));
+        assert_eq!(
+            fs::canonicalize(&current).unwrap(),
+            skill.absolute_path.canonicalize().unwrap()
+        );
+    }
+
     #[test]
     fn rebuild_adopts_disk_orphan_library_link() {
         let base = tempdir().unwrap();

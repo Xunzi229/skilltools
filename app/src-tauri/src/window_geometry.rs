@@ -123,8 +123,12 @@ pub fn restore(window: &tauri::WebviewWindow) {
         return;
     };
     let state = load_from_disk(&dir);
-    remember(state.clone());
     let (width, height) = size_for_restore(window, &state);
+    remember(WindowGeometry {
+        width,
+        height,
+        maximized: state.maximized,
+    });
     let _ = window.set_size(Size::Logical(LogicalSize::new(
         f64::from(width),
         f64::from(height),
