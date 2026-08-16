@@ -570,7 +570,7 @@ impl LibraryRepository {
                 entry.unmanaged_skill_ids.push(skill.id.clone());
             }
         }
-        for skill in self.list_library_skills().unwrap_or_default() {
+        for skill in self.list_library_skills()? {
             let entry = by_name
                 .entry(skill.name.clone())
                 .or_insert_with(|| DuplicateSkillGroup {

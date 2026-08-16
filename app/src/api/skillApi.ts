@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
+import { normalizeCommandError } from "../utils/errors";
 import type {
   AppPathsInfo,
   AppSettings,
   BackupRecord,
   BatchResult,
-  CommandError,
   ExternalEditor,
   FileContent,
   FileNode,
@@ -168,20 +168,6 @@ export interface SkillApi {
   ): Promise<BatchResult>;
 }
 
-const unknownError = (): CommandError => ({
-  code: "UNKNOWN",
-  message: t("api.operationFailed"),
-});
-
-function isCommandError(error: unknown): error is CommandError {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-
-  const candidate = error as Record<string, unknown>;
-  return typeof candidate.code === "string" && typeof candidate.message === "string";
-}
-
 async function call<T>(
   command: string,
   args?: Record<string, unknown>,
@@ -189,7 +175,7 @@ async function call<T>(
   try {
     return await invoke<T>(command, args);
   } catch (error) {
-    throw isCommandError(error) ? error : unknownError();
+    throw normalizeCommandError(error, t("api.operationFailed"));
   }
 }
 
