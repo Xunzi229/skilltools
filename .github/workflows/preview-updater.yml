@@ -1,0 +1,35 @@
+name: preview-updater
+
+# 把最新 v* Release 的 latest.json 滚到 preview 通道。
+# 正式发版仍由 release.yml 在 tag 构建结束后同步；本 workflow 用于补同步 / 手动恢复。
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/preview-updater.yml"
+
+jobs:
+  sync:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Mirror latest.json to preview channel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh release list --limit 30 --json tagName,isDraft --jq '[.[] | select(.isDraft==false and (.tagName | startswith("v")))][0].tagName')
+          if [ -z "${TAG}" ]; then
+            echo "No versioned release found"
+            exit 1
+          fi
+          mkdir -p /tmp/updater
+          gh release download "${TAG}" --pattern "latest.json" --dir /tmp/updater
+          if ! gh release view preview >/dev/null 2>&1; then
+            gh release create preview --prerelease --title "Preview updater channel" --notes "Rolling latest.json for in-app updater. Not a versioned app release."
+          fi
+          gh release upload preview /tmp/updater/latest.json --clobber
+          echo "Mirrored latest.json from ${TAG} to preview"

@@ -137,6 +137,7 @@ jobs:
       - name: Mirror latest.json to preview channel
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           mkdir -p /tmp/updater
           gh release download "${{ github.ref_name }}" --pattern "latest.json" --dir /tmp/updater
