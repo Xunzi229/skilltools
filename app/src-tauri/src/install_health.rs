@@ -5,7 +5,7 @@ use crate::error::AppError;
 use crate::fs_ops::{path_is_symlink_link, remove_directory_symlink};
 use crate::library_repository::LibraryIndex;
 use crate::model::{InstallHealthIssue, InstallHealthKind, InstallHealthReport};
-use crate::path_norm::{normalize_path_key, path_is_under, paths_eq};
+use crate::path_norm::{normalize_path_key, path_is_under_resolved, paths_eq};
 use crate::paths::AppPaths;
 
 pub fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<InstallHealthIssue> {
@@ -99,7 +99,7 @@ pub fn collect_health_issues(index: &LibraryIndex, paths: &AppPaths) -> Vec<Inst
             let Ok(resolved) = fs::canonicalize(&path) else {
                 continue;
             };
-            if !path_is_under(&resolved, &paths.library_dir) {
+            if !path_is_under_resolved(&resolved, &paths.library_dir) {
                 continue;
             }
             issues.push(InstallHealthIssue {

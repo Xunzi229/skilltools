@@ -537,7 +537,7 @@ impl LibraryRepository {
                     return false;
                 }
                 if let Some(resolved) = &skill.resolved_path {
-                    if crate::path_norm::path_is_under(resolved, library_dir) {
+                    if crate::path_norm::path_is_under_resolved(resolved, library_dir) {
                         return false;
                     }
                 }

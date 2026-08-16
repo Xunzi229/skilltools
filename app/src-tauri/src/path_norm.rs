@@ -69,6 +69,13 @@ pub(crate) fn paths_eq(left: &Path, right: &Path) -> bool {
     normalize_path_key(left) == normalize_path_key(right)
 }
 
+/// 先尽量 canonicalize 再比较，避免 macOS `/var`→`/private/var`、Windows 8.3 短名导致误判。
+pub(crate) fn path_is_under_resolved(child: &Path, parent: &Path) -> bool {
+    let child = child.canonicalize().unwrap_or_else(|_| child.to_path_buf());
+    let parent = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
+    path_is_under(&child, &parent)
+}
+
 /// Windows 卷标识：盘符 `c:` 或 UNC `//server/share`；无法识别则 None。
 #[cfg(windows)]
 pub(crate) fn windows_volume_id(path: &Path) -> Option<String> {
@@ -234,6 +241,16 @@ mod tests {
         assert!(is_forbidden_skill_dir_name("com1"));
         assert!(!is_forbidden_skill_dir_name("console"));
         assert!(!is_forbidden_skill_dir_name("alpha"));
+    }
+
+    #[test]
+    fn path_is_under_resolved_survives_canonicalize_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("library");
+        let child = parent.join("projects").join("a");
+        std::fs::create_dir_all(&child).unwrap();
+        let child_canon = child.canonicalize().unwrap();
+        assert!(path_is_under_resolved(&child_canon, &parent));
     }
 
     #[test]
