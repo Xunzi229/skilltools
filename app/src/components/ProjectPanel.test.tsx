@@ -20,6 +20,7 @@ const baseProject: Project = {
 function renderPanel(overrides: {
   projects?: Project[];
   gitImports?: GitImportItem[];
+  pullingProjectIds?: string[];
   onAddGit?: (url: string) => Promise<void>;
   onRetryGitImport?: (tempId: string) => Promise<void>;
   onDismissGitImport?: (tempId: string) => void;
@@ -35,6 +36,7 @@ function renderPanel(overrides: {
         loading={false}
         error={null}
         pendingAction={null}
+        pullingProjectIds={overrides.pullingProjectIds}
         onAddLocal={vi.fn(async () => undefined)}
         onAddGit={onAddGit}
         onRetryGitImport={onRetryGitImport}
@@ -95,6 +97,15 @@ describe("ProjectPanel git import UI", () => {
     expect(screen.getByRole("button", { name: "拉取 acme/skills" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "移除 acme/skills" })).toBeInTheDocument();
+  });
+
+  it("拉取中显示徽标并禁用导出/移除，不显示拉取按钮", () => {
+    renderPanel({ projects: [baseProject], pullingProjectIds: ["p1"] });
+    expect(screen.getByText("正在拉取中")).toBeInTheDocument();
+    expect(screen.getByText("拉取中…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "拉取 acme/skills" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "移除 acme/skills" })).toBeDisabled();
   });
 
   it("添加 Git 后立即清空输入并调用回调", async () => {

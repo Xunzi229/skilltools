@@ -15,6 +15,7 @@ interface ProjectPanelProps {
   loading: boolean;
   error: CommandError | null;
   pendingAction: string | null;
+  pullingProjectIds?: string[];
   onAddLocal: (path: string) => Promise<void>;
   onAddGit: (url: string) => Promise<void>;
   onRetryGitImport: (tempId: string) => Promise<void>;
@@ -51,6 +52,7 @@ export function ProjectPanel({
   loading,
   error,
   pendingAction,
+  pullingProjectIds = [],
   onAddLocal,
   onAddGit,
   onRetryGitImport,
@@ -67,6 +69,7 @@ export function ProjectPanel({
   const [pullSummary, setPullSummary] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const busy = pendingAction !== null;
+  const pullingIdSet = new Set(pullingProjectIds);
   const removeBusy =
     removeTarget !== null && pendingAction === `project:remove:${removeTarget.id}`;
   const hasRows = projects.length > 0 || gitImports.length > 0;
@@ -251,55 +254,68 @@ export function ProjectPanel({
                 </div>
               </li>
             ))}
-            {projects.map((project) => (
+            {projects.map((project) => {
+              const pulling = pullingIdSet.has(project.id);
+              const rowBusy = busy || pulling;
+              return (
               <li
                 key={project.id}
                 className="macos-card flex items-center justify-between gap-4 px-4 py-3"
+                data-pull-status={pulling ? "pulling" : undefined}
               >
                 <div className="min-w-0">
                   <strong className="block text-[14px] text-ink">{project.name}</strong>
                   <span className="mt-1 block truncate font-mono text-[10px] text-ink-3">
                     {project.remoteUrl ?? project.localPath}
                   </span>
-                  <span className="project-meta mt-1 block text-[11px] text-ink-3">
-                    {t("projects.lastUpdated", { time: formatDateTime(project.lastUpdatedAt) })}
-                    {" · "}
-                    {t("projects.lastPulled", { time: formatDateTime(project.lastSyncedAt) })}
-                  </span>
-                </div>
-                <div className="flex shrink-0 gap-1.5">
-                  {project.sourceType === "git" && (
-                    <button
-                      type="button"
-                      className="macos-btn-primary macos-btn-sm"
-                      aria-label={t("projects.pullAria", { name: project.name })}
-                      disabled={busy}
-                      onClick={() => {
-                        void onPull(project.id).then((result) => {
-                          if (!result) return;
-                          const names = (skills: { name: string }[]) =>
-                            skills
-                              .slice(0, 5)
-                              .map((skill) => skill.name)
-                              .join("、");
-                          setPullSummary(
-                            t("projects.pullResult", {
-                              added: result.added.length,
-                              addedNames: names(result.added) || t("common.none"),
-                              removed: result.removed.length,
-                              changed: result.changed.length,
-                            }),
-                          );
-                        });
-                      }}
-                    >
-                      {pendingAction === `project:pull:${project.id}` ? t("projects.pulling") : t("projects.pull")}
-                    </button>
+                  {pulling ? (
+                    <span className="project-meta mt-1 block text-[11px] text-ink-3">
+                      {t("projects.pulling")}
+                    </span>
+                  ) : (
+                    <span className="project-meta mt-1 block text-[11px] text-ink-3">
+                      {t("projects.lastUpdated", { time: formatDateTime(project.lastUpdatedAt) })}
+                      {" · "}
+                      {t("projects.lastPulled", { time: formatDateTime(project.lastSyncedAt) })}
+                    </span>
                   )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {project.sourceType === "git" &&
+                    (pulling ? (
+                      <span className="macos-badge">{t("projects.pullingBadge")}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="macos-btn-primary macos-btn-sm"
+                        aria-label={t("projects.pullAria", { name: project.name })}
+                        disabled={rowBusy}
+                        onClick={() => {
+                          void onPull(project.id).then((result) => {
+                            if (!result) return;
+                            const names = (skills: { name: string }[]) =>
+                              skills
+                                .slice(0, 5)
+                                .map((skill) => skill.name)
+                                .join("、");
+                            setPullSummary(
+                              t("projects.pullResult", {
+                                added: result.added.length,
+                                addedNames: names(result.added) || t("common.none"),
+                                removed: result.removed.length,
+                                changed: result.changed.length,
+                              }),
+                            );
+                          });
+                        }}
+                      >
+                        {t("projects.pull")}
+                      </button>
+                    ))}
                   <button
                     type="button"
                     className="macos-btn-ghost macos-btn-sm"
-                    disabled={busy}
+                    disabled={rowBusy}
                     onClick={() => {
                       void pickSaveZip(`${project.name}.zip`).then((path) => {
                         if (path) void onExportZip(project.id, path);
@@ -312,14 +328,15 @@ export function ProjectPanel({
                     type="button"
                     className="macos-btn-danger-soft macos-btn-sm"
                     aria-label={t("projects.removeAria", { name: project.name })}
-                    disabled={busy}
+                    disabled={rowBusy}
                     onClick={() => setRemoveTarget(project)}
                   >
                     {t("projects.remove")}
                   </button>
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>

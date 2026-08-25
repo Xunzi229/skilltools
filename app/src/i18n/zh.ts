@@ -320,6 +320,7 @@ export const zh = {
     pullResult:
       "拉取完成：新增 {added}（{addedNames}），移除 {removed}，变更 {changed}",
     pulling: "拉取中…",
+    pullingBadge: "正在拉取中",
     pull: "拉取",
     export: "导出",
     removeAria: "移除 {name}",

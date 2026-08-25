@@ -29,7 +29,9 @@ export function useLibrary(api: SkillApi) {
   const [loadError, setLoadError] = useState<CommandError | null>(null);
   const [actionError, setActionError] = useState<CommandError | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [pullingProjectIds, setPullingProjectIds] = useState<string[]>([]);
   const pendingRef = useRef<string | null>(null);
+  const pullingIdsRef = useRef<Set<string>>(new Set());
   const gitImportUrlsRef = useRef<Set<string>>(new Set());
   const detailRequest = useRef(0);
   const selectedLibrarySkillIdRef = useRef<string | null>(null);
@@ -211,6 +213,7 @@ export function useLibrary(api: SkillApi) {
     loadError,
     actionError,
     pendingAction,
+    pullingProjectIds,
     refresh,
     selectLibrarySkill: setSelectedLibrarySkillId,
     addLocalProject: (path: string) =>
@@ -230,12 +233,26 @@ export function useLibrary(api: SkillApi) {
         return prev.filter((item) => item.tempId !== tempId);
       });
     },
-    pullGitProject: (id: string) =>
-      runAction(`project:pull:${id}`, async () => {
+    pullGitProject: async (id: string) => {
+      // 与 Git 导入一致：不走全局 pendingAction，避免卡死侧栏/其它项目操作
+      if (pullingIdsRef.current.has(id)) {
+        return undefined;
+      }
+      pullingIdsRef.current.add(id);
+      setPullingProjectIds([...pullingIdsRef.current]);
+      setActionError(null);
+      try {
         const result = await api.pullGitProject(id);
         await refresh({ silent: true });
         return result;
-      }),
+      } catch (error) {
+        setActionError(normalizeCommandError(error));
+        return undefined;
+      } finally {
+        pullingIdsRef.current.delete(id);
+        setPullingProjectIds([...pullingIdsRef.current]);
+      }
+    },
     removeProject: (id: string) =>
       mutateAndRefresh(`project:remove:${id}`, () => api.removeProject(id)),
     installSkill: (id: string, provider: Provider) =>
