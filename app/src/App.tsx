@@ -519,6 +519,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
           loading={library.loading}
           error={library.actionError ?? library.loadError}
           pendingAction={library.pendingAction}
+          pullingProjectIds={library.pullingProjectIds}
           onAddLocal={library.addLocalProject}
           onAddGit={library.addGitProject}
           onRetryGitImport={library.retryGitImport}

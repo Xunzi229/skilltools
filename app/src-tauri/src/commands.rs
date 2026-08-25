@@ -361,16 +361,26 @@ pub async fn add_git_project(app: AppHandle, url: String) -> Result<Project, Com
 }
 
 #[tauri::command]
-pub fn pull_git_project(
-    state: State<'_, AppState>,
+pub async fn pull_git_project(
+    app: AppHandle,
     project_id: String,
 ) -> Result<ProjectPullResult, CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .pull_git_project(&project_id)
-        .map_err(map_app_error)
+    // git pull + 扫描放到 blocking 线程，避免占住 async runtime / 卡死 UI
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let result = {
+            let library = state.library.lock().map_err(|_| state_lock_error())?;
+            library
+                .pull_git_project(&project_id)
+                .map_err(map_app_error)
+        };
+        result
+    })
+    .await
+    .map_err(|error| CommandError {
+        code: "TASK_JOIN",
+        message: format!("拉取 Git 项目任务失败：{error}"),
+    })?
 }
 
 #[tauri::command]

@@ -330,6 +330,7 @@ export const en: Messages = {
     pullResult:
       "Pull done: added {added} ({addedNames}), removed {removed}, changed {changed}",
     pulling: "Pulling…",
+    pullingBadge: "Pulling",
     pull: "Pull",
     export: "Export",
     removeAria: "Remove {name}",
