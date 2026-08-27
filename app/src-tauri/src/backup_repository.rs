@@ -31,6 +31,10 @@ impl BackupRepository {
         self.paths = paths;
     }
 
+    pub(crate) fn paths(&self) -> &AppPaths {
+        &self.paths
+    }
+
     pub fn create_backup(
         &self,
         skill_id: &str,

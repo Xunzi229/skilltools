@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -92,6 +92,71 @@ fn apply_paths(state: &AppState, paths: AppPaths) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// 只拷路径，不长时间占着 `library` 互斥锁（Git clone/pull 会阻塞网络）。
+fn library_snapshot(state: &AppState) -> Result<LibraryRepository, CommandError> {
+    let library = state.library.lock().map_err(|_| state_lock_error())?;
+    Ok(LibraryRepository::new(library.paths().clone()))
+}
+
+fn persist_settings(state: &AppState, next: AppSettings) -> Result<AppSettings, CommandError> {
+    let paths = current_paths(state)?;
+    settings::save_settings(&paths.app_data_dir, &next).map_err(map_app_error)?;
+    crate::proxy::apply_runtime(&next.proxy);
+    let rebuilt = AppPaths::discover_with_overrides(
+        paths.app_data_dir.clone(),
+        state.home_dir.clone(),
+        &next.skill_root_overrides,
+    );
+    // 只改代理/主题等时路径不变，不必再抢 library 锁（拉取项目时会卡住 UI）。
+    if rebuilt != paths {
+        apply_paths(state, rebuilt)?;
+    }
+    Ok(next)
+}
+
+fn skills_snapshot(state: &AppState) -> Result<SkillRepository, CommandError> {
+    let skills = state.skills.lock().map_err(|_| state_lock_error())?;
+    Ok(SkillRepository::new(skills.paths().clone()))
+}
+
+fn backups_snapshot(state: &AppState) -> Result<BackupRepository, CommandError> {
+    let backups = state.backups.lock().map_err(|_| state_lock_error())?;
+    Ok(BackupRepository::new(backups.paths().clone()))
+}
+
+async fn spawn_blocking_cmd<T, F>(
+    app: AppHandle,
+    task_name: &'static str,
+    work: F,
+) -> Result<T, CommandError>
+where
+    T: Send + 'static,
+    F: FnOnce(&AppState) -> Result<T, CommandError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        work(state.inner())
+    })
+    .await
+    .map_err(|error| CommandError {
+        code: "TASK_JOIN",
+        message: format!("{task_name}失败：{error}"),
+    })?
+}
+
+async fn spawn_blocking_plain<T, F>(task_name: &'static str, work: F) -> Result<T, CommandError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, CommandError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| CommandError {
+            code: "TASK_JOIN",
+            message: format!("{task_name}失败：{error}"),
+        })?
+}
+
 fn current_paths(state: &AppState) -> Result<AppPaths, CommandError> {
     Ok(state
         .skills
@@ -155,18 +220,6 @@ fn pause_skill_with_state(state: &AppState, skill_id: String) -> Result<SkillDet
         .map_err(map_app_error)
 }
 
-fn resume_skill_with_state(
-    state: &AppState,
-    skill_id: String,
-) -> Result<SkillDetail, CommandError> {
-    state
-        .skills
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .resume(&skill_id)
-        .map_err(map_app_error)
-}
-
 fn create_backup_with_state(
     state: &AppState,
     skill_id: String,
@@ -188,18 +241,6 @@ fn list_backups_with_state(state: &AppState) -> Result<Vec<BackupRecord>, Comman
         .map_err(map_app_error)
 }
 
-fn restore_backup_with_state(
-    state: &AppState,
-    backup_id: String,
-) -> Result<SkillDetail, CommandError> {
-    state
-        .backups
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .restore_backup(&backup_id)
-        .map_err(map_app_error)
-}
-
 fn delete_skill_with_state(
     state: &AppState,
     skill_id: String,
@@ -213,8 +254,13 @@ fn delete_skill_with_state(
 }
 
 #[tauri::command]
-pub fn scan_skills(state: State<'_, AppState>) -> Result<ScanResult, CommandError> {
-    scan_skills_with_state(state.inner())
+pub async fn scan_skills(app: AppHandle) -> Result<ScanResult, CommandError> {
+    spawn_blocking_cmd(app, "扫描 Skill", |state| {
+        skills_snapshot(state)?
+            .scan_with_warnings()
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -285,27 +331,33 @@ pub fn open_library_skill_file_external(
 }
 
 #[tauri::command]
-pub fn pause_skill(
-    state: State<'_, AppState>,
-    skill_id: String,
-) -> Result<SkillDetail, CommandError> {
-    pause_skill_with_state(state.inner(), skill_id)
+pub async fn pause_skill(app: AppHandle, skill_id: String) -> Result<SkillDetail, CommandError> {
+    spawn_blocking_cmd(app, "暂停 Skill", move |state| {
+        skills_snapshot(state)?
+            .pause(&skill_id)
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn resume_skill(
-    state: State<'_, AppState>,
-    skill_id: String,
-) -> Result<SkillDetail, CommandError> {
-    resume_skill_with_state(state.inner(), skill_id)
+pub async fn resume_skill(app: AppHandle, skill_id: String) -> Result<SkillDetail, CommandError> {
+    spawn_blocking_cmd(app, "恢复 Skill", move |state| {
+        skills_snapshot(state)?
+            .resume(&skill_id)
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn create_backup(
-    state: State<'_, AppState>,
-    skill_id: String,
-) -> Result<BackupRecord, CommandError> {
-    create_backup_with_state(state.inner(), skill_id)
+pub async fn create_backup(app: AppHandle, skill_id: String) -> Result<BackupRecord, CommandError> {
+    spawn_blocking_cmd(app, "创建备份", move |state| {
+        backups_snapshot(state)?
+            .create_backup(&skill_id, BackupReason::Manual)
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -314,50 +366,43 @@ pub fn list_backups(state: State<'_, AppState>) -> Result<Vec<BackupRecord>, Com
 }
 
 #[tauri::command]
-pub fn restore_backup(
-    state: State<'_, AppState>,
-    backup_id: String,
-) -> Result<SkillDetail, CommandError> {
-    restore_backup_with_state(state.inner(), backup_id)
+pub async fn restore_backup(app: AppHandle, backup_id: String) -> Result<SkillDetail, CommandError> {
+    spawn_blocking_cmd(app, "恢复备份", move |state| {
+        backups_snapshot(state)?
+            .restore_backup(&backup_id)
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_skill(
-    state: State<'_, AppState>,
-    skill_id: String,
-) -> Result<BackupRecord, CommandError> {
-    delete_skill_with_state(state.inner(), skill_id)
+pub async fn delete_skill(app: AppHandle, skill_id: String) -> Result<BackupRecord, CommandError> {
+    spawn_blocking_cmd(app, "删除 Skill", move |state| {
+        backups_snapshot(state)?
+            .delete_skill(&skill_id)
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn add_local_project(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<Project, CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .add_local_project(path)
-        .map_err(map_app_error)
+pub async fn add_local_project(app: AppHandle, path: String) -> Result<Project, CommandError> {
+    spawn_blocking_cmd(app, "添加本地项目", move |state| {
+        library_snapshot(state)?
+            .add_local_project(path)
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn add_git_project(app: AppHandle, url: String) -> Result<Project, CommandError> {
-    // clone + 扫描放到 blocking 线程，避免占住 async runtime
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let result = {
-            let library = state.library.lock().map_err(|_| state_lock_error())?;
-            library.add_git_project(&url).map_err(map_app_error)
-        };
-        result
+    spawn_blocking_cmd(app, "添加 Git 项目任务", move |state| {
+        library_snapshot(state)?
+            .add_git_project(&url)
+            .map_err(map_app_error)
     })
     .await
-    .map_err(|error| CommandError {
-        code: "TASK_JOIN",
-        message: format!("添加 Git 项目任务失败：{error}"),
-    })?
 }
 
 #[tauri::command]
@@ -365,32 +410,22 @@ pub async fn pull_git_project(
     app: AppHandle,
     project_id: String,
 ) -> Result<ProjectPullResult, CommandError> {
-    // git pull + 扫描放到 blocking 线程，避免占住 async runtime / 卡死 UI
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let result = {
-            let library = state.library.lock().map_err(|_| state_lock_error())?;
-            library
-                .pull_git_project(&project_id)
-                .map_err(map_app_error)
-        };
-        result
+    spawn_blocking_cmd(app, "拉取 Git 项目任务", move |state| {
+        library_snapshot(state)?
+            .pull_git_project(&project_id)
+            .map_err(map_app_error)
     })
     .await
-    .map_err(|error| CommandError {
-        code: "TASK_JOIN",
-        message: format!("拉取 Git 项目任务失败：{error}"),
-    })?
 }
 
 #[tauri::command]
-pub fn remove_project(state: State<'_, AppState>, project_id: String) -> Result<(), CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .remove_project(&project_id)
-        .map_err(map_app_error)
+pub async fn remove_project(app: AppHandle, project_id: String) -> Result<(), CommandError> {
+    spawn_blocking_cmd(app, "移除项目", move |state| {
+        library_snapshot(state)?
+            .remove_project(&project_id)
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -404,15 +439,13 @@ pub fn list_projects(state: State<'_, AppState>) -> Result<Vec<Project>, Command
 }
 
 #[tauri::command]
-pub fn list_library_skills(
-    state: State<'_, AppState>,
-) -> Result<Vec<LibrarySkillSummary>, CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .list_library_skills()
-        .map_err(map_app_error)
+pub async fn list_library_skills(app: AppHandle) -> Result<Vec<LibrarySkillSummary>, CommandError> {
+    spawn_blocking_cmd(app, "列出库 Skill", |state| {
+        library_snapshot(state)?
+            .list_library_skills()
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -496,19 +529,14 @@ pub fn list_installations(
 }
 
 #[tauri::command]
-pub fn get_install_overview(state: State<'_, AppState>) -> Result<InstallOverview, CommandError> {
-    let skills = state
-        .skills
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .scan()
-        .map_err(map_app_error)?;
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .get_install_overview(&skills)
-        .map_err(map_app_error)
+pub async fn get_install_overview(app: AppHandle) -> Result<InstallOverview, CommandError> {
+    spawn_blocking_cmd(app, "加载安装总览", |state| {
+        let skills = skills_snapshot(state)?.scan().map_err(map_app_error)?;
+        library_snapshot(state)?
+            .get_install_overview(&skills)
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -722,25 +750,27 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, CommandEr
 }
 
 #[tauri::command]
-pub fn list_system_fonts() -> Result<Vec<String>, CommandError> {
-    crate::system_fonts::list_system_font_families().map_err(map_app_error)
+pub async fn list_system_fonts() -> Result<Vec<String>, CommandError> {
+    spawn_blocking_plain("列出系统字体", || {
+        crate::system_fonts::list_system_font_families().map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn save_settings(
-    state: State<'_, AppState>,
+pub async fn save_settings(
+    app: AppHandle,
     next: AppSettings,
 ) -> Result<AppSettings, CommandError> {
-    let paths = current_paths(state.inner())?;
-    settings::save_settings(&paths.app_data_dir, &next).map_err(map_app_error)?;
-    crate::proxy::apply_runtime(&next.proxy);
-    let rebuilt = AppPaths::discover_with_overrides(
-        paths.app_data_dir.clone(),
-        state.home_dir.clone(),
-        &next.skill_root_overrides,
-    );
-    apply_paths(state.inner(), rebuilt)?;
-    Ok(next)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        persist_settings(state.inner(), next)
+    })
+    .await
+    .map_err(|error| CommandError {
+        code: "TASK_JOIN",
+        message: format!("保存设置任务失败：{error}"),
+    })?
 }
 
 #[tauri::command]
@@ -843,7 +873,7 @@ pub async fn suggest_skill_groups(
         let state = app.state::<AppState>();
         let paths = current_paths(state.inner())?;
         let settings = settings::load_settings(&paths.app_data_dir).map_err(map_app_error)?;
-        let library = state.library.lock().map_err(|_| state_lock_error())?;
+        let library = library_snapshot(state.inner())?;
         let groups = library.list_groups().map_err(map_app_error)?;
         let tags = library.list_tags().map_err(map_app_error)?;
         let group_names: Vec<String> = groups.into_iter().map(|group| group.name).collect();
@@ -868,7 +898,6 @@ pub async fn suggest_skill_groups(
                 description: skill.description,
             })
             .collect::<Vec<_>>();
-        drop(library);
 
         if skills.is_empty() {
             return Err(CommandError {
@@ -902,80 +931,71 @@ pub fn reveal_path(path: String) -> Result<(), CommandError> {
 }
 
 #[tauri::command]
-pub fn export_library_skill_zip(
-    state: State<'_, AppState>,
+pub async fn export_library_skill_zip(
+    app: AppHandle,
     id: String,
     dest_path: String,
 ) -> Result<(), CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .export_library_skill_zip(&id, std::path::Path::new(&dest_path))
-        .map_err(map_app_error)
+    spawn_blocking_cmd(app, "导出 Skill ZIP", move |state| {
+        library_snapshot(state)?
+            .export_library_skill_zip(&id, Path::new(&dest_path))
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn export_project_zip(
-    state: State<'_, AppState>,
+pub async fn export_project_zip(
+    app: AppHandle,
     project_id: String,
     dest_path: String,
 ) -> Result<(), CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .export_project_zip(&project_id, std::path::Path::new(&dest_path))
-        .map_err(map_app_error)
+    spawn_blocking_cmd(app, "导出项目 ZIP", move |state| {
+        library_snapshot(state)?
+            .export_project_zip(&project_id, Path::new(&dest_path))
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn import_skill_zip(
-    state: State<'_, AppState>,
-    zip_path: String,
-) -> Result<Project, CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .import_skill_zip(std::path::Path::new(&zip_path))
-        .map_err(map_app_error)
+pub async fn import_skill_zip(app: AppHandle, zip_path: String) -> Result<Project, CommandError> {
+    spawn_blocking_cmd(app, "导入 Skill ZIP", move |state| {
+        library_snapshot(state)?
+            .import_skill_zip(Path::new(&zip_path))
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn scan_install_health(
-    state: State<'_, AppState>,
-) -> Result<InstallHealthReport, CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .scan_install_health()
-        .map_err(map_app_error)
+pub async fn scan_install_health(app: AppHandle) -> Result<InstallHealthReport, CommandError> {
+    spawn_blocking_cmd(app, "扫描安装健康", |state| {
+        library_snapshot(state)?
+            .scan_install_health()
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn repair_installations(
-    state: State<'_, AppState>,
-) -> Result<InstallHealthReport, CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .repair_installations()
-        .map_err(map_app_error)
+pub async fn repair_installations(app: AppHandle) -> Result<InstallHealthReport, CommandError> {
+    spawn_blocking_cmd(app, "修复安装", |state| {
+        library_snapshot(state)?
+            .repair_installations()
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn rebuild_installations(
-    state: State<'_, AppState>,
-) -> Result<InstallHealthReport, CommandError> {
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .rebuild_installations()
-        .map_err(map_app_error)
+pub async fn rebuild_installations(app: AppHandle) -> Result<InstallHealthReport, CommandError> {
+    spawn_blocking_cmd(app, "重建安装", |state| {
+        library_snapshot(state)?
+            .rebuild_installations()
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1021,101 +1041,114 @@ pub fn delete_library_skill(
 }
 
 #[tauri::command]
-pub fn migrate_provider_skill(
-    state: State<'_, AppState>,
+pub async fn migrate_provider_skill(
+    app: AppHandle,
     skill_id: String,
     replace_with_link: bool,
 ) -> Result<MigrateResult, CommandError> {
-    let detail = state
-        .skills
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .detail(&skill_id)
-        .and_then(batch::require_active_for_migration)
-        .map_err(map_app_error)?;
-    state
-        .library
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .migrate_provider_skill(
-            &detail.name,
-            detail.provider,
-            &detail.current_path,
-            replace_with_link,
-        )
-        .map_err(map_app_error)
+    spawn_blocking_cmd(app, "迁移 Skill", move |state| {
+        let detail = skills_snapshot(state)?
+            .detail(&skill_id)
+            .and_then(batch::require_active_for_migration)
+            .map_err(map_app_error)?;
+        library_snapshot(state)?
+            .migrate_provider_skill(
+                &detail.name,
+                detail.provider,
+                &detail.current_path,
+                replace_with_link,
+            )
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn cleanup_backups(state: State<'_, AppState>) -> Result<usize, CommandError> {
-    let paths = current_paths(state.inner())?;
-    let settings = settings::load_settings(&paths.app_data_dir).map_err(map_app_error)?;
-    state
-        .backups
-        .lock()
-        .map_err(|_| state_lock_error())?
-        .cleanup_backups(settings.backup_retention_days, settings.backup_max_count)
-        .map_err(map_app_error)
+pub async fn cleanup_backups(app: AppHandle) -> Result<usize, CommandError> {
+    spawn_blocking_cmd(app, "清理备份", |state| {
+        let paths = current_paths(state)?;
+        let settings = settings::load_settings(&paths.app_data_dir).map_err(map_app_error)?;
+        backups_snapshot(state)?
+            .cleanup_backups(settings.backup_retention_days, settings.backup_max_count)
+            .map_err(map_app_error)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn batch_pause_skills(
-    state: State<'_, AppState>,
+pub async fn batch_pause_skills(
+    app: AppHandle,
     skill_ids: Vec<String>,
 ) -> Result<BatchResult, CommandError> {
-    Ok(batch::run_ids(skill_ids, |id| {
-        pause_skill_with_state(state.inner(), id.to_owned()).map(|_| ())
-    }))
+    spawn_blocking_cmd(app, "批量暂停", move |state| {
+        let skills = skills_snapshot(state)?;
+        Ok(batch::run_ids(skill_ids, |id| skills.pause(id).map(|_| ())))
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn batch_resume_skills(
-    state: State<'_, AppState>,
+pub async fn batch_resume_skills(
+    app: AppHandle,
     skill_ids: Vec<String>,
 ) -> Result<BatchResult, CommandError> {
-    Ok(batch::run_ids(skill_ids, |id| {
-        resume_skill_with_state(state.inner(), id.to_owned()).map(|_| ())
-    }))
+    spawn_blocking_cmd(app, "批量恢复", move |state| {
+        let skills = skills_snapshot(state)?;
+        Ok(batch::run_ids(skill_ids, |id| skills.resume(id).map(|_| ())))
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn batch_backup_skills(
-    state: State<'_, AppState>,
+pub async fn batch_backup_skills(
+    app: AppHandle,
     skill_ids: Vec<String>,
 ) -> Result<BatchResult, CommandError> {
-    Ok(batch::run_ids(skill_ids, |id| {
-        create_backup_with_state(state.inner(), id.to_owned()).map(|_| ())
-    }))
+    spawn_blocking_cmd(app, "批量备份", move |state| {
+        let backups = backups_snapshot(state)?;
+        Ok(batch::run_ids(skill_ids, |id| {
+            backups.create_backup(id, BackupReason::Manual).map(|_| ())
+        }))
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn batch_delete_skills(
-    state: State<'_, AppState>,
+pub async fn batch_delete_skills(
+    app: AppHandle,
     skill_ids: Vec<String>,
 ) -> Result<BatchResult, CommandError> {
-    Ok(batch::run_ids(skill_ids, |id| {
-        delete_skill_with_state(state.inner(), id.to_owned()).map(|_| ())
-    }))
+    spawn_blocking_cmd(app, "批量删除", move |state| {
+        let backups = backups_snapshot(state)?;
+        Ok(batch::run_ids(skill_ids, |id| backups.delete_skill(id).map(|_| ())))
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn batch_install_skills(
-    state: State<'_, AppState>,
-    skill_ids: Vec<String>,
-    provider: Provider,
-) -> Result<BatchResult, CommandError> {
-    let library = state.library.lock().map_err(|_| state_lock_error())?;
-    Ok(batch::batch_install_skills(&library, skill_ids, provider))
-}
-
-#[tauri::command]
-pub fn batch_uninstall_skills(
-    state: State<'_, AppState>,
+pub async fn batch_install_skills(
+    app: AppHandle,
     skill_ids: Vec<String>,
     provider: Provider,
 ) -> Result<BatchResult, CommandError> {
-    let library = state.library.lock().map_err(|_| state_lock_error())?;
-    Ok(batch::batch_uninstall_skills(&library, skill_ids, provider))
+    spawn_blocking_cmd(app, "批量安装", move |state| {
+        let library = library_snapshot(state)?;
+        Ok(batch::batch_install_skills(&library, skill_ids, provider))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn batch_uninstall_skills(
+    app: AppHandle,
+    skill_ids: Vec<String>,
+    provider: Provider,
+) -> Result<BatchResult, CommandError> {
+    spawn_blocking_cmd(app, "批量卸载", move |state| {
+        let library = library_snapshot(state)?;
+        Ok(batch::batch_uninstall_skills(&library, skill_ids, provider))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1159,19 +1192,22 @@ pub fn batch_set_skill_tags(
 }
 
 #[tauri::command]
-pub fn batch_migrate_provider_skills(
-    state: State<'_, AppState>,
+pub async fn batch_migrate_provider_skills(
+    app: AppHandle,
     skill_ids: Vec<String>,
     replace_with_link: bool,
 ) -> Result<BatchResult, CommandError> {
-    let skills = state.skills.lock().map_err(|_| state_lock_error())?;
-    let library = state.library.lock().map_err(|_| state_lock_error())?;
-    Ok(batch::batch_migrate_provider_skills(
-        &skills,
-        &library,
-        skill_ids,
-        replace_with_link,
-    ))
+    spawn_blocking_cmd(app, "批量迁移", move |state| {
+        let skills = skills_snapshot(state)?;
+        let library = library_snapshot(state)?;
+        Ok(batch::batch_migrate_provider_skills(
+            &skills,
+            &library,
+            skill_ids,
+            replace_with_link,
+        ))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1202,26 +1238,29 @@ pub fn delete_install_preset(state: State<'_, AppState>, id: String) -> Result<(
 }
 
 #[tauri::command]
-pub fn apply_install_preset(
-    state: State<'_, AppState>,
+pub async fn apply_install_preset(
+    app: AppHandle,
     id: String,
 ) -> Result<BatchResult, CommandError> {
-    let paths = current_paths(state.inner())?;
-    let presets =
-        crate::install_presets::list_presets(&paths.app_data_dir).map_err(map_app_error)?;
-    let preset = presets
-        .into_iter()
-        .find(|preset| preset.id == id)
-        .ok_or_else(|| CommandError {
-            code: "SETTINGS",
-            message: format!("预设不存在：{id}"),
-        })?;
-    let library = state.library.lock().map_err(|_| state_lock_error())?;
-    Ok(batch::apply_install_preset(
-        &library,
-        preset.skill_ids,
-        preset.providers,
-    ))
+    spawn_blocking_cmd(app, "应用安装预设", move |state| {
+        let paths = current_paths(state)?;
+        let presets =
+            crate::install_presets::list_presets(&paths.app_data_dir).map_err(map_app_error)?;
+        let preset = presets
+            .into_iter()
+            .find(|preset| preset.id == id)
+            .ok_or_else(|| CommandError {
+                code: "SETTINGS",
+                message: format!("预设不存在：{id}"),
+            })?;
+        let library = library_snapshot(state)?;
+        Ok(batch::apply_install_preset(
+            &library,
+            preset.skill_ids,
+            preset.providers,
+        ))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1270,7 +1309,7 @@ mod tests {
 
     use super::{
         create_backup_with_state, delete_skill_with_state, get_skill_detail_with_state,
-        list_skill_tree_with_state, map_app_error, pause_skill_with_state,
+        list_skill_tree_with_state, map_app_error, pause_skill_with_state, persist_settings,
         read_skill_file_with_state, scan_skills_with_state, AppState,
     };
     use crate::backup_repository::BackupRepository;
@@ -1412,6 +1451,49 @@ mod tests {
 
         assert_eq!(error.code, "STATE_LOCK_POISONED");
         assert_eq!(error.message, "应用状态锁已损坏");
+    }
+
+    #[test]
+    fn saving_proxy_does_not_wait_on_library_lock() {
+        let _secrets = crate::secret_store::test_lock();
+        let (_base, state) = state_with_skill("proxy-save");
+        let state = Arc::new(state);
+        let _held = state.library.lock().expect("library lock");
+
+        let thread_state = Arc::clone(&state);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut next = crate::settings::AppSettings::default();
+            next.proxy.enabled = true;
+            next.proxy.host = "127.0.0.1".into();
+            next.proxy.port = 1080;
+            tx.send(persist_settings(&thread_state, next)).ok();
+        });
+        let result = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("保存代理被 library 锁挡住");
+        result.expect("proxy-only save should succeed without library lock");
+    }
+
+    #[test]
+    fn listing_library_skills_does_not_wait_on_library_mutex() {
+        let (_base, state) = state_with_skill("list-skills");
+        let paths = state.skills.lock().expect("skills lock").paths().clone();
+        let _held = state.library.lock().expect("library lock");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            tx.send(
+                LibraryRepository::new(paths)
+                    .list_library_skills()
+                    .map_err(map_app_error),
+            )
+            .ok();
+        });
+        let result = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("列出库 Skill 被 library 锁挡住");
+        result.expect("list_library_skills should succeed without library mutex");
     }
 
     #[test]

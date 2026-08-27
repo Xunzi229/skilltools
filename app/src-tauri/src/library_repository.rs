@@ -53,11 +53,16 @@ impl LibraryRepository {
 
     pub fn add_local_project(&self, path: impl AsRef<Path>) -> Result<Project, AppError> {
         let path = canonical_project_path(path.as_ref())?;
+        {
+            let _guard = lock_app_transaction(&self.paths)?;
+            let index = self.load_index()?;
+            ensure_project_path_is_new(&index, &path)?;
+        }
+        let project = project_for_source(ProjectSourceType::Local, path.clone(), None);
+        let skills = scan_project(&project, &[])?;
         let _guard = lock_app_transaction(&self.paths)?;
         let mut index = self.load_index()?;
         ensure_project_path_is_new(&index, &path)?;
-        let project = project_for_source(ProjectSourceType::Local, path, None);
-        let skills = scan_project(&project, &[])?;
         index.projects.push(project.clone());
         index.library_skills.extend(skills);
         self.write_index(&index)?;
@@ -66,27 +71,30 @@ impl LibraryRepository {
 
     pub fn add_git_project(&self, url: &str) -> Result<Project, AppError> {
         validate_git_url(url)?;
-        let _guard = lock_app_transaction(&self.paths)?;
-        let mut index = self.load_index()?;
-        if index
-            .projects
-            .iter()
-            .any(|project| project.remote_url.as_deref() == Some(url))
-        {
-            return Err(AppError::ProjectAlreadyExists {
-                value: url.to_owned(),
-            });
-        }
-        let id = stable_id(&format!("git:{url}"));
-        let destination = self.paths.library_projects_dir.join(&id);
-        self.paths
-            .assert_within(&destination, &self.paths.library_projects_dir)?;
-        if destination.exists() {
-            return Err(AppError::TargetConflict {
-                path: destination.display().to_string(),
-            });
-        }
-        fs::create_dir_all(&self.paths.library_projects_dir)?;
+        let (id, destination) = {
+            let _guard = lock_app_transaction(&self.paths)?;
+            let index = self.load_index()?;
+            if index
+                .projects
+                .iter()
+                .any(|project| project.remote_url.as_deref() == Some(url))
+            {
+                return Err(AppError::ProjectAlreadyExists {
+                    value: url.to_owned(),
+                });
+            }
+            let id = stable_id(&format!("git:{url}"));
+            let destination = self.paths.library_projects_dir.join(&id);
+            self.paths
+                .assert_within(&destination, &self.paths.library_projects_dir)?;
+            if destination.exists() {
+                return Err(AppError::TargetConflict {
+                    path: destination.display().to_string(),
+                });
+            }
+            fs::create_dir_all(&self.paths.library_projects_dir)?;
+            (id, destination)
+        };
         if let Err(error) = clone_repository(url, &destination) {
             let _ = fs::remove_dir_all(&destination);
             return Err(error);
@@ -96,17 +104,28 @@ impl LibraryRepository {
             destination.clone(),
             Some(url.to_owned()),
         );
-        project.id = id;
+        project.id = id.clone();
         project.last_synced_at = Some(Utc::now());
         project.last_updated_at = latest_commit_time(&destination)?.or_else(|| Some(Utc::now()));
         let result = (|| {
+            let _guard = lock_app_transaction(&self.paths)?;
+            let mut index = self.load_index()?;
+            if index.projects.iter().any(|existing| {
+                existing.remote_url.as_deref() == Some(url) || existing.id == id
+            }) {
+                return Err(AppError::ProjectAlreadyExists {
+                    value: url.to_owned(),
+                });
+            }
             let skills = scan_project(&project, &[])?;
             index.projects.push(project.clone());
             index.library_skills.extend(skills);
             self.write_index(&index)
         })();
         if let Err(error) = result {
-            let _ = fs::remove_dir_all(destination);
+            if !matches!(error, AppError::ProjectAlreadyExists { .. }) {
+                let _ = fs::remove_dir_all(&destination);
+            }
             return Err(error);
         }
         Ok(project)
@@ -116,6 +135,35 @@ impl LibraryRepository {
         &self,
         project_id: &str,
     ) -> Result<crate::model::ProjectPullResult, AppError> {
+        let (path, previous, previous_fingerprints) = {
+            let _guard = lock_app_transaction(&self.paths)?;
+            let index = self.load_index()?;
+            let position = project_position(&index, project_id)?;
+            if index.projects[position].source_type != ProjectSourceType::Git {
+                return Err(AppError::GitOperation {
+                    message: "本地引用项目不能执行 Git 拉取".to_string(),
+                });
+            }
+            let path = index.projects[position].local_path.clone();
+            self.paths
+                .assert_within(&path, &self.paths.library_projects_dir)?;
+            let previous = project_skills(&index, project_id);
+            let previous_fingerprints = previous
+                .iter()
+                .map(|skill| {
+                    (
+                        skill.relative_path.clone(),
+                        (
+                            skill.name.clone(),
+                            skill.description.clone(),
+                            crate::skill_metadata::skill_content_fingerprint(&skill.absolute_path),
+                        ),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+            (path, previous, previous_fingerprints)
+        };
+        pull_fast_forward(&path)?;
         let _guard = lock_app_transaction(&self.paths)?;
         let mut index = self.load_index()?;
         let position = project_position(&index, project_id)?;
@@ -124,24 +172,11 @@ impl LibraryRepository {
                 message: "本地引用项目不能执行 Git 拉取".to_string(),
             });
         }
-        let path = index.projects[position].local_path.clone();
-        self.paths
-            .assert_within(&path, &self.paths.library_projects_dir)?;
-        let previous = project_skills(&index, project_id);
-        let previous_fingerprints = previous
-            .iter()
-            .map(|skill| {
-                (
-                    skill.relative_path.clone(),
-                    (
-                        skill.name.clone(),
-                        skill.description.clone(),
-                        crate::skill_metadata::skill_content_fingerprint(&skill.absolute_path),
-                    ),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        pull_fast_forward(&path)?;
+        if index.projects[position].local_path != path {
+            return Err(AppError::GitOperation {
+                message: "拉取过程中项目路径已变化，请重试".to_string(),
+            });
+        }
         index.projects[position].last_synced_at = Some(Utc::now());
         index.projects[position].last_updated_at =
             latest_commit_time(&path)?.or_else(|| Some(Utc::now()));
@@ -193,19 +228,31 @@ impl LibraryRepository {
     }
 
     pub fn remove_project(&self, project_id: &str) -> Result<(), AppError> {
-        let _guard = lock_app_transaction(&self.paths)?;
-        let mut index = self.load_index()?;
-        let position = project_position(&index, project_id)?;
-        let project = index.projects[position].clone();
-        if project.source_type == ProjectSourceType::Git {
-            self.paths
-                .assert_within(&project.local_path, &self.paths.library_projects_dir)?;
-            match fs::remove_dir_all(&project.local_path) {
+        let git_path = {
+            let _guard = lock_app_transaction(&self.paths)?;
+            let index = self.load_index()?;
+            let position = project_position(&index, project_id)?;
+            let project = index.projects[position].clone();
+            if project.source_type == ProjectSourceType::Git {
+                self.paths
+                    .assert_within(&project.local_path, &self.paths.library_projects_dir)?;
+                Some(project.local_path.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(path) = git_path {
+            match fs::remove_dir_all(&path) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
             }
         }
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        let Ok(position) = project_position(&index, project_id) else {
+            return Ok(());
+        };
         index.projects.remove(position);
         index
             .library_skills
@@ -226,11 +273,24 @@ impl LibraryRepository {
     }
 
     pub fn list_library_skills(&self) -> Result<Vec<LibrarySkillSummary>, AppError> {
-        let _guard = lock_app_transaction(&self.paths)?;
-        let mut index = self.load_index()?;
+        let (projects, previous_by_project) = {
+            let _guard = lock_app_transaction(&self.paths)?;
+            let index = self.load_index()?;
+            let previous_by_project = index
+                .projects
+                .iter()
+                .map(|project| (project.id.clone(), project_skills(&index, &project.id)))
+                .collect::<HashMap<_, _>>();
+            (index.projects, previous_by_project)
+        };
         let mut refreshed = Vec::new();
-        for project in &index.projects {
-            let previous = project_skills(&index, &project.id);
+        let mut scanned_ids = HashSet::new();
+        for project in &projects {
+            scanned_ids.insert(project.id.clone());
+            let previous = previous_by_project
+                .get(&project.id)
+                .cloned()
+                .unwrap_or_default();
             match scan_project(project, &previous) {
                 Ok(skills) => refreshed.extend(skills),
                 Err(error) => {
@@ -243,7 +303,20 @@ impl LibraryRepository {
                 }
             }
         }
-        index.library_skills = refreshed;
+        let _guard = lock_app_transaction(&self.paths)?;
+        let mut index = self.load_index()?;
+        index
+            .library_skills
+            .retain(|skill| !scanned_ids.contains(&skill.project_id));
+        index.library_skills.extend(refreshed);
+        let live_ids = index
+            .projects
+            .iter()
+            .map(|project| project.id.clone())
+            .collect::<HashSet<_>>();
+        index
+            .library_skills
+            .retain(|skill| live_ids.contains(&skill.project_id));
         adopt_existing_installations(&mut index, &self.paths);
         prune_missing_installations(&mut index);
         sync_installation_statuses(&mut index);

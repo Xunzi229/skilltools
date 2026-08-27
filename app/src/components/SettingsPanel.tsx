@@ -137,6 +137,8 @@ export function SettingsPanel({
     setSaving(true);
     setError(null);
     setMessage(null);
+    const rootsChanged =
+      JSON.stringify(settings?.skillRootOverrides) !== JSON.stringify(next.skillRootOverrides);
     try {
       const saved = await api.saveSettings(next);
       setSettings(saved);
@@ -144,7 +146,9 @@ export function SettingsPanel({
       document.documentElement.dataset.theme = saved.theme;
       applyPreviewTypography(saved);
       setMessage(t("settings.saved"));
-      onSettingsSaved();
+      if (rootsChanged) {
+        onSettingsSaved();
+      }
     } catch (err: unknown) {
       setError(asCommandError(err, t("settings.saveFailed")));
     } finally {
