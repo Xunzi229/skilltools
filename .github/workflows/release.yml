@@ -83,7 +83,12 @@ jobs:
               - `..._windows-x64.exe` / `..._windows-arm64.exe`：免安装单文件主程序（需系统已安装 WebView2）
               - preview/rc（非数字 pre-release）跳过 MSI，仅 NSIS + 单文件 exe
               - Windows ARM64 runner：`windows-11-arm`（公开仓库可用；MSI 不支持 ARM64）
-            - macOS：`.dmg` / `.app`（未签名，首次打开需在「隐私与安全性」中允许；自动更新可能受 Gatekeeper 限制）
+            - macOS：`.dmg` / `.app`（未签名，Gatekeeper 会拦截；自动更新也可能受限制）
+              1. 将 `Skill Manager.app` 拖到「应用程序」
+              2. 若提示「已损坏，无法打开」或打不开：终端执行
+                 `sudo codesign --force --deep --sign - /Applications/Skill\ Manager.app`
+              3. 系统设置 → 隐私与安全性 → 点「仍要打开」或「允许」
+              覆盖安装后若再次拦截，重复第 2、3 步。
             - Linux：`.AppImage` / `.deb`
 
             更新签名需仓库 Secrets：`TAURI_SIGNING_PRIVATE_KEY`（及可选密码）。

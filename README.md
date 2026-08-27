@@ -87,6 +87,16 @@ cd src-tauri && cargo test
 - `TAURI_SIGNING_PRIVATE_KEY`：与 `tauri.conf.json` 中 `plugins.updater.pubkey` 对应的私钥全文
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：可选
 
+### macOS 安装（未签名）
+
+拖到「应用程序」后，若提示已损坏或无法打开，终端执行：
+
+```bash
+sudo codesign --force --deep --sign - /Applications/Skill\ Manager.app
+```
+
+然后到「系统设置 → 隐私与安全性」点「仍要打开」或「允许」。覆盖安装后再拦，重复这两步。
+
 ## 路线图
 
 - [x] 应用内文件编辑
