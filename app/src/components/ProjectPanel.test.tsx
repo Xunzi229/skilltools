@@ -11,6 +11,7 @@ const baseProject: Project = {
   sourceType: "git",
   localPath: "/tmp/acme",
   remoteUrl: "https://github.com/acme/skills.git",
+  isGitRepo: true,
   addedAt: "2026-01-01T00:00:00.000Z",
   lastUpdatedAt: "2026-01-02T00:00:00.000Z",
   lastSyncedAt: "2026-01-02T00:00:00.000Z",

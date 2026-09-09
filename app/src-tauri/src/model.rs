@@ -160,6 +160,9 @@ pub struct Project {
     pub source_type: ProjectSourceType,
     pub local_path: PathBuf,
     pub remote_url: Option<String>,
+    /// 目录本身是否为 Git 仓库（Git 项目恒为 true；本地项目按 `.git` 检测）
+    #[serde(default)]
+    pub is_git_repo: bool,
     pub added_at: DateTime<Utc>,
     /// 内容最后更新时间（本地目录 mtime / Git HEAD 提交时间）
     #[serde(default)]

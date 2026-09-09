@@ -173,6 +173,8 @@ export interface Project {
   sourceType: ProjectSourceType;
   localPath: string;
   remoteUrl: string | null;
+  /** 目录本身是否为 Git 仓库；本地项目为 true 时也可拉取 */
+  isGitRepo: boolean;
   addedAt: string;
   lastUpdatedAt: string | null;
   lastSyncedAt: string | null;

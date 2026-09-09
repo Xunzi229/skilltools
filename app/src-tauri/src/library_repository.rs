@@ -11,8 +11,9 @@ use walkdir::WalkDir;
 use crate::error::AppError;
 use crate::fs_ops::{create_directory_link, path_is_symlink_link};
 use crate::git_ops::{
-    browse_url_from_git_url, clone_repository, latest_commit_time, project_name_from_git_url,
-    pull_fast_forward, read_origin_url, source_repo_from_git_url, validate_git_url,
+    browse_url_from_git_url, clone_repository, is_git_repository, latest_commit_time,
+    project_name_from_git_url, pull_fast_forward, read_origin_url, source_repo_from_git_url,
+    validate_git_url,
 };
 use crate::json_store::{read_json_value, write_json_value};
 use crate::model::{
@@ -139,14 +140,12 @@ impl LibraryRepository {
             let _guard = lock_app_transaction(&self.paths)?;
             let index = self.load_index()?;
             let position = project_position(&index, project_id)?;
-            if index.projects[position].source_type != ProjectSourceType::Git {
-                return Err(AppError::GitOperation {
-                    message: "本地引用项目不能执行 Git 拉取".to_string(),
-                });
-            }
             let path = index.projects[position].local_path.clone();
-            self.paths
-                .assert_within(&path, &self.paths.library_projects_dir)?;
+            ensure_project_pullable(&index.projects[position])?;
+            if index.projects[position].source_type == ProjectSourceType::Git {
+                self.paths
+                    .assert_within(&path, &self.paths.library_projects_dir)?;
+            }
             let previous = project_skills(&index, project_id);
             let previous_fingerprints = previous
                 .iter()
@@ -167,11 +166,7 @@ impl LibraryRepository {
         let _guard = lock_app_transaction(&self.paths)?;
         let mut index = self.load_index()?;
         let position = project_position(&index, project_id)?;
-        if index.projects[position].source_type != ProjectSourceType::Git {
-            return Err(AppError::GitOperation {
-                message: "本地引用项目不能执行 Git 拉取".to_string(),
-            });
-        }
+        ensure_project_pullable(&index.projects[position])?;
         if index.projects[position].local_path != path {
             return Err(AppError::GitOperation {
                 message: "拉取过程中项目路径已变化，请重试".to_string(),
@@ -495,6 +490,16 @@ fn canonical_project_path(path: &Path) -> Result<PathBuf, AppError> {
     Ok(canonical)
 }
 
+/// Git 项目恒可拉取；本地项目仅当目录本身是 Git 仓库时可拉取。
+fn ensure_project_pullable(project: &Project) -> Result<(), AppError> {
+    if project.source_type == ProjectSourceType::Git || is_git_repository(&project.local_path) {
+        return Ok(());
+    }
+    Err(AppError::GitOperation {
+        message: "该本地项目不是 Git 仓库，无法执行拉取".to_string(),
+    })
+}
+
 pub(crate) fn ensure_project_path_is_new(
     index: &LibraryIndex,
     path: &Path,
@@ -530,10 +535,12 @@ pub(crate) fn project_for_source(
                 .unwrap_or_else(|| "project".to_string())
         });
     let last_updated_at = path_modified_at(&local_path).or_else(|| Some(Utc::now()));
+    let is_git_repo = source_type == ProjectSourceType::Git || is_git_repository(&local_path);
     Project {
         id: stable_id(&identity),
         name,
         source_type,
+        is_git_repo,
         local_path,
         remote_url,
         added_at: Utc::now(),
@@ -570,6 +577,17 @@ fn normalize_projects(projects: &mut [Project]) -> bool {
                 project.last_updated_at = Some(time);
                 dirty = true;
             }
+        }
+        // 本地项目每次列出时重新检测是否为 Git 仓库（兼容旧索引及后续 git init）
+        if project.source_type == ProjectSourceType::Local {
+            let is_git_repo = is_git_repository(&project.local_path);
+            if project.is_git_repo != is_git_repo {
+                project.is_git_repo = is_git_repo;
+                dirty = true;
+            }
+        } else if !project.is_git_repo {
+            project.is_git_repo = true;
+            dirty = true;
         }
     }
     dirty

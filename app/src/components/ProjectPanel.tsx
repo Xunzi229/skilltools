@@ -281,7 +281,7 @@ export function ProjectPanel({
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  {project.sourceType === "git" &&
+                  {(project.sourceType === "git" || project.isGitRepo) &&
                     (pulling ? (
                       <span className="macos-badge">{t("projects.pullingBadge")}</span>
                     ) : (

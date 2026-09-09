@@ -83,6 +83,12 @@ pub fn browse_url_from_git_url(url: &str) -> Option<String> {
     None
 }
 
+/// 目录是否为 Git 仓库根（存在 `.git` 目录或 worktree 的 `.git` 文件）。
+pub fn is_git_repository(path: &Path) -> bool {
+    let git_dir = path.join(".git");
+    git_dir.is_dir() || git_dir.is_file()
+}
+
 /// 从仓库目录 `.git/config` 读取 `remote "origin"` 的 url（不伪造；失败则 None）。
 pub fn read_origin_url(repository: &Path) -> Option<String> {
     let git_dir = repository.join(".git");
