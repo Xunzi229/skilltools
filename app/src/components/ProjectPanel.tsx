@@ -14,6 +14,7 @@ interface ProjectPanelProps {
   gitImports: GitImportItem[];
   loading: boolean;
   error: CommandError | null;
+  loadError?: CommandError | null;
   pendingAction: string | null;
   pullingProjectIds?: string[];
   onAddLocal: (path: string) => Promise<void>;
@@ -51,6 +52,7 @@ export function ProjectPanel({
   gitImports,
   loading,
   error,
+  loadError = null,
   pendingAction,
   pullingProjectIds = [],
   onAddLocal,
@@ -101,6 +103,11 @@ export function ProjectPanel({
         </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+        {loadError && (
+          <div className="macos-alert-error mb-4" role="alert">
+            {loadError.message}
+          </div>
+        )}
         {error && (
           <div
             className="macos-alert-error mb-4 flex items-center justify-between gap-3"

@@ -9,18 +9,23 @@ import type {
 import { t } from "../i18n";
 import { normalizeCommandError } from "../utils/errors";
 
+type BatchScope = "library" | "installed";
+
 export function useBatchActions(api: SkillApi) {
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
   const [batchError, setBatchError] = useState<CommandError | null>(null);
+  const [batchScope, setBatchScope] = useState<BatchScope | null>(null);
   const operationRef = useRef<symbol | null>(null);
 
   const clearBatchResult = useCallback(() => {
     setBatchResult(null);
     setBatchError(null);
+    setBatchScope(null);
   }, []);
 
   const run = useCallback(async (
+    scope: BatchScope,
     action: () => Promise<BatchResult>,
   ): Promise<BatchResult | null> => {
     if (operationRef.current) return null;
@@ -29,6 +34,7 @@ export function useBatchActions(api: SkillApi) {
     setBatchBusy(true);
     setBatchResult(null);
     setBatchError(null);
+    setBatchScope(scope);
     try {
       const result = await action();
       setBatchResult(result);
@@ -48,23 +54,24 @@ export function useBatchActions(api: SkillApi) {
     batchBusy,
     batchResult,
     batchError,
+    batchScope,
     clearBatchResult,
     batchPauseSkills: (skillIds: string[]) =>
-      run(() => api.batchPauseSkills(skillIds)),
+      run("installed", () => api.batchPauseSkills(skillIds)),
     batchResumeSkills: (skillIds: string[]) =>
-      run(() => api.batchResumeSkills(skillIds)),
+      run("installed", () => api.batchResumeSkills(skillIds)),
     batchBackupSkills: (skillIds: string[]) =>
-      run(() => api.batchBackupSkills(skillIds)),
+      run("installed", () => api.batchBackupSkills(skillIds)),
     batchDeleteSkills: (skillIds: string[]) =>
-      run(() => api.batchDeleteSkills(skillIds)),
+      run("installed", () => api.batchDeleteSkills(skillIds)),
     batchInstallSkills: (skillIds: string[], provider: Provider) =>
-      run(() => api.batchInstallSkills(skillIds, provider)),
+      run("library", () => api.batchInstallSkills(skillIds, provider)),
     batchUninstallSkills: (skillIds: string[], provider: Provider) =>
-      run(() => api.batchUninstallSkills(skillIds, provider)),
+      run("library", () => api.batchUninstallSkills(skillIds, provider)),
     batchSetSkillGroup: (skillIds: string[], groupId: string | null) =>
-      run(() => api.batchSetSkillGroup(skillIds, groupId)),
+      run("library", () => api.batchSetSkillGroup(skillIds, groupId)),
     batchApplySkillGroups: (assignments: SkillGroupAssignment[]) =>
-      run(async () => {
+      run("library", async () => {
         const buckets = new Map<string, string[]>();
         for (const item of assignments) {
           const key = item.groupId ?? "__none__";
@@ -91,13 +98,13 @@ export function useBatchActions(api: SkillApi) {
         return merged;
       }),
     batchAddSkillTags: (skillIds: string[], tagId: string) =>
-      run(() => api.batchAddSkillTags(skillIds, tagId)),
+      run("library", () => api.batchAddSkillTags(skillIds, tagId)),
     batchRemoveSkillTags: (skillIds: string[], tagId: string) =>
-      run(() => api.batchRemoveSkillTags(skillIds, tagId)),
+      run("library", () => api.batchRemoveSkillTags(skillIds, tagId)),
     batchSetSkillTags: (skillIds: string[], tagIds: string[]) =>
-      run(() => api.batchSetSkillTags(skillIds, tagIds)),
+      run("library", () => api.batchSetSkillTags(skillIds, tagIds)),
     batchMigrateProviderSkills: (skillIds: string[], replaceWithLink: boolean) =>
-      run(() => api.batchMigrateProviderSkills(skillIds, replaceWithLink)),
+      run("installed", () => api.batchMigrateProviderSkills(skillIds, replaceWithLink)),
   };
 }
 

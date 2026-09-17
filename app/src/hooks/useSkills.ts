@@ -20,6 +20,7 @@ export function useSkills(api: SkillApi) {
   const [detailError, setDetailError] = useState<CommandError | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<CommandError | null>(null);
+  const [backupActionError, setBackupActionError] = useState<CommandError | null>(null);
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
   const [backupsError, setBackupsError] = useState<CommandError | null>(null);
@@ -137,11 +138,16 @@ export function useSkills(api: SkillApi) {
       }
       pendingActionRef.current = key;
       setPendingAction(key);
-      setActionError(null);
+      const backupScoped =
+        key.startsWith("restore:") || key.startsWith("delete-backup:");
+      if (backupScoped) setBackupActionError(null);
+      else setActionError(null);
       try {
         await action();
       } catch (error) {
-        setActionError(normalizeCommandError(error));
+        const normalized = normalizeCommandError(error);
+        if (backupScoped) setBackupActionError(normalized);
+        else setActionError(normalized);
       } finally {
         pendingActionRef.current = null;
         setPendingAction(null);
@@ -215,6 +221,10 @@ export function useSkills(api: SkillApi) {
     setActionError(null);
   }, []);
 
+  const clearBackupActionError = useCallback(() => {
+    setBackupActionError(null);
+  }, []);
+
   return {
     skills,
     selectedSkillId,
@@ -226,6 +236,7 @@ export function useSkills(api: SkillApi) {
     detailError,
     pendingAction,
     actionError,
+    backupActionError,
     backups,
     backupsLoading,
     backupsError,
@@ -239,5 +250,6 @@ export function useSkills(api: SkillApi) {
     restoreBackup,
     deleteBackup,
     clearActionError,
+    clearBackupActionError,
   };
 }

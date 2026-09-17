@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import type {
+  CommandError,
   LibrarySkillSummary,
   Provider,
   SkillGroup,
@@ -44,6 +45,7 @@ interface SidebarProps {
   libraryQuery: LibraryTaxonomyQuery;
   loading: boolean;
   busy?: boolean;
+  error?: CommandError | null;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   onFilterChange: (filter: SkillFilter) => void;
@@ -56,6 +58,7 @@ interface SidebarProps {
   onCreateTag: (name: string, color: string | null) => Promise<void>;
   onRenameTag: (id: string, name: string, color: string | null) => Promise<void>;
   onDeleteTag: (id: string) => Promise<void>;
+  onClearError?: () => void;
   onApplyTaxonomyTemplate?: () => Promise<void>;
 }
 
@@ -106,6 +109,7 @@ export function Sidebar({
   libraryQuery,
   loading,
   busy = false,
+  error = null,
   collapsed = false,
   onToggleCollapse,
   onFilterChange,
@@ -118,6 +122,7 @@ export function Sidebar({
   onCreateTag,
   onRenameTag,
   onDeleteTag,
+  onClearError,
   onApplyTaxonomyTemplate,
 }: SidebarProps) {
   const { t, locale } = useI18n();
@@ -439,6 +444,24 @@ export function Sidebar({
           />
         )}
       </header>
+
+      {error && (
+        <div
+          className="macos-alert-error mb-2 flex items-start justify-between gap-2 px-2 py-1.5 text-[11px]"
+          role="alert"
+        >
+          <span className="min-w-0 break-words">{error.message}</span>
+          {onClearError ? (
+            <button
+              type="button"
+              className="macos-link shrink-0"
+              onClick={onClearError}
+            >
+              {t("common.close")}
+            </button>
+          ) : null}
+        </div>
+      )}
 
       <nav
         className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-auto"

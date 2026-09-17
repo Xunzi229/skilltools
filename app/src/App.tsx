@@ -90,6 +90,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
     batchBusy,
     batchResult,
     batchError,
+    batchScope,
     clearBatchResult,
     batchPauseSkills,
     batchResumeSkills,
@@ -115,6 +116,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
     detailError,
     pendingAction,
     actionError,
+    backupActionError,
     backups,
     backupsLoading,
     backupsError,
@@ -128,6 +130,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
     restoreBackup,
     deleteBackup,
     clearActionError,
+    clearBackupActionError,
   } = useSkills(api);
   const library = useLibrary(api);
   const installations = useInstallations(api);
@@ -365,9 +368,6 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
         >
           <span className="min-w-0 flex-1">
             {t("installations.healthBanner", { count: healthIssueCount })}
-            {installations.error ? (
-              <span className="mt-1 block text-[12px]">{installations.error.message}</span>
-            ) : null}
           </span>
           <div className="flex flex-wrap items-center gap-1.5">
             {rebuildableCount > 0 ? (
@@ -432,6 +432,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
         libraryQuery={libraryQuery}
         loading={listLoading || library.loading}
         busy={library.pendingAction !== null}
+        error={library.taxonomyError}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
         onFilterChange={(nextFilter) => {
@@ -442,7 +443,6 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
           if (nextFilter !== "installations") {
             setLibrarySelectedIds(new Set());
           }
-          clearBatchResult();
         }}
         onLibraryQueryChange={setLibraryQuery}
         onRefresh={() => {
@@ -473,6 +473,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
           await library.deleteTag(id);
           setLibraryQuery((q) => removeDeletedTagFromQuery(q, id));
         }}
+        onClearError={library.clearTaxonomyError}
         onApplyTaxonomyTemplate={async () => {
           const existingGroupNames = new Set(
             library.groups.map((g) => g.name.toLocaleLowerCase()),
@@ -517,7 +518,8 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
           projects={library.projects}
           gitImports={library.gitImports}
           loading={library.loading}
-          error={library.projectError ?? library.loadError}
+          error={library.projectError}
+          loadError={library.loadError}
           pendingAction={library.pendingAction}
           pullingProjectIds={library.pullingProjectIds}
           onAddLocal={library.addLocalProject}
@@ -544,7 +546,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
           backups={backups}
           loading={backupsLoading}
           error={backupsError}
-          actionError={actionError}
+          actionError={backupActionError}
           pendingAction={pendingAction}
           onRetry={() => void loadBackups()}
           onRestore={async (id) => {
@@ -554,7 +556,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
             void installations.refresh({ silent: true });
           }}
           onDelete={deleteBackup}
-          onClearActionError={clearActionError}
+          onClearActionError={clearBackupActionError}
         />
       ) : libraryMode ? (
         <>
@@ -571,8 +573,8 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
             loading={library.loading}
             errorMessage={library.loadError?.message ?? null}
             batchBusy={batchBusy}
-            batchResult={batchResult}
-            batchError={batchError}
+            batchResult={batchScope === "library" ? batchResult : null}
+            batchError={batchScope === "library" ? batchError : null}
             collapsed={listCollapsed}
             onToggleCollapse={() => setListCollapsed((value) => !value)}
             onSearchChange={setSearch}
@@ -689,7 +691,6 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
               setLibraryQuery(EMPTY_LIBRARY_QUERY);
               setSkillSelectedIds(new Set());
               setLibrarySelectedIds(new Set());
-              clearBatchResult();
             }}
           />
           <LibraryDetail
@@ -754,8 +755,8 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
             warnings={scanWarnings}
             hasScannedSkills={skills.length > 0}
             batchBusy={batchBusy}
-            batchResult={batchResult}
-            batchError={batchError}
+            batchResult={batchScope === "installed" ? batchResult : null}
+            batchError={batchScope === "installed" ? batchError : null}
             collapsed={listCollapsed}
             taxonomyActive={taxonomyActive}
             queryChips={queryChips}

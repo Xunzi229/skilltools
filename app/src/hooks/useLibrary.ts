@@ -14,6 +14,14 @@ import { t } from "../i18n";
 import { normalizeCommandError } from "../utils/errors";
 import { projectNameFromGitUrl } from "../utils/skillDisplay";
 
+type LibraryErrorScope = "project" | "taxonomy" | "library";
+
+function libraryErrorScope(key: string): LibraryErrorScope {
+  if (key.startsWith("project:")) return "project";
+  if (key.startsWith("group:") || key.startsWith("tag:")) return "taxonomy";
+  return "library";
+}
+
 export function useLibrary(api: SkillApi) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [gitImports, setGitImports] = useState<GitImportItem[]>([]);
@@ -29,6 +37,7 @@ export function useLibrary(api: SkillApi) {
   const [loadError, setLoadError] = useState<CommandError | null>(null);
   const [actionError, setActionError] = useState<CommandError | null>(null);
   const [projectError, setProjectError] = useState<CommandError | null>(null);
+  const [taxonomyError, setTaxonomyError] = useState<CommandError | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [pullingProjectIds, setPullingProjectIds] = useState<string[]>([]);
   const pendingRef = useRef<string | null>(null);
@@ -130,14 +139,16 @@ export function useLibrary(api: SkillApi) {
     if (pendingRef.current) return undefined;
     pendingRef.current = key;
     setPendingAction(key);
-    const projectScoped = key.startsWith("project:");
-    if (projectScoped) setProjectError(null);
+    const scope = libraryErrorScope(key);
+    if (scope === "project") setProjectError(null);
+    else if (scope === "taxonomy") setTaxonomyError(null);
     else setActionError(null);
     try {
       return await action();
     } catch (error) {
       const normalized = normalizeCommandError(error);
-      if (projectScoped) setProjectError(normalized);
+      if (scope === "project") setProjectError(normalized);
+      else if (scope === "taxonomy") setTaxonomyError(normalized);
       else setActionError(normalized);
       return undefined;
     } finally {
@@ -218,6 +229,7 @@ export function useLibrary(api: SkillApi) {
     loadError,
     actionError,
     projectError,
+    taxonomyError,
     pendingAction,
     pullingProjectIds,
     refresh,
@@ -340,5 +352,6 @@ export function useLibrary(api: SkillApi) {
       mutateAndRefresh(`group:delete:${id}`, () => api.deleteGroup(id)),
     clearActionError: () => setActionError(null),
     clearProjectError: () => setProjectError(null),
+    clearTaxonomyError: () => setTaxonomyError(null),
   };
 }

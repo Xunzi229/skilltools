@@ -535,7 +535,13 @@ describe("Skill Manager", () => {
     expect(screen.queryByRole("button", { name: /重建链接/ })).not.toBeInTheDocument();
   });
 
-  it("横幅重建失败时展示错误信息", async () => {
+  it("横幅重建失败时不混入健康提示，只在安装页展示", async () => {
+    const rebuildInstallations = vi.fn(async () => {
+      throw {
+        code: "IO",
+        message: "需要启用 Windows「开发人员模式」",
+      };
+    });
     await renderLibrary(
       createApi({
         getInstallOverview: async () => ({
@@ -556,20 +562,19 @@ describe("Skill Manager", () => {
             repaired: 0,
           },
         }),
-        rebuildInstallations: async () => {
-          throw {
-            code: "IO",
-            message: "需要启用 Windows「开发人员模式」",
-          };
-        },
+        rebuildInstallations,
       }),
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "重建链接（1）" }));
+    await waitFor(() => expect(rebuildInstallations).toHaveBeenCalled());
+    const banner = screen.getByRole("status");
+    expect(banner).toHaveTextContent("发现 1 项安装问题");
+    expect(banner).not.toHaveTextContent("需要启用 Windows「开发人员模式」");
+    await user.click(screen.getByRole("button", { name: "去处理" }));
     expect(
       await screen.findByText("需要启用 Windows「开发人员模式」"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
   it("库详情展示 git 来源并支持按来源搜索", async () => {
@@ -1021,6 +1026,10 @@ describe("Skill Manager", () => {
     expect(await screen.findByText("目标位置已存在")).toBeInTheDocument();
     expect(screen.queryByText("rust::backtrace")).not.toBeInTheDocument();
     expect(screen.getByText("checksum-new")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /已安装/ }));
+    expect(await screen.findByRole("heading", { name: "Brainstorming" })).toBeInTheDocument();
+    expect(screen.queryByText("目标位置已存在")).not.toBeInTheDocument();
   });
 
   it("操作失败展示中文 message 且保留 Skill 详情", async () => {
@@ -1038,6 +1047,10 @@ describe("Skill Manager", () => {
     expect(await screen.findByText("暂停失败：目录被占用")).toBeInTheDocument();
     expect(screen.queryByText("rust::backtrace")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Brainstorming" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /备份记录/ }));
+    expect(await screen.findByRole("region", { name: "备份列表" })).toBeInTheDocument();
+    expect(screen.queryByText("暂停失败：目录被占用")).not.toBeInTheDocument();
   });
 
   it("备份加载失败时展示错误并支持重试", async () => {
@@ -1319,6 +1332,39 @@ describe("Skill Manager", () => {
     );
   });
 
+  it("侧栏分组失败只显示在侧栏，不串到库详情和项目页", async () => {
+    const createGroup = vi.fn(async () => {
+      throw { code: "IO", message: "分组名称已存在" };
+    });
+    const user = userEvent.setup();
+    await renderLibrary(createApi({ createGroup }));
+    const sidebar = screen.getByRole("complementary", { name: "导航栏" });
+    await user.click(within(sidebar).getByRole("button", { name: "新建分组" }));
+    await user.type(screen.getByRole("textbox", { name: "名称" }), "重复");
+    await user.click(screen.getByRole("button", { name: "创建" }));
+
+    expect(await within(sidebar).findByText("分组名称已存在")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "库 Skill 详情" })).queryByText(
+        "分组名称已存在",
+      ),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Skill 分类" })).getByRole(
+        "button",
+        { name: /^项目/ },
+      ),
+    );
+    expect(await screen.findByRole("region", { name: "项目管理" })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "项目管理" })).queryByText(
+        "分组名称已存在",
+      ),
+    ).not.toBeInTheDocument();
+    expect(within(sidebar).getByText("分组名称已存在")).toBeInTheDocument();
+  });
+
   it("安装目标需点应用才提交，冲突时展示中文错误并恢复勾选", async () => {
     const installSkill = vi.fn(async () => {
       throw { code: "TARGET_CONFLICT", message: "目标位置已存在，请先移除冲突目录" };
@@ -1339,6 +1385,15 @@ describe("Skill Manager", () => {
     expect(await screen.findByText("目标位置已存在，请先移除冲突目录")).toBeInTheDocument();
     expect(toggle).not.toBeChecked();
     expect(installSkill).toHaveBeenCalledTimes(1);
+
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Skill 分类" })).getByRole(
+        "button",
+        { name: /^项目/ },
+      ),
+    );
+    expect(await screen.findByRole("region", { name: "项目管理" })).toBeInTheDocument();
+    expect(screen.queryByText("目标位置已存在，请先移除冲突目录")).not.toBeInTheDocument();
   });
 
   it("安装目标点取消只重置本地勾选且不调用安装", async () => {
@@ -1704,5 +1759,17 @@ describe("Skill Manager", () => {
     await user.click(within(list).getByRole("button", { name: "安装 cursor" }));
 
     expect(await within(list).findByText("批量安装失败")).toBeInTheDocument();
+
+    const navigation = screen.getByRole("navigation", { name: "Skill 分类" });
+    await user.click(within(navigation).getByRole("button", { name: /已安装/ }));
+    const skillList = await screen.findByRole("region", { name: "Skill 列表" });
+    expect(within(skillList).queryByText("批量安装失败")).not.toBeInTheDocument();
+
+    await user.click(within(navigation).getByRole("button", { name: /Skill 库/ }));
+    expect(
+      await within(screen.getByRole("region", { name: "库 Skill 列表" })).findByText(
+        "批量安装失败",
+      ),
+    ).toBeInTheDocument();
   });
 });
