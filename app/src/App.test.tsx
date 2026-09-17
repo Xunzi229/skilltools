@@ -1498,6 +1498,17 @@ describe("Skill Manager", () => {
 
     await user.click(screen.getByRole("button", { name: "拉取 team/skills" }));
     expect(await screen.findByText("Git 拉取失败：存在未提交修改")).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Skill 分类" })).getByRole(
+        "button",
+        { name: /Skill 库/ },
+      ),
+    );
+    const detail = await screen.findByRole("region", { name: "库 Skill 详情" });
+    expect(await within(detail).findByRole("heading", { name: "reviewer" })).toBeInTheDocument();
+    expect(within(detail).queryByText("Git 拉取失败：存在未提交修改")).not.toBeInTheDocument();
+    expect(screen.queryByText("Git 拉取失败：存在未提交修改")).not.toBeInTheDocument();
   });
 
   it("智能分组默认保留已有标签，取消后提交准确的最终集合", async () => {

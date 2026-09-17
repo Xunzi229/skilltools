@@ -28,6 +28,7 @@ export function useLibrary(api: SkillApi) {
   const [detailError, setDetailError] = useState<CommandError | null>(null);
   const [loadError, setLoadError] = useState<CommandError | null>(null);
   const [actionError, setActionError] = useState<CommandError | null>(null);
+  const [projectError, setProjectError] = useState<CommandError | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [pullingProjectIds, setPullingProjectIds] = useState<string[]>([]);
   const pendingRef = useRef<string | null>(null);
@@ -129,11 +130,15 @@ export function useLibrary(api: SkillApi) {
     if (pendingRef.current) return undefined;
     pendingRef.current = key;
     setPendingAction(key);
-    setActionError(null);
+    const projectScoped = key.startsWith("project:");
+    if (projectScoped) setProjectError(null);
+    else setActionError(null);
     try {
       return await action();
     } catch (error) {
-      setActionError(normalizeCommandError(error));
+      const normalized = normalizeCommandError(error);
+      if (projectScoped) setProjectError(normalized);
+      else setActionError(normalized);
       return undefined;
     } finally {
       pendingRef.current = null;
@@ -160,7 +165,7 @@ export function useLibrary(api: SkillApi) {
         return;
       }
       if (projects.some((project) => project.remoteUrl === trimmed)) {
-        setActionError({
+        setProjectError({
           code: "PROJECT_ALREADY_EXISTS",
           message: t("hooks.projectExists", { name: trimmed }),
         });
@@ -170,7 +175,7 @@ export function useLibrary(api: SkillApi) {
       const id = tempId ?? `importing:${trimmed}:${Date.now()}`;
       const name = projectNameFromGitUrl(trimmed);
       gitImportUrlsRef.current.add(trimmed);
-      setActionError(null);
+      setProjectError(null);
       setGitImports((prev) => {
         const withoutSame = prev.filter((item) => item.url !== trimmed);
         return [
@@ -212,6 +217,7 @@ export function useLibrary(api: SkillApi) {
     detailError,
     loadError,
     actionError,
+    projectError,
     pendingAction,
     pullingProjectIds,
     refresh,
@@ -240,13 +246,13 @@ export function useLibrary(api: SkillApi) {
       }
       pullingIdsRef.current.add(id);
       setPullingProjectIds([...pullingIdsRef.current]);
-      setActionError(null);
+      setProjectError(null);
       try {
         const result = await api.pullGitProject(id);
         await refresh({ silent: true });
         return result;
       } catch (error) {
-        setActionError(normalizeCommandError(error));
+        setProjectError(normalizeCommandError(error));
         return undefined;
       } finally {
         pullingIdsRef.current.delete(id);
@@ -333,5 +339,6 @@ export function useLibrary(api: SkillApi) {
     deleteGroup: (id: string) =>
       mutateAndRefresh(`group:delete:${id}`, () => api.deleteGroup(id)),
     clearActionError: () => setActionError(null),
+    clearProjectError: () => setProjectError(null),
   };
 }

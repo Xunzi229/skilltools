@@ -517,7 +517,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
           projects={library.projects}
           gitImports={library.gitImports}
           loading={library.loading}
-          error={library.actionError ?? library.loadError}
+          error={library.projectError ?? library.loadError}
           pendingAction={library.pendingAction}
           pullingProjectIds={library.pullingProjectIds}
           onAddLocal={library.addLocalProject}
@@ -537,7 +537,7 @@ function AppShell({ api = tauriSkillApi }: AppProps) {
           }}
           onImportZip={library.importSkillZip}
           onExportZip={library.exportProjectZip}
-          onClearError={library.clearActionError}
+          onClearError={library.clearProjectError}
         />
       ) : filter === "backups" ? (
         <BackupList
