@@ -77,38 +77,11 @@ export function TargetSelector({
 
   return (
     <section aria-label={t("targetSelector.region")}>
-      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-[13px] font-semibold text-ink">{t("targetSelector.title")}</h3>
-          <p className="mt-0.5 text-[12px] text-ink-2">{t("targetSelector.subtitle")}</p>
-        </div>
-        {dirty && (
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              className="macos-btn-ghost macos-btn-sm"
-              disabled={disabled}
-              onClick={resetDraft}
-            >
-              {t("targetSelector.cancel")}
-            </button>
-            <button
-              type="button"
-              className="macos-btn-primary macos-btn-sm"
-              disabled={busy}
-              onClick={() => {
-                setApplying(true);
-                void onApply(draft)
-                  .catch(() => undefined)
-                  .finally(() => setApplying(false));
-              }}
-            >
-              {applying ? t("targetSelector.applying") : t("targetSelector.apply")}
-            </button>
-          </div>
-        )}
+      <div className="mb-2">
+        <h3 className="text-[13px] font-semibold text-ink">{t("targetSelector.title")}</h3>
+        <p className="mt-0.5 text-[12px] text-ink-2">{t("targetSelector.subtitle")}</p>
       </div>
-      <div className="flex flex-wrap gap-2.5">
+      <div className="flex flex-wrap items-center gap-2.5">
         {targets.map(({ id, label, mark, markClass }) => {
           const selected = draft.includes(id);
           const committed = installedProviders.includes(id);
@@ -152,6 +125,34 @@ export function TargetSelector({
             </label>
           );
         })}
+        {dirty && (
+          <div className="flex h-14 shrink-0 items-center gap-2 rounded-[12px] border border-[color-mix(in_srgb,var(--color-brand)_40%,var(--color-line))] bg-[color-mix(in_srgb,var(--color-brand)_12%,var(--color-panel))] px-3">
+            <span className="mr-1 text-[12px] font-medium text-ink">
+              {t("targetSelector.dirty")}
+            </span>
+            <button
+              type="button"
+              className="macos-btn-ghost"
+              disabled={disabled}
+              onClick={resetDraft}
+            >
+              {t("targetSelector.cancel")}
+            </button>
+            <button
+              type="button"
+              className="macos-btn-primary"
+              disabled={busy}
+              onClick={() => {
+                setApplying(true);
+                void onApply(draft)
+                  .catch(() => undefined)
+                  .finally(() => setApplying(false));
+              }}
+            >
+              {applying ? t("targetSelector.applying") : t("targetSelector.apply")}
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );

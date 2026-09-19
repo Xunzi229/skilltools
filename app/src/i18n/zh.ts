@@ -492,6 +492,7 @@ export const zh = {
     region: "安装目标",
     title: "安装目标",
     subtitle: "选择要安装此 Skill 的工具目录",
+    dirty: "有未应用的更改",
     cancel: "取消",
     applying: "应用中…",
     apply: "应用",

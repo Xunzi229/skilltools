@@ -504,6 +504,7 @@ export const en: Messages = {
     region: "Install targets",
     title: "Install targets",
     subtitle: "Choose tool directories to install this Skill into",
+    dirty: "Unapplied changes",
     cancel: "Cancel",
     applying: "Applying…",
     apply: "Apply",

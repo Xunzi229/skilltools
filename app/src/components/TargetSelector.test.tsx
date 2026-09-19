@@ -21,6 +21,7 @@ describe("TargetSelector", () => {
     renderSelector(<TargetSelector installedProviders={[]} onApply={onApply} />);
 
     await user.click(screen.getByRole("checkbox", { name: "安装到 Cursor" }));
+    expect(screen.getByText("有未应用的更改")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "取消" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "应用" })).toBeInTheDocument();
 
