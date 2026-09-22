@@ -14,9 +14,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          # 与 opencalendar 相同：Apple Silicon 用 macos-14，Intel 用 macos-15-intel。
+          # macos-latest（SDK 26）的链接器签名会让未密封的 .app 被标成「已损坏」。
+          - platform: macos-14
             args: --target aarch64-apple-darwin
-          - platform: macos-latest
+          - platform: macos-15-intel
             args: --target x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ""
@@ -83,12 +85,7 @@ jobs:
               - `..._windows-x64.exe` / `..._windows-arm64.exe`：免安装单文件主程序（需系统已安装 WebView2）
               - preview/rc（非数字 pre-release）跳过 MSI，仅 NSIS + 单文件 exe
               - Windows ARM64 runner：`windows-11-arm`（公开仓库可用；MSI 不支持 ARM64）
-            - macOS：`.dmg` / `.app`（未签名，Gatekeeper 会拦截；自动更新也可能受限制）
-              1. 将 `Skill Manager.app` 拖到「应用程序」
-              2. 若提示「已损坏，无法打开」或打不开：终端执行
-                 `sudo codesign --force --deep --sign - /Applications/Skill\ Manager.app`
-              3. 系统设置 → 隐私与安全性 → 点「仍要打开」或「允许」
-              覆盖安装后若再次拦截，重复第 2、3 步。
+            - macOS：`.dmg`（拖到「应用程序」）
             - Linux：`.AppImage` / `.deb`
 
             更新签名需仓库 Secrets：`TAURI_SIGNING_PRIVATE_KEY`（及可选密码）。
